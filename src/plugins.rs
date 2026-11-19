@@ -1,6 +1,6 @@
-//! VST3 plugins (Windows ones through yabridge, native Linux ones directly).
+//! VST3, VST2, and CLAP plugins (Windows VSTs through yabridge, native Linux ones directly).
 //!
-//! * **Scan**: every bundle under the VST3 folders is probed in a child process
+//! * **Scan**: every bundle under the VST3/VST2/CLAP folders is probed in a child process
 //!   (`keyframexl plugin-probe <path>`): it loads the plugin, plays a note and
 //!   reports what it is. A plugin that crashes or hangs is marked as such and
 //!   never loaded into the program. Results are cached by path and file time.
@@ -11,6 +11,7 @@
 //! * **Audio**: each instance reaches the engine as a [`Processor`] that locks
 //!   the plugin for one block.
 
+use crate::clap::ClapPlugin;
 use crate::vst2::Vst2Plugin;
 use keyframexl::plugin::{PluginEvent, Processor, Shared, Transport};
 use serde::{Deserialize, Serialize};
@@ -540,10 +541,19 @@ pub fn wine_builds() -> Vec<(String, Option<PathBuf>)> {
     out
 }
 
-/// "vst2" for a Linux VST2 library (`.so`, e.g. a yabridge shim), else "vst3".
+/// "clap" for a CLAP shared library (`.clap` or `.clap#<id>`), "vst2" for a
+/// Linux VST2 library (`.so`, e.g. a yabridge shim), "fl" for the FL Studio
+/// live link, else "vst3".
 pub fn format_of(path: &Path) -> &'static str {
     if crate::fl_link::is_link(path) {
         return "fl";
+    }
+    let (file, _) = crate::clap::split_path(path);
+    if file
+        .extension()
+        .is_some_and(|x| x.eq_ignore_ascii_case("clap"))
+    {
+        return "clap";
     }
     if path
         .extension()
@@ -666,6 +676,8 @@ pub fn bundles(dirs: &[PathBuf]) -> Vec<PathBuf> {
 }
 
 fn stamp(p: &Path) -> u64 {
+    let (base, _) = crate::clap::split_path(p);
+    let p = base.as_path();
     // A yabridge bundle changes on either side: the native shim or the Windows dll.
     let mut latest: Option<std::time::SystemTime> = None;
     for sub in ["Contents/x86_64-linux", "Contents/x86_64-win"] {
@@ -777,30 +789,91 @@ pub fn vst2_files(dirs: &[PathBuf]) -> Vec<PathBuf> {
     out
 }
 
+/// CLAP folders: `~/.clap`, `/usr/lib/clap`, `/usr/local/lib/clap`, and `$CLAP_PATH`.
+pub fn clap_dirs() -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    if let Some(h) = dirs::home_dir() {
+        v.push(h.join(".clap"));
+    }
+    v.push("/usr/lib/clap".into());
+    v.push("/usr/local/lib/clap".into());
+    if let Some(p) = std::env::var_os("CLAP_PATH") {
+        v.extend(std::env::split_paths(&p));
+    }
+    v.dedup();
+    v
+}
+
+/// CLAP libraries (`.clap`) under `dirs`, following symlinks, depth 6.
+pub fn clap_files(dirs: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut stack: Vec<(PathBuf, usize)> = dirs.iter().map(|d| (d.clone(), 0)).collect();
+    let mut seen = std::collections::HashSet::new();
+    while let Some((d, depth)) = stack.pop() {
+        if !seen.insert(std::fs::canonicalize(&d).unwrap_or_else(|_| d.clone())) {
+            continue;
+        }
+        let Ok(rd) = std::fs::read_dir(&d) else {
+            continue;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                if depth < 6 {
+                    stack.push((p, depth + 1));
+                }
+            } else if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("clap")) {
+                out.push(p);
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 pub fn scan(extra: &[PathBuf], force: bool, progress: impl Fn(usize, usize, &str)) -> Vec<Scanned> {
     let cache = if force { vec![] } else { load_cache() };
     let mut found = bundles(&search_dirs(extra));
-    found.extend(vst2_files(&vst2_dirs()));
+    let mut v2 = vst2_dirs();
+    v2.extend(extra.iter().cloned());
+    found.extend(vst2_files(&v2));
+    let mut cl = clap_dirs();
+    cl.extend(extra.iter().cloned());
+    found.extend(clap_files(&cl));
+    found.sort();
+    found.dedup();
     let mut out: Vec<Scanned> = Vec::new();
     let mut todo = Vec::new();
     for p in found {
         let st = stamp(&p);
-        match cache.iter().find(|c| c.path == p && c.stamp == st) {
-            Some(c) => out.push(c.clone()),
-            None => todo.push((p, st)),
+        let cached: Vec<Scanned> = cache
+            .iter()
+            .filter(|c| {
+                c.stamp == st && (c.path == p || crate::clap::split_path(&c.path).0 == p)
+            })
+            .cloned()
+            .collect();
+        if !cached.is_empty() {
+            out.extend(cached);
+        } else {
+            todo.push((p, st));
         }
     }
     let total = todo.len();
     let done = Arc::new(Mutex::new(Vec::new()));
+    let finished = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     for chunk in todo.chunks(3) {
         let handles: Vec<_> = chunk
             .iter()
             .cloned()
             .map(|(p, st)| {
                 let done = done.clone();
+                let finished = finished.clone();
                 std::thread::spawn(move || {
-                    let s = probe_in_child(&p, st);
-                    done.lock().unwrap().push(s);
+                    let entries = probe_in_child_many(&p, st);
+                    finished.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    done.lock().unwrap().extend(entries);
                 })
             })
             .collect();
@@ -808,8 +881,9 @@ pub fn scan(extra: &[PathBuf], force: bool, progress: impl Fn(usize, usize, &str
             let _ = h.join();
         }
         let d = done.lock().unwrap();
+        let n = finished.load(std::sync::atomic::Ordering::Relaxed);
         if let Some(last) = d.last() {
-            progress(d.len(), total, &last.name);
+            progress(n, total, &last.name);
         }
     }
     out.extend(done.lock().unwrap().drain(..));
@@ -848,7 +922,39 @@ struct ProbeOut {
     gui: bool,
 }
 
+/// One entry from a multi-plugin CLAP file probe.
+#[derive(Serialize, Deserialize)]
+struct ProbeEntry {
+    path: PathBuf,
+    name: String,
+    vendor: String,
+    category: String,
+    instrument: bool,
+    gui: bool,
+    status: Status,
+}
+
 fn probe_in_child(path: &Path, st: u64) -> Scanned {
+    probe_in_child_many(path, st)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| Scanned {
+            path: path.to_path_buf(),
+            name: path
+                .file_stem()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            vendor: String::new(),
+            category: String::new(),
+            instrument: false,
+            gui: false,
+            status: Status::Failed("No plugin reported by probe".into()),
+            stamp: st,
+            bridged: false,
+        })
+}
+
+fn probe_in_child_many(path: &Path, st: u64) -> Vec<Scanned> {
     let name = path
         .file_stem()
         .map(|n| n.to_string_lossy().to_string())
@@ -868,7 +974,7 @@ fn probe_in_child(path: &Path, st: u64) -> Scanned {
     };
     let Ok(exe) = std::env::current_exe() else {
         s.status = Status::Failed("Cannot find the program to probe with".into());
-        return s;
+        return vec![s];
     };
     let mut command = std::process::Command::new(exe);
     apply_wine_for(&mut command, path);
@@ -883,7 +989,7 @@ fn probe_in_child(path: &Path, st: u64) -> Scanned {
         Ok(c) => c,
         Err(e) => {
             s.status = Status::Failed(format!("Cannot start the probe: {e}"));
-            return s;
+            return vec![s];
         }
     };
     let started = Instant::now();
@@ -905,6 +1011,25 @@ fn probe_in_child(path: &Path, st: u64) -> Scanned {
     if let Some(mut out) = child.stdout.take() {
         use std::io::Read;
         let _ = out.read_to_string(&mut text);
+    }
+    let multi: Vec<Scanned> = text
+        .lines()
+        .filter_map(|l| l.strip_prefix("KFXL_ENTRY "))
+        .filter_map(|j| serde_json::from_str::<ProbeEntry>(j).ok())
+        .map(|e| Scanned {
+            path: e.path,
+            name: e.name,
+            vendor: e.vendor,
+            category: e.category,
+            instrument: e.instrument,
+            gui: e.gui,
+            status: e.status,
+            stamp: st,
+            bridged: false,
+        })
+        .collect();
+    if !multi.is_empty() {
+        return multi;
     }
     let mut lines = text.lines().filter(|l| l.starts_with("KFXL "));
     if let Some(info) = lines
@@ -933,7 +1058,65 @@ fn probe_in_child(path: &Path, st: u64) -> Scanned {
     {
         s.status = Status::Failed("yabridge shim missing (run yabridgectl sync)".into());
     }
-    s
+    vec![s]
+}
+
+fn probe_clap_instance(path: &Path) -> Result<ProbeOut, String> {
+    let mut p = ClapPlugin::load(path)?;
+    let desc = p.desc().clone();
+    let instrument = p.is_instrument();
+    let gui = p.has_editor();
+    let layout = p.bus_layout().clone();
+    p.activate(48_000.0, 512)?;
+    p.start_processing()?;
+    let mut ins: Vec<Vec<Vec<f32>>> = layout
+        .inputs
+        .iter()
+        .map(|&ch| vec![vec![0.0f32; 512]; ch.max(1)])
+        .collect();
+    let mut outs: Vec<Vec<Vec<f32>>> = layout
+        .outputs
+        .iter()
+        .map(|&ch| vec![vec![0.0f32; 512]; ch.max(1)])
+        .collect();
+    for i in 0..40 {
+        if i == 2 && instrument {
+            p.queue_note_on(0, 60, 90);
+        }
+        if i == 30 && instrument {
+            p.queue_note_off(0, 60);
+        }
+        if !p.process(&mut ins, &mut outs, 512, 48_000, 120.0, true, (i * 512) as u64) {
+            return Err("CLAP process failed".into());
+        }
+    }
+    p.stop_processing();
+    p.deactivate();
+    let name = if desc.name.trim().is_empty() {
+        crate::clap::split_path(path)
+            .0
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        desc.name
+    };
+    Ok(ProbeOut {
+        name,
+        vendor: desc.vendor,
+        category: if desc.category.trim().is_empty() {
+            if instrument {
+                "Instrument".into()
+            } else {
+                "Fx".into()
+            }
+        } else {
+            desc.category
+        },
+        instrument,
+        gui,
+    })
 }
 
 /// Child side of the scan: load, describe, play a note for a moment.
@@ -944,6 +1127,62 @@ pub fn probe_main(path: &Path) -> i32 {
         let _ = writeln!(o, "KFXL {s}");
         let _ = o.flush();
     };
+    if format_of(path) == "clap" {
+        let (file, wanted_id) = crate::clap::split_path(path);
+        if wanted_id.is_none() {
+            let descs = match crate::clap::list_plugins(&file) {
+                Ok(d) => d,
+                Err(e) => {
+                    say(format!("error {e}"));
+                    return 1;
+                }
+            };
+            if descs.len() > 1 {
+                use std::io::Write;
+                let mut o = std::io::stdout();
+                for desc in descs {
+                    let sub_path = crate::clap::join_path(&file, &desc.id);
+                    let entry = match probe_clap_instance(&sub_path) {
+                        Ok(out) => ProbeEntry {
+                            path: sub_path,
+                            name: out.name,
+                            vendor: out.vendor,
+                            category: out.category,
+                            instrument: out.instrument,
+                            gui: out.gui,
+                            status: Status::Ok,
+                        },
+                        Err(e) => ProbeEntry {
+                            path: sub_path,
+                            name: desc.name,
+                            vendor: desc.vendor,
+                            category: desc.category,
+                            instrument: desc.instrument,
+                            gui: false,
+                            status: Status::Failed(e),
+                        },
+                    };
+                    if let Ok(json) = serde_json::to_string(&entry) {
+                        let _ = writeln!(o, "KFXL_ENTRY {json}");
+                        let _ = o.flush();
+                    }
+                }
+                say("ok".into());
+                std::process::exit(0);
+            }
+        }
+        match probe_clap_instance(path) {
+            Ok(out) => {
+                say(serde_json::to_string(&out).unwrap_or_default());
+                say("ok".into());
+                std::process::exit(0);
+            }
+            Err(e) => {
+                say(format!("error {e}"));
+                return 1;
+            }
+        }
+    }
     if format_of(path) == "vst2" {
         let mut p = match Vst2Plugin::load(path) {
             Ok(p) => p,
@@ -1495,11 +1734,186 @@ impl Vst2Proc {
     }
 }
 
-/// A loaded plugin of either format.
+/// The audio thread's side of one CLAP plugin: bus 0 is the main stereo I/O,
+/// input bus 1 is the effect's sidechain key, and aux output buses become
+/// extra stereo pairs for multi-out instruments.
+struct ClapProc {
+    plugin: Arc<Mutex<ClapPlugin>>,
+    inputs: Vec<Vec<Vec<f32>>>,
+    outputs: Vec<Vec<Vec<f32>>>,
+    effect: bool,
+    /// Extra stereo pairs past bus 0: (output bus index, left ch, right ch).
+    pairs: Vec<(usize, usize, usize)>,
+    /// Input bus index for sidechain key, when the plugin has one.
+    key_bus: Option<usize>,
+    /// Reported latency in samples, refreshed during `run`.
+    delay: usize,
+}
+
+impl ClapProc {
+    fn new(plugin: Arc<Mutex<ClapPlugin>>, effect: bool) -> Self {
+        let layout = plugin
+            .lock()
+            .map(|p| p.bus_layout().clone())
+            .unwrap_or(crate::clap::ClapBusLayout {
+                inputs: if effect { vec![2] } else { vec![] },
+                outputs: vec![2],
+            });
+        let mut pairs = Vec::new();
+        if !effect {
+            for (b, &ch) in layout.outputs.iter().enumerate().skip(1) {
+                if ch == 0 {
+                    continue;
+                }
+                for c in (0..ch).step_by(2) {
+                    pairs.push((b, c, (c + 1).min(ch - 1)));
+                }
+            }
+            pairs.truncate(keyframexl::plugin::MAX_EXTRA_PAIRS);
+        }
+        let key_bus = (effect && layout.inputs.get(1).is_some_and(|&ch| ch > 0)).then_some(1);
+        let inputs = layout
+            .inputs
+            .iter()
+            .map(|&ch| vec![vec![0.0f32; MAX_BLOCK]; ch])
+            .collect();
+        let outputs = layout
+            .outputs
+            .iter()
+            .map(|&ch| vec![vec![0.0f32; MAX_BLOCK]; ch])
+            .collect();
+        Self {
+            plugin,
+            inputs,
+            outputs,
+            effect,
+            pairs,
+            key_bus,
+            delay: 0,
+        }
+    }
+
+    fn run(
+        &mut self,
+        events: &[PluginEvent],
+        io: &mut [f32],
+        key: Option<&[f32]>,
+        extra: &mut [f32],
+        stride: usize,
+        t: &Transport,
+    ) -> usize {
+        let pairs = if stride == 0 || extra.len() < io.len() {
+            0
+        } else {
+            self.pairs.len().min((extra.len() - io.len()) / stride + 1)
+        };
+        let Ok(mut plugin) = self.plugin.try_lock() else {
+            if !self.effect {
+                io.fill(0.0);
+            }
+            return 0;
+        };
+        self.delay = plugin.latency_samples();
+        let frames = io.len() / 2;
+        let mut done = 0;
+        let mut ev = 0;
+        while done < frames {
+            let n = (frames - done).min(MAX_BLOCK);
+            while ev < events.len() && (events[ev].at() as usize) < done + n {
+                let at = (events[ev].at() as i32 - done as i32).max(0) as u32;
+                match events[ev] {
+                    PluginEvent::NoteOn {
+                        pitch, velocity, ..
+                    } => plugin.queue_note_on(at, pitch, velocity),
+                    PluginEvent::NoteOff { pitch, .. } => plugin.queue_note_off(at, pitch),
+                    PluginEvent::Midi { bytes, .. } => plugin.queue_midi(at, bytes),
+                }
+                ev += 1;
+            }
+            let span = done * 2..(done + n) * 2;
+            if self.effect
+                && let Some(main) = self.inputs.first_mut()
+            {
+                fill_bus(main, &io[span.clone()]);
+            }
+            if let Some(b) = self.key_bus
+                && let Some(bus) = self.inputs.get_mut(b)
+            {
+                match key {
+                    Some(key) => fill_bus(bus, &key[span.clone()]),
+                    None => bus.iter_mut().for_each(|c| c[..n].fill(0.0)),
+                }
+            }
+            if plugin.process(
+                &mut self.inputs,
+                &mut self.outputs,
+                n,
+                t.rate,
+                t.tempo,
+                t.playing,
+                t.frame + done as u64,
+            ) {
+                if let Some(main) = self.outputs.first() {
+                    read_pair(main, 0, 1, &mut io[span.clone()]);
+                }
+                for (k, &(b, l, r)) in self.pairs.iter().take(pairs).enumerate() {
+                    if let Some(bus) = self.outputs.get(b) {
+                        read_pair(
+                            bus,
+                            l,
+                            r,
+                            &mut extra[k * stride + span.start..k * stride + span.end],
+                        );
+                    }
+                }
+            }
+            done += n;
+        }
+        pairs
+    }
+}
+
+impl Processor for ClapProc {
+    fn latency(&self, _frames: usize) -> usize {
+        self.delay
+    }
+
+    fn process(&mut self, events: &[PluginEvent], io: &mut [f32], t: &Transport) {
+        self.run(events, io, None, &mut [], 0, t);
+    }
+
+    fn process_keyed(
+        &mut self,
+        events: &[PluginEvent],
+        io: &mut [f32],
+        key: &[f32],
+        t: &Transport,
+    ) {
+        self.run(events, io, Some(key), &mut [], 0, t);
+    }
+
+    fn extra_pairs(&self) -> usize {
+        self.pairs.len()
+    }
+
+    fn process_multi(
+        &mut self,
+        events: &[PluginEvent],
+        io: &mut [f32],
+        extra: &mut [f32],
+        stride: usize,
+        t: &Transport,
+    ) -> usize {
+        self.run(events, io, None, extra, stride, t)
+    }
+}
+
+/// A loaded plugin of any supported format.
 #[derive(Clone)]
 enum Handle {
     V3(Arc<Mutex<Plugin>>),
     V2(Arc<Mutex<Vst2Plugin>>),
+    Clap(Arc<Mutex<ClapPlugin>>),
     /// FL Studio live link: no editor, parameters or state of its own.
     Fl,
 }
@@ -1530,6 +1944,21 @@ impl Handle {
                     })
                     .collect()
             }
+            Handle::Clap(p) => p
+                .lock()
+                .map(|p| {
+                    p.params()
+                        .into_iter()
+                        .map(|(id, name, value, text, automatable)| ParamRow {
+                            id,
+                            name,
+                            value,
+                            text,
+                            automatable,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
             Handle::Fl => vec![],
         }
     }
@@ -1544,6 +1973,11 @@ impl Handle {
             Handle::V2(p) => {
                 if let Ok(mut p) = p.lock() {
                     p.set_parameter(id as i32, value.clamp(0.0, 1.0) as f32);
+                }
+            }
+            Handle::Clap(p) => {
+                if let Ok(mut p) = p.lock() {
+                    p.set_param_normalized(id, value.clamp(0.0, 1.0));
                 }
             }
             Handle::Fl => {}
@@ -1567,6 +2001,7 @@ impl Handle {
                     Some(out)
                 }
             }
+            Handle::Clap(p) => p.lock().ok()?.save_state(),
             Handle::Fl => Some(vec![]),
         }
     }
@@ -1582,6 +2017,10 @@ impl Handle {
                 let mut p = p.lock().map_err(|_| "busy".to_string())?;
                 v2_restore(&mut p, state)
             }
+            Handle::Clap(p) => {
+                let mut p = p.lock().map_err(|_| "busy".to_string())?;
+                p.load_state(state)
+            }
             Handle::Fl => Ok(()),
         }
     }
@@ -1594,6 +2033,11 @@ impl Handle {
                 }
             }
             Handle::V2(p) => {
+                if let Ok(mut p) = p.lock() {
+                    p.editor_close();
+                }
+            }
+            Handle::Clap(p) => {
                 if let Ok(mut p) = p.lock() {
                     p.editor_close();
                 }
@@ -1614,6 +2058,12 @@ impl Handle {
                     p.stop();
                 }
             }
+            Handle::Clap(p) => {
+                if let Ok(mut p) = p.lock() {
+                    p.stop_processing();
+                    p.deactivate();
+                }
+            }
             Handle::Fl => {}
         }
     }
@@ -1630,6 +2080,10 @@ impl Handle {
                 let mut p = p.try_lock().ok()?;
                 p.editor_idle();
                 p.take_editor_resize_request()
+            }
+            Handle::Clap(p) => {
+                let mut p = p.try_lock().ok()?;
+                p.service()
             }
             Handle::Fl => None,
         }
@@ -1681,6 +2135,29 @@ impl Handle {
                     _ => Ok((frame, win, w, h)),
                 }
             }
+            Handle::Clap(p) => {
+                let mut p = p.lock().map_err(|_| "busy".to_string())?;
+                let mut opened_size: Option<(i32, i32)> = None;
+                let (frame, win, w, h) = embed(conn, None, parent, rect, clip, |win| {
+                    let sz = p.editor_open(win)?;
+                    opened_size = Some(sz);
+                    Ok(())
+                })?;
+                match opened_size.filter(|s| s.0 > 0 && s.1 > 0) {
+                    Some((nw, nh)) if (nw, nh) != (w, h) => {
+                        conn.send_request(&xcb::x::ConfigureWindow {
+                            window: win,
+                            value_list: &[
+                                xcb::x::ConfigWindow::Width(nw as u32),
+                                xcb::x::ConfigWindow::Height(nh as u32),
+                            ],
+                        });
+                        let _ = conn.flush();
+                        Ok((frame, win, nw, nh))
+                    }
+                    _ => Ok((frame, win, w, h)),
+                }
+            }
             Handle::Fl => {
                 Err("The FL Studio link has no editor here: FL Studio shows its own window".into())
             }
@@ -1706,7 +2183,8 @@ fn v2_restore(p: &mut Vst2Plugin, state: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-/// Load either format, restore `state`, start processing. (handle, name, has editor, audio side)
+/// Load any supported format, restore `state`, start processing.
+/// Returns `(handle, name, has_editor, audio_processor)`.
 fn load_any(
     host: &mut Vst3Host,
     path: &Path,
@@ -1722,6 +2200,31 @@ fn load_any(
             false,
             keyframexl::plugin::share(link),
         ));
+    }
+    if format_of(path) == "clap" {
+        let mut p = ClapPlugin::load(path)?;
+        p.activate(rate as f64, MAX_BLOCK)?;
+        if !state.is_empty()
+            && let Err(e) = p.load_state(state)
+        {
+            eprintln!("{}: state not restored: {e}", path.display());
+        }
+        p.start_processing()?;
+        let desc = p.desc();
+        let name = if desc.name.trim().is_empty() {
+            crate::clap::split_path(path)
+                .0
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned()
+        } else {
+            desc.name.clone()
+        };
+        let gui = p.has_editor();
+        let p = Arc::new(Mutex::new(p));
+        let proc = keyframexl::plugin::share(ClapProc::new(p.clone(), effect));
+        return Ok((Handle::Clap(p), name, gui, proc));
     }
     if format_of(path) == "vst2" {
         let mut p = Vst2Plugin::load(path)?;
@@ -2475,6 +2978,12 @@ fn host_thread(
                 poke();
             }
         }
+        // CLAP main-thread callbacks, timers, and param flushes run even without an open editor.
+        for l in loaded.values_mut() {
+            if l.embed.is_none() && l.window.is_none() && matches!(l.plugin, Handle::Clap(_)) {
+                let _ = l.plugin.service();
+            }
+        }
     }
     let trace = std::env::var_os("KFXL_PLUGIN_TRACE").is_some();
     for (id, l) in loaded.drain() {
@@ -2493,6 +3002,35 @@ fn host_thread(
         if let Some(w) = &mut l.window {
             w.close();
         }
+    }
+}
+
+#[cfg(test)]
+mod clap_scan_tests {
+    use super::*;
+
+    #[test]
+    fn clap_libraries_are_found_and_identified_with_optional_sub_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("Vendor");
+        std::fs::create_dir_all(&sub).unwrap();
+        let p1 = dir.path().join("SurgeXT.clap");
+        let p2 = sub.join("Suite.clap");
+        std::fs::write(&p1, b"clap1").unwrap();
+        std::fs::write(&p2, b"clap2").unwrap();
+        std::fs::write(dir.path().join("ignore.txt"), b"txt").unwrap();
+
+        let found = clap_files(&[dir.path().to_path_buf()]);
+        let names: Vec<String> = found
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["SurgeXT.clap", "Suite.clap"]);
+        assert_eq!(format_of(&p1), "clap");
+        let sub_path = crate::clap::join_path(&p2, "org.example.synth");
+        assert_eq!(format_of(&sub_path), "clap");
+        assert_eq!(stamp(&sub_path), stamp(&p2));
+        assert!(stamp(&sub_path) > 0);
     }
 }
 

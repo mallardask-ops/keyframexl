@@ -1923,6 +1923,8 @@ impl App {
         card(ui, "folders", |ui| {
             let mut std_dirs = crate::plugins::search_dirs(&[]);
             std_dirs.extend(crate::plugins::vst2_dirs());
+            std_dirs.extend(crate::plugins::clap_dirs());
+            std_dirs.dedup();
             for d in &std_dirs {
                 ui.horizontal(|ui| {
                     let there = d.is_dir();
@@ -1965,7 +1967,7 @@ impl App {
                 {
                     s.plugins.extra_dirs.push(d);
                 }
-                ui.label(RichText::new("Also $VST3_PATH and $VST_PATH. yabridge puts Windows plugins in ~/.vst3/yabridge (VST3) and ~/.vst/yabridge (VST2).").font(t::sans(12.0)).color(t::FAINT));
+                ui.label(RichText::new("Also $VST3_PATH, $VST_PATH, and $CLAP_PATH. yabridge puts Windows plugins in ~/.vst3/yabridge (VST3) and ~/.vst/yabridge (VST2).").font(t::sans(12.0)).color(t::FAINT));
             });
         });
         ui.data_mut(|d| d.insert_temp(id, (query, kind, picked)));

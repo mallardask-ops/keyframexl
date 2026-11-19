@@ -1,5 +1,6 @@
 mod audio;
 mod bridge;
+mod clap;
 mod fl_link;
 mod fl_native;
 mod flp_freeze;

@@ -2242,9 +2242,14 @@ impl App {
         };
         if let Some(p) = &slot.plugin {
             let (status, color) = self.plugin_status(p.id);
+            let fmt = if p.format.is_empty() {
+                crate::plugins::format_of(std::path::Path::new(&p.path)).to_uppercase()
+            } else {
+                p.format.to_uppercase()
+            };
             ui.label(
                 egui::RichText::new(format!(
-                    "{} · VST3",
+                    "{} · {fmt}",
                     if p.vendor.is_empty() {
                         "Plugin"
                     } else {

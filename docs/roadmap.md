@@ -28,7 +28,7 @@ This document tracks what has already been built in KeyFrameXL and what remains 
 ### Mixer, Effects & Plugin Hosting
 - **Mixer (`F9`)** — scrollable insert strips with Master bus, arm-for-record, mute/solo, pan/stereo separation, dB faders with meters, 3-band strip EQ, loop-free sends, and a 10-slot effect rack inspector.
 - **32 Built-in DSP Effects (`src/fx/`)** — custom UI faces and A/B presets covering EQ/filters, dynamics, reverbs/delays (including convolution reverb), distortion, modulation, stereo tools, and a vocoder.
-- **VST3 & VST2 Plugin Bridge (`src/bridge/`, `src/plugins.rs`, `src/vst2.rs`)** — out-of-process plugin hosting over shared memory so plugin crashes do not take down the DAW, embedded X11 editor windows, background plugin scanning, and Wine/yabridge support for Windows plugins.
+- **VST3, VST2 & CLAP Plugin Hosting (`src/bridge/`, `src/plugins.rs`, `src/vst2.rs`, `src/clap.rs`)** — native Linux CLAP 1.2 host (multi-plugin bundles, stereo/multi-out/sidechain buses, parameters, state chunks, latency/PDC, X11 embedded GUI, timers & POSIX fd support) alongside VST3 and VST2, with out-of-process crash-isolated plugin hosting over shared memory, background plugin scanning, and Wine/yabridge support for Windows plugins.
 
 ### MIDI, Interop, Recording & Export
 - **MIDI & Recording (`src/midi_in.rs`, `src/midi_out.rs`, `src/midi.rs`, `src/ui/record.rs`)** — live ALSA sequencer MIDI input & hardware output, 24 PPQN **MIDI Clock Master & Slave** synchronization (`0xF8`/`0xFA`/`0xFB`/`0xFC`), MIDI Learn (`Link to controller`), **Multilink to controllers** (`Ctrl+J`), typing-keyboard-to-piano, MIDI file import/export, and in-app audio recording.
@@ -48,9 +48,6 @@ This document tracks what has already been built in KeyFrameXL and what remains 
 ### Sampler & DirectWave Fidelity
 - **Native `.dwp` binary reader** — read `.dwp` files directly without ConvertWithMoss so fields dropped by SFZ conversion (`ENV 1/2`, second filter, full modulation matrix) are preserved verbatim.
 - **DirectWave P2/P3 features** — second set of program LFOs, per-voice FX (Ringmod, Decimator, Quantizer, Phaser), built-in Drive/Delay/Chorus/Reverb sends, Time Stretch / Beat Sync / Tick Slice, and round-robin playback.
-
-### Plugins
-- **CLAP plugin hosting** — native CLAP host (`clack-host`) alongside existing VST3/VST2 support.
 
 ### Workflow & UI Polish
 - **Vocal engine upgrades** — dynamic mid-phrase tempo-map stretching, clip-offset vocal slicing, and per-note pitch-bend curves.
