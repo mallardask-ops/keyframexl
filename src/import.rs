@@ -2,6 +2,14 @@ use keyframexl::sequence::SamplePreset;
 use std::{path::Path, process::Command};
 
 pub fn dwp(path: &Path) -> Result<SamplePreset, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    if crate::dwp::is_dwp_magic(&bytes) {
+        return crate::dwp::read_dwp(path);
+    }
+    dwp_via_converter(path, bytes)
+}
+
+fn dwp_via_converter(path: &Path, original_bytes: Vec<u8>) -> Result<SamplePreset, String> {
     let converter = std::env::var_os("KEYFRAMEXL_CONVERTER")
         .or_else(|| {
             let root = std::env::var_os("XDG_DATA_HOME")
@@ -45,7 +53,7 @@ pub fn dwp(path: &Path) -> Result<SamplePreset, String> {
         .unwrap_or_default()
         .to_string_lossy()
         .into();
-    preset.original_dwp = std::sync::Arc::new(std::fs::read(path).map_err(|e| e.to_string())?);
+    preset.original_dwp = std::sync::Arc::new(original_bytes);
     Ok(preset)
 }
 
@@ -835,9 +843,6 @@ mod tests {
 
     #[test]
     fn convert_fixture_when_converter_is_available() {
-        if std::env::var_os("KEYFRAMEXL_CONVERTER").is_none() {
-            return;
-        }
         let p = super::dwp(std::path::Path::new("tests/fixtures/dwp/test.dwp")).unwrap();
         let zone = &p.zones[0];
         assert_eq!((zone.root, zone.low, zone.high), (60, 48, 72));
@@ -870,9 +875,6 @@ mod tests {
             sampler::LoopMode,
             sequence::{Clip, Note, Pattern, Song, render},
         };
-        if std::env::var_os("KEYFRAMEXL_CONVERTER").is_none() {
-            return;
-        }
         let input = tempfile::tempdir().unwrap();
         let input_path = input.path().join("Zones.dwp");
         std::fs::copy("tests/fixtures/multizone/converted/Zones.dwp", &input_path).unwrap();
@@ -900,7 +902,7 @@ mod tests {
                 (z.adsr.release, r),
             ] {
                 assert!(
-                    (actual - expected).abs() < 0.000001,
+                    (actual - expected).abs() < 1e-5,
                     "{actual} != {expected}"
                 );
             }

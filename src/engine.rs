@@ -8,7 +8,7 @@
 
 use crate::sampler::{
     FilterKind, FilterRouting, GlideMode, LoopMode, ModSource, ModTarget, PlayMode, Program,
-    SamplePreset, Zone,
+    ProgramFx, SamplePreset, TriggerMode, Zone,
 };
 use crate::sequence::{
     BAR, InstrumentKind, Note, Pattern, Song, Tick, drum, loop_bounds, loop_frames,
@@ -135,6 +135,14 @@ struct Voice {
     /// Channel volume/pan gains reached at the last rendered frame
     /// (smoothing); `None` starts at the next block's target.
     gain_state: Option<[f64; 2]>,
+    /// Per-voice effects (`VoiceFx`): ring-mod carrier phase, decimator
+    /// countdown and held frame, phaser LFO phase and its 4 allpass states
+    /// per channel. Untouched while the effects are off.
+    rm_phase: f64,
+    dec_acc: f64,
+    dec_hold: [f64; 2],
+    ph_phase: f64,
+    ph_ap: [[f64; 4]; 2],
 }
 
 impl Voice {
@@ -182,6 +190,11 @@ impl Voice {
             ratio_cache: (f64::NAN, 0.0),
             coeff_cache: [(f64::NAN, f64::NAN, (0.0, 0.0)); 2],
             gain_state: None,
+            rm_phase: 0.0,
+            dec_acc: 0.0,
+            dec_hold: [0.0; 2],
+            ph_phase: 0.0,
+            ph_ap: [[0.0; 4]; 2],
         }
     }
 
@@ -532,6 +545,15 @@ impl Voice {
         let target = |t: ModTarget| t as usize;
         let mut lfo = [0.0; 2];
         if active {
+            // Program LFOs: only worked out when a slot reads one.
+            let mut plfo = [0.0; 2];
+            for s in p.matrix.iter() {
+                match s.source {
+                    ModSource::ProgLfo1 => plfo[0] = program.lfo[0].at(self.t, self.clock, 1.0),
+                    ModSource::ProgLfo2 => plfo[1] = program.lfo[1].at(self.t, self.clock, 1.0),
+                    _ => {}
+                }
+            }
             // LFO rate is itself a target, so resolve it from non-LFO sources first.
             let mut rate_oct = [0.0; 2];
             for s in p
@@ -539,7 +561,7 @@ impl Voice {
                 .iter()
                 .filter(|s| matches!(s.target, ModTarget::Lfo1Rate | ModTarget::Lfo2Rate))
             {
-                let v = self.mod_source(s.source, p, gate, [0.0; 2]);
+                let v = self.mod_source(s.source, p, gate, [0.0; 2], plfo);
                 rate_oct[(s.target == ModTarget::Lfo2Rate) as usize] +=
                     v * s.amount * s.target.full_scale();
             }
@@ -547,8 +569,9 @@ impl Voice {
                 lfo[i] = l.at(self.t, self.clock, 2f64.powf(rate_oct[i]));
             }
             for s in p.matrix.iter().filter(|s| s.source != ModSource::None) {
-                m[target(s.target)] +=
-                    self.mod_source(s.source, p, gate, lfo) * s.amount * s.target.full_scale();
+                m[target(s.target)] += self.mod_source(s.source, p, gate, lfo, plfo)
+                    * s.amount
+                    * s.target.full_scale();
             }
         }
 
@@ -676,6 +699,10 @@ impl Voice {
             }
         }
 
+        if p.voice_fx.active() {
+            out = self.voice_fx(&p.voice_fx, out, rate);
+        }
+
         // Amplitude and pan.
         let vel_gain =
             (1.0 - z.velocity_tracking) + z.velocity_tracking * (self.vel as f64 / 127.0);
@@ -697,6 +724,7 @@ impl Voice {
         p: &crate::sampler::ZoneParams,
         gate: f64,
         lfo: [f64; 2],
+        plfo: [f64; 2],
     ) -> f64 {
         match source {
             ModSource::None => 0.0,
@@ -707,7 +735,61 @@ impl Voice {
             ModSource::Velocity => self.vel as f64 / 127.0,
             ModSource::Key => (self.key as f64 - 60.0) / 60.0,
             ModSource::Random => self.rnd,
+            ModSource::ProgLfo1 => plfo[0],
+            ModSource::ProgLfo2 => plfo[1],
         }
+    }
+
+    /// Per-voice effects on one stereo frame (`VoiceFx`): ring modulator,
+    /// decimator, quantizer, phaser, each crossfaded by its own mix.
+    fn voice_fx(&mut self, fx: &crate::sampler::VoiceFx, mut out: [f64; 2], rate: f64) -> [f64; 2] {
+        if fx.ringmod_mix > 0.0 {
+            let c = (std::f64::consts::TAU * self.rm_phase).sin();
+            self.rm_phase = (self.rm_phase + fx.ringmod_rate / rate).fract();
+            let m = fx.ringmod_mix;
+            for x in out.iter_mut() {
+                *x = *x * (1.0 - m) + *x * c * m;
+            }
+        }
+        if fx.decimator_mix > 0.0 {
+            let step = 1.0 + 63.0 * fx.decimator_rate * fx.decimator_rate;
+            // Counts down to the next captured frame; the first frame is captured at once.
+            if self.dec_acc <= 0.0 {
+                self.dec_hold = out;
+                self.dec_acc += step;
+            }
+            self.dec_acc -= 1.0;
+            let m = fx.decimator_mix;
+            for (x, h) in out.iter_mut().zip(self.dec_hold) {
+                *x = *x * (1.0 - m) + h * m;
+            }
+        }
+        if fx.quantizer_mix > 0.0 {
+            let levels = 2.0_f64.powf(fx.quantizer_bits.clamp(1.0, 16.0) - 1.0);
+            let m = fx.quantizer_mix;
+            for x in out.iter_mut() {
+                *x = *x * (1.0 - m) + (*x * levels).round() / levels * m;
+            }
+        }
+        if fx.phaser_mix > 0.0 {
+            // The LFO sweeps the allpass corner over ~200..3000 Hz (exponentially).
+            let sweep = 0.5 + 0.5 * (std::f64::consts::TAU * self.ph_phase).sin();
+            self.ph_phase = (self.ph_phase + fx.phaser_freq / rate).fract();
+            let hz = 200.0 * 15.0_f64.powf(sweep);
+            let t = (std::f64::consts::PI * hz.min(rate * 0.45) / rate).tan();
+            let a = (t - 1.0) / (t + 1.0);
+            let m = fx.phaser_mix;
+            for (ch, x) in out.iter_mut().enumerate() {
+                let mut y = *x;
+                for z in self.ph_ap[ch].iter_mut() {
+                    let o = a * y + *z;
+                    *z = y - a * o;
+                    y = o;
+                }
+                *x = *x * (1.0 - m) + 0.5 * (*x + y) * m;
+            }
+        }
+        out
     }
 }
 
@@ -801,6 +883,172 @@ struct SynthFx {
     inst: Option<u64>,
     buf: Vec<f32>,
     states: Vec<Option<crate::fx::FxState>>,
+}
+
+/// Sampler channels whose program has built-in effects at once.
+const MAX_SAMPLER_FX: usize = 16;
+/// How long a program's delay and reverb sends keep running after the last input.
+const DELAY_TAIL_SECONDS: f64 = 4.0;
+const REVERB_TAIL_SECONDS: f64 = 3.5;
+/// Programs/trigger groups remembered for round robin (reserved up front).
+const MAX_TRIGGER_STATES: usize = 64;
+
+/// One sampler channel's program effects (`ProgramFx`): its voices render
+/// into `buf`, the chain runs once per block, the result joins the channel's bus.
+struct SamplerFx {
+    /// The channel; `None`: a free entry.
+    inst: Option<u64>,
+    buf: Vec<f32>,
+    /// Still sounding after the voices: a delay or reverb tail is due or audible.
+    ringing: bool,
+    /// Frames since the effects last had input.
+    quiet: u64,
+    dsp: ProgFxDsp,
+}
+
+/// Fixed-size buffers of the program effects, sized once for the sample
+/// rate (zeroed memory, so untouched pages cost nothing).
+struct ProgFxDsp {
+    chorus: [Vec<f32>; 2],
+    chorus_w: usize,
+    chorus_phase: f32,
+    delay: [Vec<f32>; 2],
+    delay_w: [usize; 2],
+    delay_lp: [f32; 2],
+    comb: [[Vec<f32>; 4]; 2],
+    comb_i: [[usize; 4]; 2],
+    comb_lp: [[f32; 4]; 2],
+    allpass: [[Vec<f32>; 2]; 2],
+    allpass_i: [[usize; 2]; 2],
+    rate: f32,
+}
+
+impl ProgFxDsp {
+    const COMBS: [usize; 4] = [1116, 1188, 1277, 1356];
+    const ALLPASSES: [usize; 2] = [556, 441];
+    const SPREAD: usize = 23;
+
+    fn new(rate: f64) -> Self {
+        let rate = rate.max(8000.0);
+        let secs = |s: f64| (s * rate).round() as usize;
+        let tuned = |n: usize| ((n as f64 * rate / 44_100.0).round() as usize).max(8);
+        Self {
+            chorus: [vec![0.0; secs(0.03) + 4], vec![0.0; secs(0.03) + 4]],
+            chorus_w: 0,
+            chorus_phase: 0.0,
+            delay: [vec![0.0; secs(0.35).max(2)], vec![0.0; secs(0.26).max(2)]],
+            delay_w: [0; 2],
+            delay_lp: [0.0; 2],
+            comb: std::array::from_fn(|ch| {
+                std::array::from_fn(|i| vec![0.0; tuned(Self::COMBS[i] + ch * Self::SPREAD)])
+            }),
+            comb_i: [[0; 4]; 2],
+            comb_lp: [[0.0; 4]; 2],
+            allpass: std::array::from_fn(|ch| {
+                std::array::from_fn(|i| vec![0.0; tuned(Self::ALLPASSES[i] + ch * Self::SPREAD)])
+            }),
+            allpass_i: [[0; 2]; 2],
+            rate: rate as f32,
+        }
+    }
+
+    /// Forget everything the effects remember (memset, no allocation).
+    fn clear(&mut self) {
+        for v in self
+            .chorus
+            .iter_mut()
+            .chain(self.delay.iter_mut())
+            .chain(self.comb.iter_mut().flatten())
+            .chain(self.allpass.iter_mut().flatten())
+        {
+            v.fill(0.0);
+        }
+        self.chorus_w = 0;
+        self.chorus_phase = 0.0;
+        self.delay_w = [0; 2];
+        self.delay_lp = [0.0; 2];
+        self.comb_i = [[0; 4]; 2];
+        self.comb_lp = [[0.0; 4]; 2];
+        self.allpass_i = [[0; 2]; 2];
+    }
+
+    /// Run drive, then the chorus, delay and reverb sends over interleaved stereo.
+    fn process(&mut self, fx: &ProgramFx, buf: &mut [f32]) {
+        let (drive, chorus, delay, reverb) = (
+            fx.drive as f32,
+            fx.chorus as f32,
+            fx.delay as f32,
+            fx.reverb as f32,
+        );
+        let k = 1.0 + drive * 8.0;
+        let norm = k.tanh();
+        let cho_inc = 0.65 / self.rate;
+        for frame in buf.chunks_exact_mut(2) {
+            let mut dry = [frame[0], frame[1]];
+            if drive > 0.0 {
+                for x in dry.iter_mut() {
+                    *x += ((*x * k).tanh() / norm - *x) * drive;
+                }
+            }
+            let mut y = dry;
+            if chorus > 0.0 {
+                // 8..22 ms, left and right a quarter cycle apart.
+                let (sn, cs) = (std::f32::consts::TAU * self.chorus_phase).sin_cos();
+                let len = self.chorus[0].len();
+                for (ch, lfo) in [sn, cs].into_iter().enumerate() {
+                    let buf = &mut self.chorus[ch];
+                    buf[self.chorus_w] = dry[ch];
+                    let d = (0.015 + 0.007 * lfo) * self.rate;
+                    let pos = self.chorus_w as f32 - d;
+                    let pos = if pos < 0.0 { pos + len as f32 } else { pos };
+                    let i = pos as usize;
+                    let f = pos - i as f32;
+                    let (a, b) = (buf[i % len], buf[(i + 1) % len]);
+                    y[ch] += (a + (b - a) * f) * chorus * 0.5;
+                }
+                self.chorus_w = (self.chorus_w + 1) % len;
+                self.chorus_phase = (self.chorus_phase + cho_inc).fract();
+            }
+            if delay > 0.0 {
+                for ch in 0..2 {
+                    let w = self.delay_w[ch];
+                    let buf = &mut self.delay[ch];
+                    let o = buf[w];
+                    self.delay_lp[ch] += (o - self.delay_lp[ch]) * 0.45;
+                    buf[w] = dry[ch] + self.delay_lp[ch] * 0.42;
+                    self.delay_w[ch] = (w + 1) % buf.len();
+                    y[ch] += o * delay * 0.55;
+                }
+            }
+            if reverb > 0.0 {
+                let input = (dry[0] + dry[1]) * 0.5 * 0.5;
+                for ch in 0..2 {
+                    let mut sum = 0.0;
+                    for i in 0..4 {
+                        let buf = &mut self.comb[ch][i];
+                        let at = self.comb_i[ch][i];
+                        let o = buf[at];
+                        self.comb_lp[ch][i] = o * 0.8 + self.comb_lp[ch][i] * 0.2;
+                        buf[at] = input + self.comb_lp[ch][i] * 0.88;
+                        self.comb_i[ch][i] = (at + 1) % buf.len();
+                        sum += o;
+                    }
+                    let mut x = sum * 0.25;
+                    for i in 0..2 {
+                        let buf = &mut self.allpass[ch][i];
+                        let at = self.allpass_i[ch][i];
+                        let b = buf[at];
+                        buf[at] = x + b * 0.5;
+                        self.allpass_i[ch][i] = (at + 1) % buf.len();
+                        x = b - x;
+                    }
+                    y[ch] += x * reverb * 0.6;
+                }
+            }
+            frame[0] = y[0];
+            frame[1] = y[1];
+        }
+    }
 }
 
 /// Per-voice synth values worked out once and reused while their inputs
@@ -1007,6 +1255,10 @@ pub struct Engine {
     pub live_lyric: std::sync::Arc<std::sync::atomic::AtomicU64>,
     phrases: Vec<PhraseVoice>,
     hit_skip: usize,
+    /// Sampler channels with program effects (see `SamplerFx`).
+    sampler_fx: Vec<SamplerFx>,
+    /// Round robin: (channel, trigger group, notes counted, last zone played).
+    trigger_state: Vec<(u64, u8, u32, u32)>,
 }
 
 /// Plugin instances one engine holds (reserved up front).
@@ -1077,6 +1329,16 @@ impl Engine {
             live_lyric: Default::default(),
             phrases: Vec::with_capacity(MAX_PHRASES),
             hit_skip: 0,
+            sampler_fx: (0..MAX_SAMPLER_FX)
+                .map(|_| SamplerFx {
+                    inst: None,
+                    buf: Vec::new(),
+                    ringing: false,
+                    quiet: 0,
+                    dsp: ProgFxDsp::new(rate as f64),
+                })
+                .collect(),
+            trigger_state: Vec::with_capacity(MAX_TRIGGER_STATES),
         }
     }
 
@@ -1119,7 +1381,10 @@ impl Engine {
     }
 
     pub fn busy(&self) -> bool {
-        !self.voices.is_empty() || !self.phrases.is_empty() || !self.plugins.is_empty()
+        !self.voices.is_empty()
+            || !self.phrases.is_empty()
+            || !self.plugins.is_empty()
+            || self.sampler_fx.iter().any(|c| c.ringing)
     }
 
     /// A raw MIDI message (controller, pitch bend) to a plugin channel now.
@@ -1152,6 +1417,11 @@ impl Engine {
     pub fn reserve(&mut self, tracks: usize, frames: usize) {
         self.grow_buses(tracks, frames);
         for c in &mut self.synth_fx {
+            if c.buf.len() < frames * 2 {
+                c.buf.resize(frames * 2, 0.0);
+            }
+        }
+        for c in &mut self.sampler_fx {
             if c.buf.len() < frames * 2 {
                 c.buf.resize(frames * 2, 0.0);
             }
@@ -1228,6 +1498,15 @@ impl Engine {
         self.voices.clear();
         self.phrases.clear();
         self.last_key.clear();
+        // Round robin starts over, program effect tails are cut.
+        self.trigger_state.clear();
+        for c in &mut self.sampler_fx {
+            if c.inst.take().is_some() || c.ringing {
+                c.dsp.clear();
+            }
+            c.ringing = false;
+            c.quiet = 0;
+        }
         // Sequenced plugin notes end now; live (held) ones keep sounding.
         for pl in &mut self.plugins {
             let mut i = 0;
@@ -1245,7 +1524,9 @@ impl Engine {
     }
 
     pub fn active_voices(&self) -> usize {
-        self.voices.len() + self.phrases.len()
+        self.voices.len()
+            + self.phrases.len()
+            + self.sampler_fx.iter().filter(|c| c.ringing).count()
     }
 
     /// What each channel (by its index in `song.instruments`, up to
@@ -1302,6 +1583,7 @@ impl Engine {
         out.fill(0.0);
         let frames = out.len() / 2;
         self.prepare_buses(song.mixer.len().max(1), frames);
+        self.prepare_sampler_fx(song, frames);
         self.sync_tempo(song, song_mode);
         let length = match &self.tempo {
             Some(t) => t.frames_at(song.end_bar_tick()) as u64,
@@ -1376,6 +1658,7 @@ impl Engine {
         }
         self.cursor = 0;
         self.run_synth_fx(song, frames);
+        self.run_sampler_fx(song, frames);
         self.run_plugins(song, frames, block_clock);
         self.mix(song, frames, out);
         if self.clip_output {
@@ -1524,6 +1807,81 @@ impl Engine {
                 }
             }
             let bus = (inst.mixer as usize).min(self.buses.len() - 1);
+            for (d, s) in self.buses[bus][..n].iter_mut().zip(buf.iter()) {
+                *d += *s;
+            }
+        }
+    }
+
+    /// Give every sampler channel whose program has effects an entry, and
+    /// size and clear the buffers of the entries in use. Nothing to do (and
+    /// nothing touched) while no program uses effects.
+    fn prepare_sampler_fx(&mut self, song: &Song, frames: usize) {
+        for i in &song.instruments {
+            let Some(p) = i.sampler_preset() else {
+                continue;
+            };
+            if !p.program.fx.active() || self.sampler_fx.iter().any(|c| c.inst == Some(i.id)) {
+                continue;
+            }
+            if let Some(c) = self.sampler_fx.iter_mut().find(|c| c.inst.is_none()) {
+                c.inst = Some(i.id);
+            }
+        }
+        let n = frames * 2;
+        for c in self.sampler_fx.iter_mut().filter(|c| c.inst.is_some()) {
+            if c.buf.len() < n {
+                // Once per larger block (like the buses); `reserve` does it up front.
+                c.buf.resize(n, 0.0);
+            }
+            c.buf[..n].fill(0.0);
+        }
+    }
+
+    /// Program effects of each sampler channel, then into its channel's bus.
+    /// Runs while voices sound or the tail rings.
+    fn run_sampler_fx(&mut self, song: &Song, frames: usize) {
+        let n = frames * 2;
+        for c in &mut self.sampler_fx {
+            let Some(id) = c.inst else { continue };
+            let inst = song.instrument(id);
+            let Some(fx) = inst
+                .and_then(|i| i.sampler_preset())
+                .map(|p| &p.program.fx)
+                .filter(|fx| fx.active())
+            else {
+                // Effects turned off, or the channel changed: free the entry.
+                c.inst = None;
+                c.ringing = false;
+                c.quiet = 0;
+                c.dsp.clear();
+                continue;
+            };
+            if c.buf.len() < n {
+                continue;
+            }
+            let buf = &mut c.buf[..n];
+            let heard = buf.iter().any(|s| *s != 0.0);
+            if !heard && !c.ringing {
+                continue;
+            }
+            c.dsp.process(fx, buf);
+            c.quiet = if heard { 0 } else { c.quiet + frames as u64 };
+            // Echoes and reverb keep coming for a while after the last input
+            // (silent gaps included); then it rings until the output is inaudible.
+            let tail = [
+                (fx.delay > 0.0, DELAY_TAIL_SECONDS),
+                (fx.reverb > 0.0, REVERB_TAIL_SECONDS),
+                (fx.chorus > 0.0, 0.05),
+            ]
+            .iter()
+            .filter(|t| t.0)
+            .fold(0.0, |a: f64, t| a.max(t.1));
+            c.ringing = (c.quiet as f64) < tail * self.rate || buf.iter().any(|s| s.abs() > 1e-5);
+            if !c.ringing {
+                c.dsp.clear();
+            }
+            let bus = (inst.map_or(0, |i| i.mixer as usize)).min(self.buses.len() - 1);
             for (d, s) in self.buses[bus][..n].iter_mut().zip(buf.iter()) {
                 *d += *s;
             }
@@ -2367,9 +2725,11 @@ impl Engine {
         self.auto.clear();
         let frames = out.len() / 2;
         self.prepare_buses(song.mixer.len().max(1), frames);
+        self.prepare_sampler_fx(song, frames);
         self.render_voices(song, 0, frames);
         self.render_phrases(song, 0, frames);
         self.run_synth_fx(song, frames);
+        self.run_sampler_fx(song, frames);
         self.plugin_transport = crate::plugin::Transport {
             rate: self.rate as u32,
             tempo: song.tempo,
@@ -2688,33 +3048,119 @@ impl Engine {
     }
 
     fn start_zones(&mut self, preset: &SamplePreset, base: Voice) {
+        // Trigger groups (round robin): one zone per group plays. Groups
+        // already handled, as bits 0..16 of a stack word: no allocation.
+        let mut done = 0u32;
         for (zi, z) in preset.zones.iter().enumerate() {
             if !z.matches(base.key, base.vel) {
                 continue;
             }
-            let mut v = base;
-            v.source = Source::Zone { zone: zi };
-            v.cut_group = z.params.mute_group;
-            if z.params.one_shot {
-                v.gate = f64::INFINITY;
-            }
-            if z.params.reverse {
-                v.pos = (z.end - 1) as f64;
-                v.dir = -1.0;
-            } else {
-                v.pos = z.offset as f64;
-            }
-            if v.cut_group != 0 {
-                for o in self
-                    .voices
-                    .iter_mut()
-                    .filter(|o| o.inst == v.inst && o.cut_group == v.cut_group)
-                {
-                    o.kill_now();
+            let g = z.params.trigger_group;
+            let mode = z.params.trigger_mode;
+            if g != 0 && mode != TriggerMode::Normal {
+                let bit = 1u32 << (g.min(16) - 1);
+                if done & bit != 0 {
+                    continue;
                 }
+                done |= bit;
+                // The first matching zone of the group sets its mode.
+                let pick = self.pick_trigger_zone(preset, &base, g, mode);
+                self.start_zone(preset, base, pick);
+                continue;
             }
-            self.push(v);
+            self.start_zone(preset, base, zi);
         }
+    }
+
+    /// The zone that plays for trigger group `g` this note: among the zones
+    /// matching the note in that group (not `Normal`), by cycling, a hash of
+    /// the note, or a hash that skips the zone played last.
+    fn pick_trigger_zone(
+        &mut self,
+        preset: &SamplePreset,
+        base: &Voice,
+        g: u8,
+        mode: TriggerMode,
+    ) -> usize {
+        let in_group = |z: &Zone| {
+            z.matches(base.key, base.vel)
+                && z.params.trigger_group == g
+                && z.params.trigger_mode != TriggerMode::Normal
+        };
+        let count = preset.zones.iter().filter(|z| in_group(z)).count().max(1);
+        let nth = |k: usize, skip: Option<usize>| {
+            preset
+                .zones
+                .iter()
+                .enumerate()
+                .filter(|(zi, z)| in_group(z) && Some(*zi) != skip)
+                .nth(k)
+                .map_or(0, |(zi, _)| zi)
+        };
+        let at = match self
+            .trigger_state
+            .iter()
+            .position(|s| s.0 == base.inst && s.1 == g)
+        {
+            Some(at) => at,
+            None if self.trigger_state.len() < self.trigger_state.capacity() => {
+                self.trigger_state.push((base.inst, g, 0, u32::MAX));
+                self.trigger_state.len() - 1
+            }
+            // Table full: no memory of earlier notes, still deterministic.
+            None => return nth(base.note as usize % count, None),
+        };
+        let (_, _, counter, last) = self.trigger_state[at];
+        let mut h = base.note ^ base.inst.rotate_left(17) ^ (g as u64).rotate_left(33);
+        h = (h ^ (counter as u64).wrapping_mul(0xD6E8_FEB8_6659_FD93))
+            .wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        h ^= h >> 29;
+        h = h.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        h ^= h >> 32;
+        let pick = match mode {
+            TriggerMode::Cycle => nth(counter as usize % count, None),
+            TriggerMode::Random => nth(h as usize % count, None),
+            _ => {
+                let last = (last != u32::MAX).then_some(last as usize);
+                let others = if count > 1 && last.is_some_and(|l| in_group(&preset.zones[l])) {
+                    count - 1
+                } else {
+                    count
+                };
+                let skip = if others < count { last } else { None };
+                nth(h as usize % others, skip)
+            }
+        };
+        let s = &mut self.trigger_state[at];
+        s.2 = counter.wrapping_add(1);
+        s.3 = pick as u32;
+        pick
+    }
+
+    fn start_zone(&mut self, preset: &SamplePreset, base: Voice, zi: usize) {
+        let z = &preset.zones[zi];
+        let mut v = base;
+        v.source = Source::Zone { zone: zi };
+        v.cut_group = z.params.mute_group;
+        if z.params.one_shot {
+            v.gate = f64::INFINITY;
+        }
+        if z.params.reverse {
+            v.pos = (z.end - 1) as f64;
+            v.dir = -1.0;
+        } else {
+            v.pos = z.offset as f64;
+        }
+        if v.cut_group != 0 {
+            for o in self
+                .voices
+                .iter_mut()
+                .filter(|o| o.inst == v.inst && o.cut_group == v.cut_group)
+            {
+                o.kill_now();
+            }
+        }
+        self.push(v);
     }
 
     fn remember_key(&mut self, inst: u64, key: u8) {
@@ -2784,6 +3230,7 @@ impl Engine {
         let alpha = smooth_alpha(rate);
         let buses = &mut self.buses;
         let chans = &mut self.synth_fx;
+        let sfx = &mut self.sampler_fx;
         let auto = &self.auto;
         let ctl = &self.ctl;
         for v in &mut self.voices {
@@ -2811,13 +3258,19 @@ impl Engine {
                     }
                 }
             }
-            let out = match chan {
-                Some(n) => &mut chans[n].buf[at * 2..(at + frames) * 2],
-                None => &mut buses[bus][at * 2..(at + frames) * 2],
-            };
             let preset = match v.source {
                 Source::Zone { .. } => inst.and_then(|i| i.sampler_preset()),
                 _ => None,
+            };
+            // A program with effects plays into its channel's buffer.
+            let schan = preset
+                .filter(|p| p.program.fx.active())
+                .and_then(|_| sfx.iter().position(|c| c.inst == Some(v.inst)))
+                .filter(|n| sfx[*n].buf.len() >= (at + frames) * 2);
+            let out = match (chan, schan) {
+                (Some(n), _) => &mut chans[n].buf[at * 2..(at + frames) * 2],
+                (None, Some(n)) => &mut sfx[n].buf[at * 2..(at + frames) * 2],
+                _ => &mut buses[bus][at * 2..(at + frames) * 2],
             };
             let forge = match (v.source, inst.map(|i| &i.kind)) {
                 (Source::Forge, Some(InstrumentKind::Forge { sound })) => Some(&*sound.rendered),
@@ -4327,6 +4780,378 @@ mod tests {
         assert_eq!(cut(&e), 200.0);
         assert_eq!(time(&e), 1.0);
         assert!(late < before * 0.1, "the cutoff closed: {late} vs {before}");
+    }
+
+    // ------------------------------------------------ DirectWave P2/P3: round robin, voice FX, program LFOs and sends
+
+    fn sine_frames(seconds: f64, hz: f64) -> Vec<[f32; 2]> {
+        (0..(RATE as f64 * seconds) as usize)
+            .map(|i| {
+                let v = (std::f64::consts::TAU * hz * i as f64 / RATE as f64).sin() as f32 * 0.5;
+                [v, v]
+            })
+            .collect()
+    }
+
+    /// The Bass channel's preset with `n` full-range zones of DC `0.1 * (i + 1)`,
+    /// all in trigger group 1 under `mode`, plus the program shell.
+    fn round_robin_song(n: usize, mode: crate::sampler::TriggerMode) -> Song {
+        let mut song = song_with(vec![[0.1; 2]; 64], |_, _| {});
+        let mut preset = song
+            .instrument(4)
+            .unwrap()
+            .sampler_preset()
+            .unwrap()
+            .clone();
+        for i in 0..n {
+            let mut z = preset.zones[0].clone();
+            z.frames = Arc::new(vec![[0.1 * (i + 1) as f32; 2]; 64]);
+            z.params.trigger_group = 1;
+            z.params.trigger_mode = mode;
+            if i == 0 {
+                preset.zones[0] = z;
+            } else {
+                preset.zones.push(z);
+            }
+        }
+        song.set_sampler_preset(4, preset).unwrap();
+        song
+    }
+
+    /// Zones that start for note id `note`, in the order they were pushed.
+    fn started_zones(e: &mut Engine, song: &Song, note: u64) -> Vec<usize> {
+        let preset = song.instrument(4).unwrap().sampler_preset().unwrap();
+        let before = e.voices.len();
+        e.start_zones(preset, Voice::new(4, note, Source::Tone, 60, 100, 1.0));
+        e.voices[before..]
+            .iter()
+            .map(|v| match v.source {
+                Source::Zone { zone } => zone,
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn cycle_trigger_group_alternates_zones_in_order() {
+        let song = round_robin_song(3, crate::sampler::TriggerMode::Cycle);
+        let mut e = Engine::new(RATE);
+        let picks: Vec<usize> = (1..=6)
+            .map(|n| {
+                let z = started_zones(&mut e, &song, n);
+                assert_eq!(z.len(), 1, "one zone of the group plays");
+                z[0]
+            })
+            .collect();
+        assert_eq!(picks, [0, 1, 2, 0, 1, 2]);
+        // A stop starts the cycle over.
+        e.stop();
+        assert_eq!(started_zones(&mut e, &song, 99), [0]);
+    }
+
+    #[test]
+    fn avoid_previous_never_repeats_and_random_is_deterministic() {
+        let song = round_robin_song(3, crate::sampler::TriggerMode::AvoidPrevious);
+        let mut e = Engine::new(RATE);
+        let picks: Vec<usize> = (1..=20)
+            .map(|n| started_zones(&mut e, &song, n)[0])
+            .collect();
+        assert!(picks.windows(2).all(|w| w[0] != w[1]), "{picks:?}");
+        assert!(
+            (0..3).all(|z| picks.contains(&z)),
+            "all zones get used: {picks:?}"
+        );
+        // One zone only: nothing to avoid, it plays every time.
+        let one = round_robin_song(1, crate::sampler::TriggerMode::AvoidPrevious);
+        let mut e1 = Engine::new(RATE);
+        assert!((1..5).all(|n| started_zones(&mut e1, &one, n) == [0]));
+        // Random: same notes, same picks, in a fresh engine.
+        let song = round_robin_song(4, crate::sampler::TriggerMode::Random);
+        let run = || {
+            let mut e = Engine::new(RATE);
+            (1..=16)
+                .map(|n| started_zones(&mut e, &song, n)[0])
+                .collect::<Vec<_>>()
+        };
+        let (a, b) = (run(), run());
+        assert_eq!(a, b);
+        assert!(a.iter().any(|z| *z != a[0]), "not constant: {a:?}");
+    }
+
+    #[test]
+    fn zones_outside_a_group_or_in_normal_mode_always_play() {
+        let mut song = round_robin_song(3, crate::sampler::TriggerMode::Cycle);
+        let mut preset = song
+            .instrument(4)
+            .unwrap()
+            .sampler_preset()
+            .unwrap()
+            .clone();
+        preset.zones[2].params.trigger_group = 0; // always plays
+        preset.zones[1].params.trigger_mode = crate::sampler::TriggerMode::Normal; // plays too
+        song.set_sampler_preset(4, preset).unwrap();
+        let mut e = Engine::new(RATE);
+        // Zone 1 (Normal) and 2 (group 0) every note; zone 0 is alone in its group.
+        for n in 1..=3 {
+            let mut z = started_zones(&mut e, &song, n);
+            z.sort();
+            assert_eq!(z, [0, 1, 2]);
+        }
+    }
+
+    #[test]
+    fn voice_fx_change_the_sound_stay_bounded_and_off_means_identical() {
+        use crate::sampler::VoiceFx;
+        let tone = sine_frames(1.0, 440.0);
+        let render_fx = |fx: VoiceFx| {
+            let mut song = song_with(tone.clone(), |z, _| z.params.voice_fx = fx);
+            song.patterns[0].notes.push(note(0, 8, 60));
+            render(&song, 1, false, RATE)
+        };
+        let dry = render_fx(VoiceFx::default());
+        // Every parameter moved, every mix off: bit-identical to the plain voice.
+        let off = render_fx(VoiceFx {
+            ringmod_rate: 1234.0,
+            decimator_rate: 0.9,
+            quantizer_bits: 3.0,
+            phaser_freq: 7.0,
+            ..VoiceFx::default()
+        });
+        assert_eq!(dry, off);
+        let cases: [(&str, VoiceFx); 4] = [
+            (
+                "ringmod",
+                VoiceFx {
+                    ringmod_mix: 1.0,
+                    ..VoiceFx::default()
+                },
+            ),
+            (
+                "decimator",
+                VoiceFx {
+                    decimator_mix: 1.0,
+                    decimator_rate: 1.0,
+                    ..VoiceFx::default()
+                },
+            ),
+            (
+                "quantizer",
+                VoiceFx {
+                    quantizer_mix: 1.0,
+                    quantizer_bits: 2.0,
+                    ..VoiceFx::default()
+                },
+            ),
+            (
+                "phaser",
+                VoiceFx {
+                    phaser_mix: 1.0,
+                    phaser_freq: 2.0,
+                    ..VoiceFx::default()
+                },
+            ),
+        ];
+        let window = 2000..RATE as usize / 2;
+        for (name, fx) in cases {
+            assert!(fx.active() && fx.validate().is_ok());
+            let wet = render_fx(fx);
+            assert_eq!(wet.len(), dry.len(), "{name}: same length");
+            assert!(
+                wet.iter()
+                    .flatten()
+                    .all(|v| v.is_finite() && v.abs() <= 1.0),
+                "{name}: finite and bounded"
+            );
+            let diff: f64 = wet[window.clone()]
+                .iter()
+                .zip(&dry[window.clone()])
+                .map(|(a, b)| ((a[0] - b[0]) as f64).powi(2))
+                .sum();
+            assert!(diff > 1.0, "{name}: audibly different, diff {diff}");
+            assert!(energy(&wet[window.clone()]) > 1.0, "{name}: still sounds");
+        }
+    }
+
+    #[test]
+    fn decimator_holds_and_quantizer_snaps_to_levels() {
+        use crate::sampler::VoiceFx;
+        let tone = sine_frames(0.5, 440.0);
+        let render_fx = |fx: VoiceFx| {
+            let mut song = song_with(tone.clone(), |z, _| z.params.voice_fx = fx);
+            song.patterns[0].notes.push(note(0, 4, 60));
+            render(&song, 1, false, RATE)
+        };
+        // Full decimation: runs of 64 equal frames.
+        let dec = render_fx(VoiceFx {
+            decimator_mix: 1.0,
+            decimator_rate: 1.0,
+            ..VoiceFx::default()
+        });
+        let runs = dec[1000..3000].windows(2).filter(|w| w[0] == w[1]).count();
+        assert!(runs > 1900, "held between captures: {runs}");
+        // 2 bits: levels of 1/2 -> only multiples of 0.5 (the sine peaks at 0.5).
+        let q = render_fx(VoiceFx {
+            quantizer_mix: 1.0,
+            quantizer_bits: 2.0,
+            ..VoiceFx::default()
+        });
+        assert!(
+            q[1000..3000]
+                .iter()
+                .all(|f| (f[0] * 2.0 - (f[0] * 2.0).round()).abs() < 1e-6)
+        );
+    }
+
+    #[test]
+    fn program_lfos_modulate_gain_and_pitch() {
+        use crate::sampler::{ModSource as S, ModTarget as T};
+        let dc = vec![[0.5f32; 2]; RATE as usize];
+        let mut song = song_with(dc.clone(), |z, p| {
+            p.lfo[0].rate = 8.0;
+            z.params.route(S::ProgLfo1, T::Gain, -1.0);
+        });
+        song.patterns[0].notes.push(note(0, 8, 60));
+        let out = render(&song, 1, false, RATE);
+        let (lo, hi) = out[1000..RATE as usize / 2]
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(a, b), s| (a.min(s[0]), b.max(s[0])));
+        assert!(hi - lo > 0.3, "program LFO 1 tremolo swings: {lo}..{hi}");
+        // The zone's own LFO 1 is left alone: nothing routed from it, no swing.
+        let mut plain = song_with(dc, |z, p| {
+            p.lfo[0].rate = 8.0;
+            z.params.route(S::Lfo1, T::Gain, -1.0);
+            z.params.lfo[0].rate = 0.01;
+        });
+        plain.patterns[0].notes.push(note(0, 8, 60));
+        let flat = render(&plain, 1, false, RATE);
+        let (lo2, hi2) = flat[1000..RATE as usize / 2]
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(a, b), s| (a.min(s[0]), b.max(s[0])));
+        assert!(hi2 - lo2 < 0.05, "zone LFO is independent: {lo2}..{hi2}");
+        // Program LFO 2 to pitch bends a ramp: differs from the unmodulated render.
+        let ramp: Vec<[f32; 2]> = (0..RATE as usize)
+            .map(|i| [(i % 100) as f32 / 100.0 - 0.5; 2])
+            .collect();
+        let run = |route: bool| {
+            let mut song = song_with(ramp.clone(), |z, p| {
+                p.lfo[1].rate = 5.0;
+                if route {
+                    z.params.route(S::ProgLfo2, T::Pitch, 0.5);
+                }
+            });
+            song.patterns[0].notes.push(note(0, 8, 60));
+            render(&song, 1, false, RATE)
+        };
+        let (bent, straight) = (run(true), run(false));
+        assert!(bent.iter().flatten().all(|v| v.is_finite()));
+        assert_ne!(bent, straight);
+    }
+
+    #[test]
+    fn program_fx_transform_and_ring_on_after_the_note() {
+        use crate::sampler::ProgramFx;
+        // A 0.1 s burst: the note (1 step = 0.125 s) and sample end before 0.2 s.
+        let burst = sine_frames(0.1, 330.0);
+        let render_fx = |fx: ProgramFx| {
+            let mut song = song_with(burst.clone(), |_, p| p.fx = fx);
+            song.patterns[0].notes.push(note(0, 1, 60));
+            render(&song, 1, false, RATE)
+        };
+        let dry = render_fx(ProgramFx::default());
+        let tail =
+            |o: &[[f32; 2]]| energy(&o[RATE as usize * 6 / 10..o.len().min(RATE as usize * 2)]);
+        assert!(tail(&dry) < 1e-9, "dry: silent after the note");
+        let first = |o: &[[f32; 2]]| o[..RATE as usize].to_vec();
+        let d = ProgramFx::default;
+        for (name, fx) in [
+            ("drive", ProgramFx { drive: 1.0, ..d() }),
+            ("chorus", ProgramFx { chorus: 1.0, ..d() }),
+            ("delay", ProgramFx { delay: 1.0, ..d() }),
+            ("reverb", ProgramFx { reverb: 1.0, ..d() }),
+        ] {
+            assert!(fx.active() && fx.validate().is_ok());
+            let wet = render_fx(fx);
+            assert!(wet.iter().flatten().all(|v| v.is_finite()), "{name}");
+            assert_ne!(first(&wet), first(&dry), "{name}: changes the sound");
+            match name {
+                "delay" | "reverb" => {
+                    assert!(
+                        tail(&wet) > 1e-4,
+                        "{name}: rings after the note: {}",
+                        tail(&wet)
+                    );
+                    assert!(
+                        wet.len() > dry.len(),
+                        "{name}: the export waits for the tail"
+                    );
+                }
+                _ => {}
+            }
+        }
+        // Left echoes after ~0.35 s, right after ~0.26 s.
+        let echo = render_fx(ProgramFx { delay: 1.0, ..d() });
+        let at = |ch: usize, a: f64, b: f64| -> f64 {
+            echo[(a * RATE as f64) as usize..(b * RATE as f64) as usize]
+                .iter()
+                .map(|f| (f[ch] as f64).powi(2))
+                .sum()
+        };
+        assert!(
+            at(0, 0.36, 0.44) > 100.0 * at(0, 0.22, 0.34).max(1e-12),
+            "left echo at 0.35 s"
+        );
+        assert!(
+            at(1, 0.27, 0.35) > 100.0 * at(1, 0.15, 0.25).max(1e-12),
+            "right echo at 0.26 s"
+        );
+    }
+
+    #[test]
+    fn program_fx_off_touches_nothing_and_is_block_size_independent() {
+        use crate::sampler::ProgramFx;
+        // Defaults: the sample comes out as is, and no effect entry is ever claimed.
+        let mut song = song_with(vec![[0.5; 2]; 4000], |_, p| p.fx = ProgramFx::default());
+        song.patterns[0].notes.push(note(0, 8, 60));
+        let mut e = Engine::new(RATE);
+        let mut buf = vec![0.0f32; 512 * 2];
+        e.process(&song, 1, false, 0, &mut buf, false);
+        assert!(buf[..400].iter().all(|v| *v == 0.5), "plain pass-through");
+        assert!(e.sampler_fx.iter().all(|c| c.inst.is_none() && !c.ringing));
+        // Effects on: the result does not depend on the block size.
+        let burst = sine_frames(0.2, 300.0);
+        let mut song = song_with(burst, |_, p| {
+            p.fx = ProgramFx {
+                drive: 0.5,
+                chorus: 0.6,
+                delay: 0.5,
+                reverb: 0.5,
+            }
+        });
+        song.patterns[0].notes.push(note(0, 2, 60));
+        let run = |block: usize| {
+            let mut e = Engine::new(RATE);
+            let mut out = Vec::new();
+            let mut buf = vec![0.0f32; block * 2];
+            let mut at = 0;
+            while out.len() < RATE as usize * 2 {
+                at = e.process(&song, 1, false, at, &mut buf, false);
+                out.extend_from_slice(&buf);
+            }
+            out.truncate(RATE as usize * 2);
+            out
+        };
+        assert_eq!(run(512), run(256));
+        // Turning the effects off frees the entry once the channel is told so.
+        let mut off = song.clone();
+        let mut preset = off.instrument(4).unwrap().sampler_preset().unwrap().clone();
+        preset.program.fx = ProgramFx::default();
+        off.set_sampler_preset(4, preset).unwrap();
+        let mut e = Engine::new(RATE);
+        let mut buf = vec![0.0f32; 512 * 2];
+        e.process(&song, 1, false, 0, &mut buf, false);
+        assert!(e.sampler_fx.iter().any(|c| c.inst == Some(4)));
+        e.process(&off, 1, false, 512, &mut buf, false);
+        assert!(e.sampler_fx.iter().all(|c| c.inst.is_none()));
     }
 }
 

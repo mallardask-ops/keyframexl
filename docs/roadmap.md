@@ -16,11 +16,11 @@ This document tracks what has already been built in KeyFrameXL and what remains 
 - **Dockable Shell (`src/ui/workspace.rs`)** — hybrid docked + floating tab layout (`egui_dock`) with three saved presets (`Arrange`, `Compose`, `Edit` via `Alt+1..3`) persisted to `~/.config/keyframexl/workspace.ron`, plus a **Browser** (`Alt+F8`) with Current Project and Files tabs, background search, and click-to-audition.
 
 ### Built-in Instruments
-- **Sampler v2 (`src/sampler.rs`)** — DirectWave-inspired multi-zone sampler with:
-  - *Program:* Volume, Pan, Transpose, Play Mode (`Poly` / `Mono` / `Legato`), Polyphony limit, Glide Time (`Fixed` / `Auto`), Pitch Bend range.
-  - *Zone:* Semi `±36`, Fine `±50`, Key Tracking `±100%`, Gain, Pan, Velocity range, Amp DAHDSR, Loop modes (`Disabled`, `Forward`, `One Shot`, `Sustained`, `Bounce`), Reverse, Start offset, Mute group.
+- **Sampler v2 (`src/sampler.rs`, `src/dwp.rs`)** — DirectWave-inspired multi-zone sampler with:
+  - *Program:* Volume, Pan, Transpose, Play Mode (`Poly` / `Mono` / `Legato`), Polyphony limit, Glide Time (`Fixed` / `Auto`), Pitch Bend range, two **Program LFOs** (`ProgLfo1` / `ProgLfo2`), and per-program **FX sends** (Drive, Chorus, Stereo Delay, Reverb).
+  - *Zone:* Semi `±36`, Fine `±50`, Key Tracking `±100%`, Gain, Pan, Velocity range, Amp DAHDSR, Loop modes (`Disabled`, `Forward`, `One Shot`, `Sustained`, `Bounce`), Reverse, Start offset, Mute group, **Round-robin trigger groups** (`Normal` / `Cycle` / `Random` / `AvoidPrevious`), and **per-voice FX** (Ringmod, Decimator, Quantizer, 4-stage Phaser).
   - *Filters & Modulation:* Dual TPT SVF filters (`Off`, `LP`, `HP`, `BP`, `Notch`, `Allpass`, Serial/Parallel), `ENV 1/2`, `LFO 1/2` (8 waveforms, Rate, Attack, Phase, Sync/Free Run), and a 16-slot Modulation Matrix.
-  - *DirectWave `.dwp` Import:* Reads normalized SFZ output from ConvertWithMoss and embeds all samples inside `.kfxl` projects (see [dwp-validation.md](dwp-validation.md)).
+  - *Native DirectWave `.dwp` Reader (`src/dwp.rs`):* Reads `DwPr` binary presets directly (v36/v37/v38, embedded FLAC & planar PCM monoliths, external WAV/FLAC/OGG, dual filters, `ENV 1/2`, `LFO 1/2`, Program LFOs, and full 16-slot modulation matrix) with zero external tools required, plus ConvertWithMoss fallback for non-`DwPr` files (see [dwp-validation.md](dwp-validation.md)).
 - **KeyFrame Tide (`src/synth.rs`)** — native polyphonic synthesizer with 18 factory presets.
 - **Forge (`src/forge/`)** — 6-layer procedural game SFX designer with recipes, project game styles, macros, deterministic mutations, channel bouncing, and batch WAV/OGG export (see [forge.md](forge.md)).
 - **Vocal (`src/vocal/`)** — UTAU singing voice channels using an embedded WORLD vocoder, per-note lyrics in the Piano Roll, and background phrase rendering/caching (see [vocal.md](vocal.md)).
@@ -46,8 +46,7 @@ This document tracks what has already been built in KeyFrameXL and what remains 
 - **Lock-free command queue** — expand `rtrb` command streaming for all live parameter and sequence edits instead of cloning song state snapshots.
 
 ### Sampler & DirectWave Fidelity
-- **Native `.dwp` binary reader** — read `.dwp` files directly without ConvertWithMoss so fields dropped by SFZ conversion (`ENV 1/2`, second filter, full modulation matrix) are preserved verbatim.
-- **DirectWave P2/P3 features** — second set of program LFOs, per-voice FX (Ringmod, Decimator, Quantizer, Phaser), built-in Drive/Delay/Chorus/Reverb sends, Time Stretch / Beat Sync / Tick Slice, and round-robin playback.
+- **Time Stretch / Beat Sync / Tick Slice** — tempo-synced granular/phase-vocoder sample stretching and slice playback modes.
 
 ### Workflow & UI Polish
 - **Vocal engine upgrades** — dynamic mid-phrase tempo-map stretching, clip-offset vocal slicing, and per-note pitch-bend curves.

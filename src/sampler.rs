@@ -120,6 +120,9 @@ pub struct Adsr {
 fn is_zero(v: &f64) -> bool {
     *v == 0.0
 }
+fn is_zero_u8(v: &u8) -> bool {
+    *v == 0
+}
 
 /// How far along a segment the level is at progress `p` (0..1), bent by
 /// `c` (−1..1): 0 straight, + fast first (exponential-like), − slow first.
@@ -223,10 +226,12 @@ macro_rules! labelled_enum {
 labelled_enum!(FilterKind { Off => "Off", Lowpass => "Lowpass", Highpass => "Highpass", Bandpass => "Bandpass", Notch => "Notch", Allpass => "Allpass" });
 labelled_enum!(FilterRouting { Serial => "Serial", Parallel => "Parallel" });
 labelled_enum!(LfoShape { Sine => "Sine", AbsSine => "Abs Sine", Triangle => "Triangle", Square => "Square", Saw => "Saw", InvSaw => "Inv Saw", Random => "Random", LpRandom => "LP Random" });
-labelled_enum!(ModSource { None => "—", Lfo1 => "LFO 1", Lfo2 => "LFO 2", Env1 => "ENV 1", Env2 => "ENV 2", Velocity => "Velocity", Key => "Key", Random => "Random" });
+labelled_enum!(ModSource { None => "—", Lfo1 => "LFO 1", Lfo2 => "LFO 2", Env1 => "ENV 1", Env2 => "ENV 2", Velocity => "Velocity", Key => "Key", Random => "Random", ProgLfo1 => "Prog LFO 1", ProgLfo2 => "Prog LFO 2" });
 labelled_enum!(ModTarget { Pitch => "Pitch", Gain => "Gain", Pan => "Pan", Cutoff1 => "Filter 1 freq", Emphasis1 => "Filter 1 emph", Cutoff2 => "Filter 2 freq", Emphasis2 => "Filter 2 emph", Lfo1Rate => "LFO 1 rate", Lfo2Rate => "LFO 2 rate" });
 labelled_enum!(PlayMode { Poly => "Poly", Mono => "Mono", Legato => "Legato" });
 labelled_enum!(GlideMode { Fixed => "Fixed", Auto => "Auto" });
+// How zones sharing a trigger group take turns (see `ZoneParams::trigger_group`).
+labelled_enum!(TriggerMode { Normal => "Normal", Cycle => "Cycle", Random => "Random", AvoidPrevious => "Avoid prev" });
 
 /// What 100 % of a matrix slot means for each target.
 impl ModTarget {
@@ -327,6 +332,14 @@ impl Default for Lfo {
     }
 }
 impl Lfo {
+    fn valid(&self) -> bool {
+        [self.rate, self.attack, self.phase]
+            .iter()
+            .all(|v| v.is_finite())
+            && (0.01..=50.0).contains(&self.rate)
+            && (0.0..=10.0).contains(&self.attack)
+            && (0.0..=1.0).contains(&self.phase)
+    }
     /// Output at voice time `t` (s) with `rate_mul` from the matrix; `clock` is
     /// song time (s) at the voice start, used by Free Run.
     pub fn at(&self, t: f64, clock: f64, rate_mul: f64) -> f64 {
@@ -368,6 +381,109 @@ pub struct ZoneParams {
     pub one_shot: bool,
     /// Mute group: a new voice silences voices of the same non-zero group.
     pub mute_group: u8,
+    /// Trigger group (round robin): 0 = always plays; 1..=16 = of the zones
+    /// that match a note and share this group only one plays, chosen by
+    /// `trigger_mode`.
+    #[serde(skip_serializing_if = "is_zero_u8")]
+    pub trigger_group: u8,
+    #[serde(skip_serializing_if = "is_default_mode")]
+    pub trigger_mode: TriggerMode,
+    /// Per-voice effects after the filters; all mixes 0 = off.
+    #[serde(skip_serializing_if = "VoiceFx::is_default")]
+    pub voice_fx: VoiceFx,
+}
+fn is_default_mode(m: &TriggerMode) -> bool {
+    *m == TriggerMode::Normal
+}
+
+/// Per-voice effects (DirectWave Zone FX): ring modulator, sample-rate
+/// decimator, bit quantizer and phaser, each with a wet mix (0 = off).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct VoiceFx {
+    /// Ring modulator carrier, Hz 20..5000.
+    pub ringmod_rate: f64,
+    pub ringmod_mix: f64,
+    /// Decimator: 0 = full rate, 1 = sample-and-hold every ~64 samples.
+    pub decimator_rate: f64,
+    pub decimator_mix: f64,
+    /// Quantizer resolution, bits 1..16.
+    pub quantizer_bits: f64,
+    pub quantizer_mix: f64,
+    /// Phaser sweep, Hz 0.05..10.
+    pub phaser_freq: f64,
+    pub phaser_mix: f64,
+}
+impl Default for VoiceFx {
+    fn default() -> Self {
+        Self {
+            ringmod_rate: 220.0,
+            ringmod_mix: 0.0,
+            decimator_rate: 0.0,
+            decimator_mix: 0.0,
+            quantizer_bits: 16.0,
+            quantizer_mix: 0.0,
+            phaser_freq: 0.5,
+            phaser_mix: 0.0,
+        }
+    }
+}
+impl VoiceFx {
+    /// Any effect on.
+    pub fn active(&self) -> bool {
+        self.ringmod_mix > 0.0
+            || self.decimator_mix > 0.0
+            || self.quantizer_mix > 0.0
+            || self.phaser_mix > 0.0
+    }
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+    pub fn validate(&self) -> Result<(), &'static str> {
+        let ok = |v: f64, lo: f64, hi: f64| v.is_finite() && (lo..=hi).contains(&v);
+        if ok(self.ringmod_rate, 20.0, 5000.0)
+            && ok(self.ringmod_mix, 0.0, 1.0)
+            && ok(self.decimator_rate, 0.0, 1.0)
+            && ok(self.decimator_mix, 0.0, 1.0)
+            && ok(self.quantizer_bits, 1.0, 16.0)
+            && ok(self.quantizer_mix, 0.0, 1.0)
+            && ok(self.phaser_freq, 0.05, 10.0)
+            && ok(self.phaser_mix, 0.0, 1.0)
+        {
+            Ok(())
+        } else {
+            Err("Invalid voice effect parameters")
+        }
+    }
+}
+
+/// Program-level built-in effect sends (DirectWave Program FX), 0..1 each:
+/// soft-clip drive, chorus, delay and reverb on the summed program output.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default)]
+pub struct ProgramFx {
+    pub drive: f64,
+    pub chorus: f64,
+    pub delay: f64,
+    pub reverb: f64,
+}
+impl ProgramFx {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+    pub fn active(&self) -> bool {
+        self.drive > 0.0 || self.chorus > 0.0 || self.delay > 0.0 || self.reverb > 0.0
+    }
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if [self.drive, self.chorus, self.delay, self.reverb]
+            .iter()
+            .all(|v| v.is_finite() && (0.0..=1.0).contains(v))
+        {
+            Ok(())
+        } else {
+            Err("Invalid program effect parameters")
+        }
+    }
 }
 impl Default for ZoneParams {
     fn default() -> Self {
@@ -381,6 +497,9 @@ impl Default for ZoneParams {
             reverse: false,
             one_shot: false,
             mute_group: 0,
+            trigger_group: 0,
+            trigger_mode: TriggerMode::Normal,
+            voice_fx: VoiceFx::default(),
         }
     }
 }
@@ -392,12 +511,7 @@ impl ZoneParams {
                 && f.emphasis.is_finite()
                 && (0.0..=1.0).contains(&f.emphasis)
         });
-        let lfos = self.lfo.iter().all(|l| {
-            [l.rate, l.attack, l.phase].iter().all(|v| v.is_finite())
-                && (0.01..=50.0).contains(&l.rate)
-                && (0.0..=10.0).contains(&l.attack)
-                && (0.0..=1.0).contains(&l.phase)
-        });
+        let lfos = self.lfo.iter().all(Lfo::valid);
         let matrix = self
             .matrix
             .iter()
@@ -408,8 +522,9 @@ impl ZoneParams {
             && self.env.iter().all(Adsr::valid)
             && self.key_track.is_finite()
             && (-1.0..=1.0).contains(&self.key_track)
+            && self.trigger_group <= 16
         {
-            Ok(())
+            self.voice_fx.validate()
         } else {
             Err("Invalid zone sound parameters")
         }
@@ -448,6 +563,16 @@ pub struct Program {
     pub glide_mode: GlideMode,
     /// PB Rng, cents. Stored for MIDI input.
     pub bend_range: f64,
+    /// Program LFO 1 and 2: shared by every zone, routed through each zone's
+    /// matrix as `ProgLfo1` / `ProgLfo2`.
+    #[serde(skip_serializing_if = "default_lfos")]
+    pub lfo: [Lfo; 2],
+    /// Built-in effect sends on the program's output.
+    #[serde(skip_serializing_if = "ProgramFx::is_default")]
+    pub fx: ProgramFx,
+}
+fn default_lfos(l: &[Lfo; 2]) -> bool {
+    *l == [Lfo::default(), Lfo::default()]
 }
 impl Default for Program {
     fn default() -> Self {
@@ -460,6 +585,8 @@ impl Default for Program {
             glide: 0.0,
             glide_mode: GlideMode::Fixed,
             bend_range: 200.0,
+            lfo: [Lfo::default(), Lfo::default()],
+            fx: ProgramFx::default(),
         }
     }
 }
@@ -474,7 +601,10 @@ impl Program {
         {
             return Err("Invalid program parameters");
         }
-        Ok(())
+        if !self.lfo.iter().all(Lfo::valid) {
+            return Err("Invalid program LFO parameters");
+        }
+        self.fx.validate()
     }
     pub fn gain(&self) -> f64 {
         10f64.powf(self.volume_db / 20.0)
@@ -841,6 +971,77 @@ mod tests {
             "straight segments are not written"
         );
     }
+    #[test]
+    fn directwave_p2_p3_fields_default_cleanly_and_round_trip() {
+        // A document from before trigger groups, voice FX, program LFOs and sends.
+        let old = serde_json::json!({
+            "name": "old", "program": {"volume_db": -3.0, "polyphony": 8},
+            "zones": [{"name": "z", "root": 60, "low": 0, "high": 127,
+                "low_velocity": 1, "high_velocity": 127, "sample_rate": 48000,
+                "frames": [[0.25, -0.5], [0.0, 1.0]], "offset": 0, "end": 2,
+                "loop_mode": "none", "loop_start": 0, "loop_end": 2,
+                "adsr": Adsr::default(), "gain": 1.0, "pan": 0.0,
+                "tune_cents": 0.0, "velocity_tracking": 1.0,
+                "params": {"mute_group": 2}}],
+        });
+        let p: SamplePreset = serde_json::from_value(old).unwrap();
+        let z = &p.zones[0].params;
+        assert_eq!((z.trigger_group, z.trigger_mode), (0, TriggerMode::Normal));
+        assert_eq!(z.voice_fx, VoiceFx::default());
+        assert!(!z.voice_fx.active());
+        assert_eq!(z.mute_group, 2, "existing fields still read");
+        assert_eq!(p.program.fx, ProgramFx::default());
+        assert!(!p.program.fx.active());
+        assert_eq!(p.program.lfo, [Lfo::default(), Lfo::default()]);
+        assert_eq!(p.program.polyphony, 8);
+        // Defaults are not written, so new projects open in older builds too.
+        let json = serde_json::to_string(&p).unwrap();
+        for key in ["trigger", "voice_fx", "\"fx\"", "ringmod"] {
+            assert!(!json.contains(key), "{key} should be omitted: {json}");
+        }
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(v["program"].get("lfo").is_none() && v["program"].get("fx").is_none());
+        // Non-defaults survive a round trip.
+        let mut q = p.clone();
+        q.zones[0].params.trigger_group = 3;
+        q.zones[0].params.trigger_mode = TriggerMode::AvoidPrevious;
+        q.zones[0].params.voice_fx.phaser_mix = 0.4;
+        q.zones[0].params.voice_fx.quantizer_bits = 5.0;
+        q.program.fx.reverb = 0.7;
+        q.program.lfo[1].rate = 2.5;
+        q.zones[0]
+            .params
+            .route(ModSource::ProgLfo2, ModTarget::Pan, 0.5);
+        let back: SamplePreset = serde_json::from_str(&serde_json::to_string(&q).unwrap()).unwrap();
+        assert_eq!(back.zones[0].params, q.zones[0].params);
+        assert_eq!(back.program, q.program);
+        assert_eq!(back.zones[0].params.matrix[0].source, ModSource::ProgLfo2);
+    }
+
+    #[test]
+    fn new_parameters_are_range_checked() {
+        let mut p = SamplePreset::test_preset("t");
+        p.validate().unwrap();
+        let bad: [&dyn Fn(&mut SamplePreset); 8] = [
+            &|p| p.zones[0].params.trigger_group = 17,
+            &|p| p.zones[0].params.voice_fx.ringmod_rate = 5.0,
+            &|p| p.zones[0].params.voice_fx.quantizer_bits = 0.0,
+            &|p| p.zones[0].params.voice_fx.phaser_mix = 1.5,
+            &|p| p.zones[0].params.voice_fx.decimator_rate = f64::NAN,
+            &|p| p.program.fx.delay = -0.1,
+            &|p| p.program.fx.drive = f64::INFINITY,
+            &|p| p.program.lfo[0].rate = 0.0,
+        ];
+        for (i, f) in bad.iter().enumerate() {
+            let mut q = p.clone();
+            f(&mut q);
+            assert!(q.validate().is_err(), "case {i} must be rejected");
+        }
+        p.zones[0].params.trigger_group = 16;
+        p.program.fx.reverb = 1.0;
+        p.validate().unwrap();
+    }
+
     #[test]
     fn legacy_single_zone_project_migrates() {
         let p:SamplePreset=serde_json::from_str(r#"{"name":"old","root":60,"low":48,"high":72,"sample_rate":48000,"samples":[0.0,0.5]}"#).unwrap();

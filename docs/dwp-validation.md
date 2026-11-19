@@ -1,8 +1,8 @@
 # DirectWave (`.dwp`) Import & Validation
 
-KeyFrameXL's built-in **Sampler** supports importing DirectWave `.dwp` presets by converting them through **ConvertWithMoss** (20.2.0+) into normalized SFZ + WAV data and embedding all audio and zone parameters directly inside the `.kfxl` project file.
+KeyFrameXL's built-in **Sampler** natively parses DirectWave `.dwp` (`DwPr`) binary presets in `src/dwp.rs` — reading v36/v37/v38 chunks, embedded FLAC and planar PCM monoliths, external WAV/FLAC/OGG samples, dual filters, `ENV 1/2`, `LFO 1/2`, Program LFOs, and the full 16-slot modulation matrix directly without any external tool. Non-`DwPr` files fall back to **ConvertWithMoss** (20.2.0+) via normalized SFZ.
 
-Once imported, a project is completely self-contained and portable — playback and reopening do not require ConvertWithMoss or the original `.dwp` file.
+Once imported, a project is completely self-contained and portable — playback and reopening embed all audio and zone parameters inside the `.kfxl` file.
 
 Reference: [ConvertWithMoss 20.2.0 release](https://github.com/git-moss/ConvertWithMoss/releases/tag/20.2.0)
 
