@@ -1,14 +1,14 @@
-<p align="left">
-  <img src="assets/icon.svg" width="72" height="72" alt="KeyFrameXL icon">
-</p>
-
-# KeyFrameXL
+<div align="center">
+  <img src="assets/icon.svg" width="84" height="84" alt="KeyFrameXL icon">
+  <h1>KeyFrameXL</h1>
+  <p>Native Linux pattern-based music sequencer and audio workstation written in Rust</p>
+</div>
 
 > [!IMPORTANT]
 > **This application is vibecoded.**
 > KeyFrameXL is an experimental native Linux DAW and pattern sequencer built through AI-assisted vibecoding. Expect rough edges, rapid iteration, and unconventional internals — use it for experimenting, making beats, and exploring ideas, not as a battle-tested studio replacement.
 
-**KeyFrameXL** is a native Linux pattern-based music sequencer and audio workstation written in Rust (`eframe`/`egui` + `egui_dock`), inspired by classic pattern-centric DAW workflows and tactile hardware sequencers.
+KeyFrameXL is built with `eframe`/`egui` + `egui_dock`, inspired by classic pattern-centric DAW workflows and tactile hardware sequencers.
 
 ![KeyFrameXL workspace](docs/screenshots/workspace.png)
 
@@ -46,11 +46,27 @@ The Mixer (`F9`) ships with **32 native DSP effects** with custom visual faces a
 
 ## Quick Start
 
-### Prerequisites (Linux)
-- **Rust** (Edition 2024 / recent stable toolchain)
-- **ALSA development libraries** (`libasound2-dev` on Debian/Ubuntu, `alsa-lib` on Arch, `alsa-lib-devel` on Fedora)
-- **C/C++ build toolchain & pkg-config** (for native crates such as `rsworld-sys`)
-- Working **PipeWire** or **ALSA** audio output
+### Platform Support
+
+> [!WARNING]
+> **Linux only — Windows and macOS are NOT supported.**
+> KeyFrameXL **will not work properly on Windows or macOS**, and support for those platforms is **not planned at this time**. The codebase relies directly on Linux-specific APIs and subsystems (`libc` / file-descriptor manipulation, ALSA/PipeWire audio, X11/XCB plugin window embedding, UNIX IPC/process supervision, and Wine/yabridge bridging).
+
+### System Requirements
+
+- **OS:** 64-bit Linux (`x86_64`)
+- **Display:** X11, or Wayland with **XWayland** (runs on X11/XWayland by default so embedded VST plugin GUIs work; pure Wayland is supported via `KFXL_X11=0` without X11 plugin embedding)
+- **Graphics:** OpenGL-capable GPU & drivers (for `eframe` / `glow`)
+- **Audio:** Working **PipeWire** (via PipeWire-ALSA) or **ALSA** output
+- **Display Resolution:** `1180×680` minimum (`1366×768` or higher recommended)
+- **Build & System Libraries:**
+  - **Rust** toolchain (Edition 2024 / recent stable `rustc` + `cargo`)
+  - **C/C++ compiler** (`gcc` or `clang`) and `pkg-config` (for native dependencies like `rsworld-sys`)
+  - **ALSA, X11/XCB & Fontconfig dev libraries:**
+    - Debian / Ubuntu: `sudo apt install build-essential pkg-config libasound2-dev libxcb1-dev libx11-dev fontconfig`
+    - Arch Linux: `sudo pacman -S base-devel pkgconf alsa-lib libxcb libx11 fontconfig`
+    - Fedora: `sudo dnf install gcc gcc-c++ pkgconf-pkg-config alsa-lib-devel libxcb-devel libX11-devel fontconfig`
+  - **File dialogs:** XDG desktop portal (`xdg-desktop-portal`) or GTK3/zenity/kdialog for `rfd` open/save dialogs
 
 ### Build & Run
 
