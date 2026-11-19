@@ -335,6 +335,16 @@ impl App {
             if item(ui, "MIDI file…", "Ctrl+Shift+M", true, "") {
                 self.export_midi();
             }
+            ui.separator();
+            if item(
+                ui,
+                "Project bundle (.zip, Collect all & save)…",
+                "",
+                true,
+                "",
+            ) {
+                self.export_project_bundle();
+            }
         });
         ui.menu_button(RichText::new("Import").font(t::sans(13.0)), |ui| {
             kit::menu_style(ui);
@@ -350,6 +360,10 @@ impl App {
             }
             if item(ui, "MIDI file…", "", true, "") {
                 self.import_midi_dialog();
+            }
+            ui.separator();
+            if item(ui, "Project bundle (.zip)…", "", true, "") {
+                self.import_project_bundle();
             }
         });
         ui.separator();
@@ -515,6 +529,19 @@ impl App {
         if check(ui, "Follow playhead", "", self.follow) {
             self.follow = !self.follow;
         }
+        ui.menu_button(RichText::new("Deck monitor").font(t::sans(13.0)), |ui| {
+            kit::menu_style(ui);
+            for mode in crate::settings::DeckMonitor::ALL {
+                if check(
+                    ui,
+                    mode.label(),
+                    "",
+                    self.settings.general.deck_monitor == mode,
+                ) {
+                    self.set_deck_monitor(mode);
+                }
+            }
+        });
         ui.separator();
         ui.menu_button(RichText::new("Workspace").font(t::sans(13.0)), |ui| {
             kit::menu_style(ui);
@@ -716,6 +743,10 @@ impl App {
                 self.say(Tone::Bad, format!("Could not open {}: {e}", page.display()));
             }
         }
+        if item(ui, "Check for updates…", "", true, "") {
+            self.check_for_updates(ui.ctx());
+        }
+        ui.separator();
         if item(ui, "About KeyFrameXL", "", true, "") {
             ui.ctx()
                 .data_mut(|d| d.insert_temp(egui::Id::new("about-open"), true));

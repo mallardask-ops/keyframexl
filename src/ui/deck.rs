@@ -415,6 +415,162 @@ impl App {
                 ui.data_mut(|d| d.insert_temp(id, (count, changed_at)));
             }
         }
+        self.deck_monitor(ui);
+    }
+
+    /// Recessed Master bus oscilloscope / spectrum display in the transport deck.
+    fn deck_monitor(&mut self, ui: &mut Ui) {
+        use crate::settings::DeckMonitor;
+        use std::sync::atomic::Ordering;
+
+        let mode = self.settings.general.deck_monitor;
+        let Some(a) = &self.audio else { return };
+        if mode == DeckMonitor::Off {
+            a.master_scope.track.store(usize::MAX, Ordering::Relaxed);
+            return;
+        }
+        a.master_scope.track.store(0, Ordering::Relaxed);
+
+        ui.add_space(6.0);
+        let size = vec2(110.0, 32.0);
+        let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+        let p = ui.painter();
+        p.rect_filled(rect, 4.0, t::SUNKEN);
+        p.rect_stroke(
+            rect,
+            4.0,
+            Stroke::new(1.0_f32, t::EDGE),
+            egui::StrokeKind::Inside,
+        );
+        let inner = rect.shrink2(vec2(3.0, 3.0));
+        // Subtle baseline / grid.
+        let mid_y = inner.center().y;
+        p.line_segment(
+            [pos2(inner.left(), mid_y), pos2(inner.right(), mid_y)],
+            Stroke::new(1.0_f32, t::LCD_OFF),
+        );
+
+        let mut buf = [0.0f32; 1024];
+        a.master_scope.read(&mut buf);
+        let peak = buf.iter().fold(0.0f32, |m, &x| m.max(x.abs()));
+        if self.is_playing() || peak > 1e-4 {
+            ui.ctx().request_repaint();
+        }
+
+        match mode {
+            DeckMonitor::Scope => {
+                // Rising zero-crossing trigger in the first half keeps periodic waves steady.
+                let mut start = 0usize;
+                if peak > 1e-3 {
+                    for i in 1..512 {
+                        if buf[i - 1] <= 0.0 && buf[i] > 0.0 {
+                            start = i;
+                            break;
+                        }
+                    }
+                }
+                let span = 512usize;
+                let step = 4usize;
+                let count = span / step;
+                let mut pts = Vec::with_capacity(count);
+                let half_h = inner.height() * 0.46;
+                for i in 0..count {
+                    let s = buf[start + i * step].clamp(-1.0, 1.0);
+                    let x = inner.left() + inner.width() * (i as f32 / (count - 1).max(1) as f32);
+                    let y = mid_y - s * half_h;
+                    pts.push(pos2(x, y));
+                }
+                let color = if peak > 0.99 { t::BAD } else { t::OK };
+                p.add(Shape::line(pts, Stroke::new(1.25_f32, color)));
+            }
+            DeckMonitor::Spectrum => {
+                let db = super::fx_views::spectrum_db(&buf);
+                let rate = a.running.rate.max(8_000) as f32;
+                let nyq = rate * 0.5;
+                let bins = db.len().max(1);
+                const BARS: usize = 22;
+                let f_lo = 40.0f32;
+                let f_hi = nyq.min(18_000.0).max(f_lo * 2.0);
+                let ratio = f_hi / f_lo;
+
+                let cache_id = ui.make_persistent_id("deck_spec_bars");
+                let mut held: [f32; BARS] = ui
+                    .data_mut(|d| d.get_temp(cache_id))
+                    .unwrap_or([0.0; BARS]);
+
+                let gap = 1.5;
+                let bw = ((inner.width() - gap * (BARS - 1) as f32) / BARS as f32).max(1.5);
+                for (i, slot) in held.iter_mut().enumerate() {
+                    let f0 = f_lo * ratio.powf(i as f32 / BARS as f32);
+                    let f1 = f_lo * ratio.powf((i + 1) as f32 / BARS as f32);
+                    let k0 = ((f0 / nyq) * bins as f32).floor() as usize;
+                    let k1 = (((f1 / nyq) * bins as f32).ceil() as usize)
+                        .max(k0 + 1)
+                        .min(bins);
+                    let mut m = -96.0f32;
+                    for &v in &db[k0.min(bins - 1)..k1] {
+                        m = m.max(v);
+                    }
+                    let norm = ((m + 60.0) / 60.0).clamp(0.0, 1.0);
+                    *slot = norm.max(*slot * 0.84);
+                    let h = (*slot * inner.height()).max(1.0);
+                    let x = inner.left() + i as f32 * (bw + gap);
+                    let bar = Rect::from_min_max(
+                        pos2(x, inner.bottom() - h),
+                        pos2(x + bw, inner.bottom()),
+                    );
+                    let col = if *slot > 0.92 {
+                        t::BAD
+                    } else if *slot > 0.78 {
+                        t::WAIT
+                    } else {
+                        t::ENC_BLUE
+                    };
+                    p.rect_filled(bar, 1.0, col);
+                }
+                ui.data_mut(|d| d.insert_temp(cache_id, held));
+            }
+            DeckMonitor::Off => {}
+        }
+
+        let tip = match mode {
+            DeckMonitor::Scope => "Master oscilloscope · click for spectrum, right-click for mode",
+            DeckMonitor::Spectrum => "Master spectrum · click for oscilloscope, right-click for mode",
+            DeckMonitor::Off => "",
+        };
+        let resp = kit::bar_hint(resp, tip);
+        if resp.clicked() {
+            let next = match mode {
+                DeckMonitor::Scope => DeckMonitor::Spectrum,
+                DeckMonitor::Spectrum => DeckMonitor::Scope,
+                DeckMonitor::Off => DeckMonitor::Scope,
+            };
+            self.set_deck_monitor(next);
+        }
+        resp.context_menu(|ui| {
+            kit::menu_style(ui);
+            for opt in DeckMonitor::ALL {
+                if ui
+                    .selectable_label(mode == opt, opt.label())
+                    .clicked()
+                {
+                    self.set_deck_monitor(opt);
+                    ui.close_menu();
+                }
+            }
+        });
+    }
+
+    pub(super) fn set_deck_monitor(&mut self, mode: crate::settings::DeckMonitor) {
+        self.settings.general.deck_monitor = mode;
+        if mode == crate::settings::DeckMonitor::Off
+            && let Some(a) = &self.audio
+        {
+            a.master_scope
+                .track
+                .store(usize::MAX, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.save_settings();
     }
 
     /// Metronome, count-in and wait-for-input (FL's three small keys by the

@@ -37,6 +37,14 @@ pub enum Event {
         cc: u8,
         value: u16,
     },
+    /// Incoming MIDI Clock Start (0xFA) in Slave mode.
+    ClockStart,
+    /// Incoming MIDI Clock Continue (0xFB) in Slave mode.
+    ClockContinue,
+    /// Incoming MIDI Clock Stop (0xFC) in Slave mode.
+    ClockStop,
+    /// Estimated tempo from incoming 24 PPQN MIDI Clock ticks (0xF8) in Slave mode.
+    ClockTempo(f64),
 }
 
 /// One message from a port.
@@ -61,12 +69,64 @@ struct Keys {
     pedal: bool,
 }
 
+/// Estimates tempo from incoming 24 PPQN MIDI Clock ticks (`0xF8`).
+#[derive(Default)]
+struct ClockTracker {
+    /// Rolling window of recent tick timestamps in microseconds (up to 25 = 1 beat).
+    stamps: std::collections::VecDeque<u64>,
+    ticks_since_emit: u8,
+    last_bpm: Option<f64>,
+}
+
+impl ClockTracker {
+    const WINDOW: usize = 25;
+    /// Gaps longer than 500 ms (~5 BPM) mean the external clock stopped or restarted.
+    const MAX_GAP_US: u64 = 500_000;
+
+    fn reset(&mut self) {
+        self.stamps.clear();
+        self.ticks_since_emit = 0;
+        self.last_bpm = None;
+    }
+
+    fn tick(&mut self, stamp_us: u64) -> Option<f64> {
+        if let Some(&prev) = self.stamps.back()
+            && (stamp_us <= prev || stamp_us - prev > Self::MAX_GAP_US)
+        {
+            self.stamps.clear();
+            self.ticks_since_emit = 0;
+        }
+        self.stamps.push_back(stamp_us);
+        while self.stamps.len() > Self::WINDOW {
+            self.stamps.pop_front();
+        }
+        self.ticks_since_emit = self.ticks_since_emit.saturating_add(1);
+        if self.stamps.len() < 7 || self.ticks_since_emit < 6 {
+            return None;
+        }
+        self.ticks_since_emit = 0;
+        let span_us = self.stamps.back()? - self.stamps.front()?;
+        if span_us == 0 {
+            return None;
+        }
+        let intervals = (self.stamps.len() - 1) as f64;
+        let raw_bpm = 60_000_000.0 * intervals / (span_us as f64 * 24.0);
+        let bpm = (raw_bpm.clamp(20.0, 300.0) * 10.0).round() / 10.0;
+        if self.last_bpm.is_some_and(|prev| (prev - bpm).abs() < 0.05) {
+            return None;
+        }
+        self.last_bpm = Some(bpm);
+        Some(bpm)
+    }
+}
+
 pub struct Shared {
     /// Channel (instrument id) that incoming notes play.
     pub target: AtomicU64,
     pub prefs: Mutex<MidiSettings>,
     pub route: Mutex<Route>,
     keys: Mutex<Keys>,
+    clock: Mutex<ClockTracker>,
 }
 
 impl Shared {
@@ -89,11 +149,35 @@ impl Shared {
 
     /// Turn raw bytes into live notes and a UI event.
     pub fn handle(&self, bytes: &[u8]) -> Option<Event> {
+        self.handle_at(0, bytes)
+    }
+
+    /// Turn raw bytes with a microsecond timestamp (from midir) into live notes / clock events.
+    pub fn handle_at(&self, stamp_us: u64, bytes: &[u8]) -> Option<Event> {
         let (&status, rest) = bytes.split_first()?;
-        if status < 0x80 || status >= 0xF0 {
+        if status < 0x80 {
             return None;
         }
         let prefs = self.prefs.lock().ok()?.clone();
+        if status >= 0xF0 {
+            if prefs.clock != crate::settings::MidiClockMode::Slave {
+                return None;
+            }
+            let mut clk = self.clock.lock().ok()?;
+            return match status {
+                0xF8 => clk.tick(stamp_us).map(Event::ClockTempo),
+                0xFA => {
+                    clk.reset();
+                    Some(Event::ClockStart)
+                }
+                0xFB => Some(Event::ClockContinue),
+                0xFC => {
+                    clk.reset();
+                    Some(Event::ClockStop)
+                }
+                _ => None,
+            };
+        }
         let channel = (status & 0x0F) + 1;
         if prefs.channel != 0 && prefs.channel != channel {
             return None;
@@ -293,6 +377,7 @@ impl MidiIn {
                 sounding: [None; 128],
                 pedal: false,
             }),
+            clock: Mutex::new(ClockTracker::default()),
         });
         Self {
             shared,
@@ -364,7 +449,8 @@ impl MidiIn {
 
     fn connect(&self, name: &str) -> Result<midir::MidiInputConnection<()>, String> {
         let mut input = midir::MidiInput::new("KeyFrameXL").map_err(|e| e.to_string())?;
-        input.ignore(midir::Ignore::All);
+        // Keep Time (0xF8/0xFA/0xFB/0xFC) so MIDI Clock Slave works when enabled.
+        input.ignore(midir::Ignore::Sysex | midir::Ignore::ActiveSense);
         let port = input
             .ports()
             .into_iter()
@@ -375,8 +461,8 @@ impl MidiIn {
             .connect(
                 &port,
                 "KeyFrameXL input",
-                move |_, bytes, _| {
-                    if let Some(event) = shared.handle(bytes) {
+                move |stamp, bytes, _| {
+                    if let Some(event) = shared.handle_at(stamp, bytes) {
                         let _ = tx.send(Incoming {
                             port: port_name.clone(),
                             event,
@@ -558,5 +644,37 @@ mod tests {
             "bend goes to the channel; all notes off"
         );
         assert_eq!(s.handle(&[0xF8]), None, "clock is ignored");
+    }
+
+    #[test]
+    fn clock_slave_tracks_tempo_and_transport() {
+        let (s, _) = shared(MidiSettings {
+            clock: crate::settings::MidiClockMode::Slave,
+            ..Default::default()
+        });
+        assert_eq!(s.handle_at(1_000, &[0xFA]), Some(Event::ClockStart));
+        assert_eq!(s.handle_at(2_000, &[0xFB]), Some(Event::ClockContinue));
+        assert_eq!(s.handle_at(3_000, &[0xFC]), Some(Event::ClockStop));
+
+        // 120 BPM at 24 PPQN = 60_000_000 / (120 * 24) = 20_833.333... us per tick.
+        let mut last = None;
+        for i in 0..25u64 {
+            let stamp = (i as f64 * (60_000_000.0 / (120.0 * 24.0))).round() as u64;
+            if let Some(ev) = s.handle_at(stamp, &[0xF8]) {
+                last = Some(ev);
+            }
+        }
+        assert_eq!(last, Some(Event::ClockTempo(120.0)));
+
+        // Tempo jump to 140 BPM.
+        let base = 2_000_000u64; // >500ms gap resets window cleanly
+        let mut last = None;
+        for i in 0..25u64 {
+            let stamp = base + (i as f64 * (60_000_000.0 / (140.0 * 24.0))).round() as u64;
+            if let Some(ev) = s.handle_at(stamp, &[0xF8]) {
+                last = Some(ev);
+            }
+        }
+        assert_eq!(last, Some(Event::ClockTempo(140.0)));
     }
 }

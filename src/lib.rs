@@ -195,6 +195,7 @@ mod project_tests {
 }
 
 pub mod automation;
+pub mod bundle;
 pub mod engine;
 pub mod flp;
 pub mod forge;

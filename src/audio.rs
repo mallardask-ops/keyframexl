@@ -304,6 +304,8 @@ pub struct Audio {
     pub reduction: Arc<Vec<AtomicU32>>,
     /// One track's last frames, for the EQ's spectrum.
     pub scope: Arc<keyframexl::engine::Scope>,
+    /// Master bus's last frames, for the Deck oscilloscope / spectrum monitor.
+    pub master_scope: Arc<keyframexl::engine::Scope>,
     /// Browser preview: set to play, clear to stop. `preview_done` turns true at its end.
     pub preview: Arc<ArcSwapOption<Preview>>,
     pub preview_done: Arc<AtomicBool>,
@@ -497,6 +499,7 @@ impl Audio {
         // for blocks up to 8192 frames and mixers up to 128 tracks.
         engine.reserve(128, 8192);
         let scope = engine.scope();
+        let master_scope = engine.master_scope();
         let failed = Arc::new(AtomicBool::new(false));
         let fail = failed.clone();
         let stream = device
@@ -676,6 +679,7 @@ impl Audio {
             activity,
             reduction,
             scope,
+            master_scope,
             preview,
             preview_done,
             failed,

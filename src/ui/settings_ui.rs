@@ -174,24 +174,38 @@ impl App {
             .unwrap_or(self.instrument)
     }
 
-    /// Once per frame: follow the selected channel, light keys, record notes.
+    /// Once per frame: follow the selected channel, light keys, record notes,
+    /// and keep MIDI output / Clock Master synced with transport.
     pub(crate) fn midi_frame(&mut self) {
         let target = self.midi_target();
-        let Some(m) = &mut self.midi_in else { return };
-        m.shared.target.store(target, Ordering::Relaxed);
-        let events = m.poll(&self.settings.midi);
-        if events.iter().any(|e| matches!(e.event, Event::On { .. })) {
-            self.input_arrived();
+        if let Some(m) = &mut self.midi_in {
+            m.shared.target.store(target, Ordering::Relaxed);
+            let events = m.poll(&self.settings.midi);
+            if events.iter().any(|e| matches!(e.event, Event::On { .. })) {
+                self.input_arrived();
+            }
+            let recording = self.rec.on && self.is_playing();
+            if !recording && !self.midi_rec.is_empty() {
+                self.midi_rec.clear();
+            }
+            if !recording {
+                self.midi_take = false;
+            }
+            for inc in events {
+                self.on_midi(target, inc.event, recording);
+            }
         }
-        let recording = self.rec.on && self.is_playing();
-        if !recording && !self.midi_rec.is_empty() {
-            self.midi_rec.clear();
-        }
-        if !recording {
-            self.midi_take = false;
-        }
-        for inc in events {
-            self.on_midi(target, inc.event, recording);
+        let playing = self.is_playing();
+        let at_start = self
+            .audio
+            .as_ref()
+            .is_some_and(|a| a.position.load(Ordering::Relaxed) == 0);
+        let master = self.settings.midi.clock == crate::settings::MidiClockMode::Master;
+        let tempo = self.song.tempo;
+        if let Some(mo) = &mut self.midi_out {
+            let prefs = &self.settings.midi;
+            mo.poll_refresh(|p| prefs.is_out_on(p));
+            mo.sync_transport(master, playing, at_start, tempo);
         }
     }
 
@@ -228,6 +242,30 @@ impl App {
                     self.multilink_cc(channel, cc);
                 } else {
                     self.apply_midi_cc(channel, cc, v);
+                }
+            }
+            Event::ClockStart => {
+                let (start, _) = self.loop_bounds();
+                if let Some(a) = &self.audio {
+                    a.count_in.store(0, Ordering::Relaxed);
+                    a.position.store(start, Ordering::Relaxed);
+                    a.playing.store(true, Ordering::Relaxed);
+                }
+            }
+            Event::ClockContinue => {
+                if let Some(a) = &self.audio {
+                    a.playing.store(true, Ordering::Relaxed);
+                }
+            }
+            Event::ClockStop => {
+                if let Some(a) = &self.audio {
+                    a.playing.store(false, Ordering::Relaxed);
+                }
+            }
+            Event::ClockTempo(bpm) => {
+                if (self.song.tempo - bpm).abs() >= 0.05 {
+                    self.song.tempo = bpm;
+                    self.publish();
                 }
             }
         }
@@ -557,13 +595,25 @@ impl App {
                             })
                             .show(ui, |ui| {
                                 ui.spacing_mut().item_spacing = vec2(8.0, 6.0);
+                                let mut check_updates_now = false;
                                 match page {
                                     Page::Audio => {
                                         restart = self.audio_page(ui, &mut s, &outputs, &inputs)
                                     }
                                     Page::Midi => (panic, rescan) = self.midi_page(ui, &mut s),
                                     Page::Plugins => self.plugins_page(ui, &mut s),
-                                    Page::General => general_page(ui, &mut s),
+                                    Page::General => {
+                                        check_updates_now = general_page(
+                                            ui,
+                                            &mut s,
+                                            self.updater.is_checking(),
+                                        );
+                                    }
+                                }
+                                if check_updates_now {
+                                    ui.ctx().data_mut(|d| {
+                                        d.insert_temp(egui::Id::new("settings-check-updates"), true)
+                                    });
                                 }
                             });
                     });
@@ -614,14 +664,29 @@ impl App {
         }
         if s != self.settings {
             let audio_changed = s.audio != self.settings.audio;
+            let midi_out_changed = s.midi.out_enabled != self.settings.midi.out_enabled
+                || s.midi.out_disabled != self.settings.midi.out_disabled;
             self.settings = s;
             if let Some(m) = &self.midi_in {
                 m.set_prefs(&self.settings.midi);
+            }
+            if midi_out_changed
+                && let Some(mo) = &mut self.midi_out
+            {
+                let prefs = &self.settings.midi;
+                mo.refresh(|p| prefs.is_out_on(p));
             }
             self.save_settings();
             if audio_changed {
                 restart = true;
             }
+        }
+        if ui
+            .ctx()
+            .data_mut(|d| d.remove_temp::<bool>(egui::Id::new("settings-check-updates")))
+            .unwrap_or(false)
+        {
+            self.check_for_updates(ui.ctx());
         }
         if restart {
             self.restart_audio();
@@ -637,6 +702,11 @@ impl App {
                 m.retry();
                 m.refresh(&self.settings.midi);
             }
+            if let Some(mo) = &mut self.midi_out {
+                mo.retry();
+                let prefs = &self.settings.midi;
+                mo.refresh(|p| prefs.is_out_on(p));
+            }
         }
     }
 
@@ -644,6 +714,9 @@ impl App {
     pub(crate) fn panic(&mut self) {
         if let Some(m) = &self.midi_in {
             m.shared.panic();
+        }
+        if let Some(mo) = &self.midi_out {
+            mo.panic();
         }
         self.midi_keys = [false; 128];
         self.release_note();
@@ -868,6 +941,74 @@ impl App {
             });
             ui.label(RichText::new("Keys play the selected channel: the focused piano roll, else the rack selection.").font(t::sans(12.0)).color(t::FAINT));
         });
+        card(ui, "output devices & clock sync", |ui| {
+            let out_ports = self
+                .midi_out
+                .as_ref()
+                .map(|m| m.ports.clone())
+                .unwrap_or_default();
+            if self.midi_out.is_none() {
+                ui.label(
+                    RichText::new("MIDI output is off in this run.")
+                        .font(t::sans(13.0))
+                        .color(t::FAINT),
+                );
+            } else if out_ports.is_empty() {
+                ui.label(
+                    RichText::new("No MIDI outputs found. Connect hardware gear or a virtual port, then Rescan.")
+                        .font(t::sans(13.0))
+                        .color(t::FAINT),
+                );
+            }
+            for p in &out_ports {
+                ui.horizontal(|ui| {
+                    let mut on = s.midi.is_out_on(&p.name);
+                    if kit_switch(ui, &mut on) {
+                        s.midi.set_out_on(&p.name, on);
+                    }
+                    ui.label(RichText::new(&p.name).font(t::sans(13.0)).color(t::TEXT));
+                    let (text, color) = match (&p.error, p.connected) {
+                        (Some(e), _) => (e.clone(), t::BAD),
+                        (None, true) => ("connected".into(), t::OK),
+                        (None, false) => ("off".into(), t::FAINT),
+                    };
+                    ui.label(RichText::new(text).font(t::sans(12.0)).color(color));
+                });
+            }
+            row(
+                ui,
+                "MIDI Clock",
+                Some("Master sends 24 PPQN clock + Start/Stop to enabled outputs. Slave follows incoming clock."),
+                |ui| {
+                    use crate::settings::MidiClockMode;
+                    let labels: Vec<&str> = MidiClockMode::ALL.iter().map(|m| m.label()).collect();
+                    let cur = MidiClockMode::ALL
+                        .iter()
+                        .position(|m| *m == s.midi.clock)
+                        .unwrap_or(0);
+                    let (pick, _) = kit::chips(ui, "midi-clock-mode", &labels, cur, None);
+                    if let Some(i) = pick {
+                        s.midi.clock = MidiClockMode::ALL[i];
+                    }
+                },
+            );
+            if s.midi.clock == crate::settings::MidiClockMode::Master
+                && let Some(mo) = &self.midi_out
+            {
+                let open = mo.connected_count();
+                let ticks = mo.ticks();
+                let info = if open == 0 {
+                    "Enable at least one output port above to send clock.".to_string()
+                } else {
+                    format!("Sending to {open} port(s) · {ticks} pulses sent")
+                };
+                ui.label(
+                    RichText::new(info)
+                        .font(t::sans(12.0))
+                        .color(if open == 0 { t::WAIT } else { t::FAINT }),
+                );
+            }
+        });
         card(ui, "notes in", |ui| {
             row(ui, "Channel", None, |ui| {
                 let mut names: Vec<String> = vec!["Omni".into()];
@@ -982,7 +1123,8 @@ impl App {
     }
 }
 
-fn general_page(ui: &mut egui::Ui, s: &mut Settings) {
+fn general_page(ui: &mut egui::Ui, s: &mut Settings, checking_updates: bool) -> bool {
+    let mut check_now = false;
     card(ui, "interface", |ui| {
         row(
             ui,
@@ -1009,6 +1151,23 @@ fn general_page(ui: &mut egui::Ui, s: &mut Settings) {
                         .font(t::sans(12.0))
                         .color(t::FAINT),
                 );
+            },
+        );
+        row(
+            ui,
+            "Deck monitor",
+            Some("Master bus oscilloscope or spectrum in the top transport bar."),
+            |ui| {
+                use crate::settings::DeckMonitor;
+                let labels: Vec<&str> = DeckMonitor::ALL.iter().map(|m| m.label()).collect();
+                let cur = DeckMonitor::ALL
+                    .iter()
+                    .position(|m| *m == s.general.deck_monitor)
+                    .unwrap_or(1);
+                let (pick, _) = kit::chips(ui, "gen-deck-monitor", &labels, cur, None);
+                if let Some(i) = pick {
+                    s.general.deck_monitor = DeckMonitor::ALL[i];
+                }
             },
         );
         row(
@@ -1062,6 +1221,50 @@ fn general_page(ui: &mut egui::Ui, s: &mut Settings) {
             },
         );
     });
+    card(ui, "updates", |ui| {
+        row(
+            ui,
+            "Check automatically",
+            Some("Checks GitHub Releases at most once per day on startup. Set KFXL_NO_UPDATE_CHECK=1 to disable."),
+            |ui| {
+                kit_switch(ui, &mut s.general.check_updates);
+            },
+        );
+        row(ui, "Current version", None, |ui| {
+            ui.label(
+                RichText::new(format!("v{}", crate::updater::CURRENT_VERSION))
+                    .font(t::mono(12.5))
+                    .color(t::TEXT),
+            );
+            if kit::tool_button(
+                ui,
+                if checking_updates {
+                    "Checking…"
+                } else {
+                    "Check now"
+                },
+                kit::Kind::Ghost,
+                !checking_updates,
+            )
+            .clicked()
+            {
+                check_now = true;
+            }
+            if let Some(ver) = s.general.skipped_version.clone() {
+                if kit::tool_button(
+                    ui,
+                    &format!("Clear skipped (v{ver})"),
+                    kit::Kind::Ghost,
+                    true,
+                )
+                .clicked()
+                {
+                    s.general.skipped_version = None;
+                }
+            }
+        });
+    });
+    check_now
 }
 
 /// Width of the section list on the left.

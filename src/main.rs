@@ -5,10 +5,12 @@ mod fl_native;
 mod flp_freeze;
 mod import;
 mod midi_in;
+mod midi_out;
 mod plugins;
 mod settings;
 mod theme;
 mod ui;
+mod updater;
 mod vst2;
 
 use std::{

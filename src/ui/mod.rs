@@ -29,6 +29,7 @@ mod script;
 mod settings_ui;
 mod synth;
 mod tempo_lane;
+mod updater_ui;
 mod vocal;
 mod workspace;
 
@@ -338,6 +339,8 @@ pub struct App {
     pub(crate) settings_ui: Option<settings_ui::SettingsUi>,
     /// MIDI keyboards; keys held on them (lit in the piano roll); notes being recorded.
     pub(crate) midi_in: Option<crate::midi_in::MidiIn>,
+    /// MIDI hardware output ports & 24 PPQN Clock Master.
+    pub(crate) midi_out: Option<crate::midi_out::MidiOut>,
     pub(crate) midi_keys: [bool; 128],
     pub(crate) midi_rec: settings_ui::Recording,
     pub(crate) midi_take: bool,
@@ -345,6 +348,8 @@ pub struct App {
     pub(crate) midi_learn: Option<keyframexl::automation::Target>,
     /// Last controller move, to group one gesture into one undo step.
     pub(crate) midi_cc_last: Option<std::time::Instant>,
+    /// Non-blocking GitHub Releases update checker.
+    pub(crate) updater: crate::updater::UpdateChecker,
     /// Hosted plugins (VST3).
     pub(crate) plugins: plugins_ui::PluginState,
     /// Built-in effects open in their own windows: (mixer track, slot).
@@ -821,6 +826,7 @@ impl App {
             app.persist = true;
             app.recent = project::load_recent();
             app.midi_in = Some(crate::midi_in::MidiIn::new(app.settings.midi.clone()));
+            app.midi_out = Some(crate::midi_out::MidiOut::new());
             app.route_midi(Some(&cc.egui_ctx));
             app.start_plugins(Some(&cc.egui_ctx));
             // Look for FL Studio packs and preset folders without blocking the window.
@@ -1128,11 +1134,13 @@ impl App {
             settings: Default::default(),
             settings_ui: None,
             midi_in: None,
+            midi_out: None,
             midi_keys: [false; 128],
             midi_rec: Default::default(),
             midi_take: false,
             midi_learn: None,
             midi_cc_last: None,
+            updater: Default::default(),
             plugins: Default::default(),
             fx_windows: Vec::new(),
             waiting_input: false,
@@ -1669,9 +1677,95 @@ impl App {
         self.load_default_kit();
     }
 
+    pub(crate) fn export_project_bundle(&mut self) {
+        let stem = self.project_name();
+        let default_name = format!("{stem}.zip");
+        let Some(dest) = rfd::FileDialog::new()
+            .add_filter("KeyFrameXL Project Bundle", &["zip"])
+            .set_file_name(default_name)
+            .save_file()
+        else {
+            return;
+        };
+        self.collect_plugin_states();
+        let opts = keyframexl::bundle::BundleOptions::default();
+        match keyframexl::bundle::export_bundle(&self.song, &stem, &dest, &opts) {
+            Ok(report) => {
+                let mut parts = vec![format!("Bundled {}", dest.display())];
+                if report.bundled_irs > 0 {
+                    parts.push(format!("{} IR(s)", report.bundled_irs));
+                }
+                if report.plugins > 0 {
+                    parts.push(format!("{} plugin ref(s)", report.plugins));
+                }
+                if !report.missing_irs.is_empty() {
+                    parts.push(format!("{} missing IR(s)", report.missing_irs.len()));
+                }
+                let tone = if report.missing_irs.is_empty() {
+                    Tone::Done
+                } else {
+                    Tone::Wait
+                };
+                self.say(tone, parts.join(" · "));
+            }
+            Err(e) => self.say(Tone::Bad, format!("Bundle export failed: {e}")),
+        }
+    }
+
+    pub(crate) fn import_project_bundle(&mut self) {
+        let Some(zip_path) = rfd::FileDialog::new()
+            .add_filter("KeyFrameXL Project Bundle", &["zip"])
+            .pick_file()
+        else {
+            return;
+        };
+        self.import_bundle_path(&zip_path);
+    }
+
+    fn import_bundle_path(&mut self, zip_path: &std::path::Path) {
+        let stem = zip_path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "project_bundle".into());
+        let parent = zip_path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let extract_dir = parent.join(&stem);
+        match keyframexl::bundle::import_bundle(zip_path, &extract_dir) {
+            Ok(imported) => {
+                self.flp_freeze = None;
+                self.close_riff();
+                self.unload_all_plugins();
+                self.checkpoint();
+                self.selected = imported.song.patterns[0].id;
+                self.song = imported.song;
+                self.clip = None;
+                self.path = Some(imported.project_path.clone());
+                self.saved_edits = self.edits;
+                self.publish();
+                self.remember(&imported.project_path);
+                let extra = if imported.restored_irs > 0 {
+                    format!(" ({} IR(s) restored)", imported.restored_irs)
+                } else {
+                    String::new()
+                };
+                self.say(
+                    Tone::Done,
+                    format!("Unpacked bundle to {}{extra}", extract_dir.display()),
+                );
+            }
+            Err(e) => self.say(Tone::Bad, format!("Cannot open bundle: {e}")),
+        }
+    }
+
     pub(crate) fn open(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter("KeyFrameXL or FL Studio project", &["kfxl", "flp"])
+            .add_filter(
+                "KeyFrameXL, Bundle, or FL Studio project",
+                &["kfxl", "zip", "flp"],
+            )
             .pick_file()
         {
             self.open_path(&path);
@@ -1684,6 +1778,12 @@ impl App {
             .is_some_and(|e| e.eq_ignore_ascii_case("flp"))
         {
             return self.import_flp(path);
+        }
+        if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("zip"))
+        {
+            return self.import_bundle_path(path);
         }
         match keyframexl::project_io::open(path) {
             Ok(s) => {
@@ -2493,8 +2593,8 @@ impl App {
             p.circle_filled(Pos2::new(x + 4.0, y), 4.0, ink.gamma_multiply(pulse));
             x += 16.0;
         }
-        // Only what needs attention on the right: no audio output.
-        let right_edge = match &self.audio {
+        // Right-aligned alerts: no audio output, and a quiet update pill if available.
+        let mut right_edge = match &self.audio {
             Some(_) => rect.right() - PAGE,
             None => kit::caps(
                 p,
@@ -2504,8 +2604,50 @@ impl App {
                 12.0,
                 t::BAD,
             )
-            .left(),
+            .left()
+                - 14.0,
         };
+        if let Some(info) = self
+            .updater
+            .available(self.settings.general.skipped_version.as_deref())
+            .cloned()
+        {
+            let label = format!("update v{}", info.version);
+            let galley = kit::caps_galley(p, &label, 11.0, t::WAIT);
+            let pill_w = galley.size().x + 16.0;
+            let pill_h = 18.0;
+            let pill = egui::Rect::from_min_max(
+                Pos2::new(right_edge - pill_w, y - pill_h * 0.5),
+                Pos2::new(right_edge, y + pill_h * 0.5),
+            );
+            let resp = ui
+                .interact(pill, ui.id().with("update_pill"), Sense::click())
+                .on_hover_text(format!(
+                    "KeyFrameXL v{} is available — click to view details",
+                    info.version
+                ));
+            let fill = if resp.hovered() {
+                t::CTL_TOP
+            } else {
+                t::WAIT_SOFT
+            };
+            p.rect_filled(pill, 9.0, fill);
+            p.rect_stroke(
+                pill,
+                9.0,
+                Stroke::new(1.0_f32, t::WAIT),
+                egui::StrokeKind::Inside,
+            );
+            p.galley(
+                Pos2::new(pill.left() + 8.0, y - galley.size().y * 0.5),
+                galley,
+                t::WAIT,
+            );
+            if resp.clicked() {
+                self.updater.dialog_open = true;
+            }
+            right_edge = pill.left() - 12.0;
+        }
         // A long message stops short of it; hover shows all of it.
         let room = (right_edge - 24.0 - x).max(0.0);
         let shown = kit::elide(p, text, t::sans(13.0), room);
@@ -2957,6 +3099,7 @@ impl eframe::App for App {
         self.quantize_window(ctx);
         self.lyrics_window(ctx);
         self.project_frame(ctx);
+        self.updater_frame(ctx);
         // egui's own Ctrl+= / Ctrl+− have no limits; keep the layout usable.
         use crate::settings::{UI_SCALE_MAX, UI_SCALE_MIN};
         let z = ctx.zoom_factor();

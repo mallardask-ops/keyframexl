@@ -988,6 +988,8 @@ pub struct Engine {
     taps: Vec<Tap>,
     /// The track an open EQ is analysing.
     scope: std::sync::Arc<Scope>,
+    /// Dedicated post-fader Master scope for the transport deck oscilloscope / spectrum.
+    master_scope: std::sync::Arc<Scope>,
     /// Hosted plugins (instruments and effects), installed from the UI thread.
     plugins: Vec<crate::plugin::Instance>,
     /// Block offset and engine frame of the hit being triggered (plugin events).
@@ -1052,6 +1054,7 @@ impl Engine {
                 .collect(),
             taps: Vec::with_capacity(MAX_TAPS),
             scope: Default::default(),
+            master_scope: Default::default(),
             plugins: Vec::with_capacity(MAX_PLUGINS),
             cursor: 0,
             hit_clock: 0,
@@ -1182,6 +1185,11 @@ impl Engine {
     /// The analyser the UI reads (see [`Scope`]).
     pub fn scope(&self) -> std::sync::Arc<Scope> {
         self.scope.clone()
+    }
+
+    /// Dedicated post-fader Master analyser for the Deck monitor.
+    pub fn master_scope(&self) -> std::sync::Arc<Scope> {
+        self.master_scope.clone()
     }
 
     /// Start recording a mixer track. Gives the tap back when all are in use.
@@ -2078,6 +2086,15 @@ impl Engine {
                     at = (at + 1) % SCOPE_LEN;
                 }
                 self.scope.pos.store(at, Relaxed);
+            }
+            if t == 0 && self.master_scope.track.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+                use std::sync::atomic::Ordering::Relaxed;
+                let mut at = self.master_scope.pos.load(Relaxed);
+                for f in bus.chunks_exact(2) {
+                    self.master_scope.ring[at].store(((f[0] + f[1]) * 0.5).to_bits(), Relaxed);
+                    at = (at + 1) % SCOPE_LEN;
+                }
+                self.master_scope.pos.store(at, Relaxed);
             }
             for tap in self.taps.iter_mut().filter(|tap| tap.track == t) {
                 for f in bus.chunks_exact(2) {

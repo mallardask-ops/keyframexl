@@ -31,10 +31,11 @@ This document tracks what has already been built in KeyFrameXL and what remains 
 - **VST3 & VST2 Plugin Bridge (`src/bridge/`, `src/plugins.rs`, `src/vst2.rs`)** — out-of-process plugin hosting over shared memory so plugin crashes do not take down the DAW, embedded X11 editor windows, background plugin scanning, and Wine/yabridge support for Windows plugins.
 
 ### MIDI, Interop, Recording & Export
-- **MIDI & Recording (`src/midi_in.rs`, `src/midi.rs`, `src/ui/record.rs`)** — live ALSA sequencer MIDI input, MIDI Learn (`Link to controller`), **Multilink to controllers** (`Ctrl+J`), typing-keyboard-to-piano, MIDI file import/export, and in-app audio recording.
+- **MIDI & Recording (`src/midi_in.rs`, `src/midi_out.rs`, `src/midi.rs`, `src/ui/record.rs`)** — live ALSA sequencer MIDI input & hardware output, 24 PPQN **MIDI Clock Master & Slave** synchronization (`0xF8`/`0xFA`/`0xFB`/`0xFC`), MIDI Learn (`Link to controller`), **Multilink to controllers** (`Ctrl+J`), typing-keyboard-to-piano, MIDI file import/export, and in-app audio recording.
 - **Unified Parameter Automation (`src/automation.rs`, `src/ui/automation.rs`, `src/engine.rs`)** — `TOOLS → Last tweaked` actions (*Create automation clip*, *Link to controller…*, *Copy/Paste value*, *Reset to default*), live automation recording during `Record + Play` with Ramer–Douglas–Peucker point thinning and single-step undo, and click-free 5 ms per-sample/per-block parameter smoothing in the audio engine.
 - **FL Studio Interop (`src/flp.rs`, `src/flp_fx.rs`, `src/fl_link.rs`, `src/flp_freeze.rs`)** — `.flp` project importer plus experimental FL Link and channel freezing helpers.
-- **Project I/O & Audio Export (`src/project_io.rs`, `src/render.rs`, `src/ui/export.rs`)** — self-contained `.kfxl` projects (Save, Save As, Recent files, unsaved-change guard, autosave recovery) and multi-format rendering to **WAV** (16/24-bit, 32-bit float), **FLAC** (16/24-bit), and **MP3** (128/192/320 kbps).
+- **Project I/O, Packaging & Audio Export (`src/project_io.rs`, `src/bundle.rs`, `src/render.rs`, `src/ui/export.rs`)** — self-contained `.kfxl` projects (Save, Save As, Recent files, unsaved-change guard, autosave recovery), **Project bundle (`.zip`, "Collect all & save")** export & import with external IR packaging, plugin/voicebank inventory (`manifest.json` + `README.txt`), and multi-format rendering to **WAV** (16/24-bit, 32-bit float), **FLAC** (16/24-bit), and **MP3** (128/192/320 kbps).
+- **Deck Monitor & Update Checker (`src/ui/deck.rs`, `src/updater.rs`, `src/ui/updater_ui.rs`)** — optional recessed Master **Oscilloscope / Spectrum** monitor in the top transport deck (`VIEW → Deck monitor`), and a non-intrusive, zero-telemetry GitHub Releases/Tags **Update Checker** (`HELP → Check for updates…`, daily rate-limited background check with `KFXL_NO_UPDATE_CHECK=1` opt-out and skip-version support).
 
 ---
 
@@ -51,11 +52,9 @@ This document tracks what has already been built in KeyFrameXL and what remains 
 ### Plugins
 - **CLAP plugin hosting** — native CLAP host (`clack-host`) alongside existing VST3/VST2 support.
 
-### MIDI & Workflow
-- **MIDI Out & Clock** — hardware MIDI output and MIDI clock master/slave synchronization.
+### Workflow & UI Polish
 - **Vocal engine upgrades** — dynamic mid-phrase tempo-map stretching, clip-offset vocal slicing, and per-note pitch-bend curves.
-- **Project packaging** — "Collect all & save" bundle export including external samples and plugin states.
-- **UI polish** — optional Light theme, toolbar/deck customization, optional oscilloscope/spectrum monitor in the deck, and potential Ukrainian UI localization.
+- **UI polish** — optional Light theme, toolbar/deck customization, and potential Ukrainian UI localization.
 
 ---
 

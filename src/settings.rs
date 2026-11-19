@@ -88,6 +88,28 @@ impl VelocityCurve {
     }
 }
 
+/// How KeyFrameXL synchronises MIDI Clock (0xF8 / Start / Stop) with external gear.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum MidiClockMode {
+    #[default]
+    Off,
+    /// Send 24 PPQN MIDI Clock + Start/Continue/Stop to enabled output ports.
+    Master,
+    /// Follow incoming 24 PPQN MIDI Clock + Start/Continue/Stop from input ports.
+    Slave,
+}
+
+impl MidiClockMode {
+    pub const ALL: [Self; 3] = [Self::Off, Self::Master, Self::Slave];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Master => "Send (Master)",
+            Self::Slave => "Receive (Slave)",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MidiSettings {
@@ -95,6 +117,12 @@ pub struct MidiSettings {
     pub enabled: Vec<String>,
     /// Ports the user switched off (so a replugged device stays off).
     pub disabled: Vec<String>,
+    /// Output ports that are switched on, by name. Output ports start off until enabled.
+    pub out_enabled: Vec<String>,
+    /// Output ports explicitly switched off.
+    pub out_disabled: Vec<String>,
+    /// MIDI Clock synchronisation mode (Off / Master / Slave).
+    pub clock: MidiClockMode,
     pub velocity: VelocityCurve,
     pub fixed_velocity: u8,
     /// Semitones added to every incoming note.
@@ -138,6 +166,9 @@ impl Default for MidiSettings {
         Self {
             enabled: vec![],
             disabled: vec![],
+            out_enabled: vec![],
+            out_disabled: vec![],
+            clock: MidiClockMode::Off,
             velocity: VelocityCurve::Linear,
             fixed_velocity: 100,
             transpose: 0,
@@ -161,6 +192,20 @@ impl MidiSettings {
             self.enabled.push(port.to_string());
         } else {
             self.disabled.push(port.to_string());
+        }
+    }
+
+    /// An output port starts off until explicitly switched on (avoids spamming gear).
+    pub fn is_out_on(&self, port: &str) -> bool {
+        self.out_enabled.iter().any(|p| p == port)
+    }
+    pub fn set_out_on(&mut self, port: &str, on: bool) {
+        self.out_disabled.retain(|p| p != port);
+        self.out_enabled.retain(|p| p != port);
+        if on {
+            self.out_enabled.push(port.to_string());
+        } else {
+            self.out_disabled.push(port.to_string());
         }
     }
 
@@ -228,6 +273,26 @@ impl Default for PluginSettings {
     }
 }
 
+/// Master bus visualisation in the top transport deck (FL: oscilloscope / spectrum).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum DeckMonitor {
+    Off,
+    #[default]
+    Scope,
+    Spectrum,
+}
+
+impl DeckMonitor {
+    pub const ALL: [Self; 3] = [Self::Off, Self::Scope, Self::Spectrum];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Scope => "Oscilloscope",
+            Self::Spectrum => "Spectrum",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GeneralSettings {
@@ -256,6 +321,14 @@ pub struct GeneralSettings {
     /// Interface size on top of the system scale, 0.5..=2.0 (FL: Options →
     /// General → zoom). Ctrl+= / Ctrl+- / Ctrl+0 change it too.
     pub ui_scale: f32,
+    /// Master bus oscilloscope / spectrum monitor in the top transport deck.
+    pub deck_monitor: DeckMonitor,
+    /// Automatically check GitHub Releases once per day for newer versions.
+    pub check_updates: bool,
+    /// Unix timestamp (seconds) of the last automatic update check.
+    pub last_update_check: u64,
+    /// Version tag the user chose to skip (e.g. "0.2.0").
+    pub skipped_version: Option<String>,
 }
 
 /// Interface sizes offered in Settings and stepped through by VIEW → Interface size.
@@ -293,6 +366,10 @@ impl Default for GeneralSettings {
             x11: true,
             system_title_bar: false,
             ui_scale: 1.0,
+            deck_monitor: DeckMonitor::Scope,
+            check_updates: true,
+            last_update_check: 0,
+            skipped_version: None,
         }
     }
 }
@@ -413,5 +490,29 @@ mod tests {
             old.midi.bindings.is_empty(),
             "older files start with no links"
         );
+    }
+
+    #[test]
+    fn midi_out_clock_monitor_and_update_settings_round_trip() {
+        let mut s = Settings::default();
+        assert!(!s.midi.is_out_on("Synth Port"));
+        s.midi.set_out_on("Synth Port", true);
+        assert!(s.midi.is_out_on("Synth Port"));
+        s.midi.clock = MidiClockMode::Master;
+        s.general.deck_monitor = DeckMonitor::Spectrum;
+        s.general.check_updates = false;
+        s.general.last_update_check = 1_700_000_000;
+        s.general.skipped_version = Some("0.2.0".into());
+
+        let text = ron::ser::to_string(&s).unwrap();
+        let back: Settings = ron::from_str(&text).unwrap();
+        assert_eq!(back, s);
+
+        let old: Settings = ron::from_str("(general: (autosave_minutes: 3))").unwrap();
+        assert_eq!(old.general.deck_monitor, DeckMonitor::Scope);
+        assert!(old.general.check_updates);
+        assert_eq!(old.general.last_update_check, 0);
+        assert_eq!(old.general.skipped_version, None);
+        assert_eq!(old.midi.clock, MidiClockMode::Off);
     }
 }
