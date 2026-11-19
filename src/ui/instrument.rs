@@ -423,35 +423,63 @@ impl App {
     }
 
     fn empty_sampler(&mut self, ui: &mut Ui, id: u64, loading: bool) {
-        let (area, _) = ui.allocate_exact_size(vec2(ui.available_width(), 170.0), Sense::hover());
+        let h = ui.available_height().clamp(200.0, 260.0);
+        let (area, _) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::hover());
         let p = ui.painter();
-        let well = kit::sunken(p, area, 8.0);
+        p.rect_filled(area, 8.0, t::SMP_CHASSIS);
+        p.rect_stroke(
+            area,
+            8.0,
+            egui::Stroke::new(1.0_f32, t::SMP_LINE),
+            egui::StrokeKind::Inside,
+        );
+        // Subtle brass top rail matching the loaded DWP Sampler console.
+        p.line_segment(
+            [
+                egui::pos2(area.left() + 14.0, area.top() + 1.0),
+                egui::pos2(area.right() - 14.0, area.top() + 1.0),
+            ],
+            egui::Stroke::new(2.0_f32, t::SMP_GOLD.gamma_multiply(0.45)),
+        );
+        let well = area.shrink2(vec2(14.0, 14.0));
+        p.rect_filled(well, 6.0, t::SMP_WELL);
+        p.rect_stroke(
+            well,
+            6.0,
+            egui::Stroke::new(1.0_f32, t::SMP_LINE),
+            egui::StrokeKind::Inside,
+        );
+
         let c = well.center();
+        let mark_r = Rect::from_center_size(c - vec2(0.0, 52.0), vec2(42.0, 26.0));
+        super::sampler::paint_sampler_mark(p, mark_r);
+
         if loading {
             p.text(
-                c,
+                c + vec2(0.0, 4.0),
                 Align2::CENTER_CENTER,
-                "Loading sound",
+                "Loading sound…",
                 t::medium(15.0),
-                t::WAIT,
+                t::SMP_GOLD,
             );
             return;
         }
-        p.text(
-            c - vec2(0.0, 40.0),
-            Align2::CENTER_CENTER,
-            "No sound loaded",
-            t::medium(15.0),
-            t::TEXT,
-        );
+
         p.text(
             c - vec2(0.0, 16.0),
             Align2::CENTER_CENTER,
-            "Notes play a test tone until you load one. Drop a sample or .dwp here, or:",
-            t::sans(14.0),
-            t::MUTED,
+            "DWP SAMPLER  ·  NO SAMPLE LOADED",
+            t::semibold(13.0),
+            t::SMP_GOLD,
         );
-        let b = Rect::from_center_size(c + vec2(0.0, 24.0), vec2(160.0, kit::CONTROL_H));
+        p.text(
+            c + vec2(0.0, 6.0),
+            Align2::CENTER_CENTER,
+            "Drop a DirectWave .dwp preset or audio file (.wav, .flac, .ogg) anywhere in this window.",
+            t::sans(13.0),
+            t::SMP_SAND,
+        );
+        let b = Rect::from_center_size(c + vec2(0.0, 44.0), vec2(170.0, kit::CONTROL_H));
         let r = ui.interact(b, ui.id().with(("load-empty", id)), Sense::click());
         kit::paint_button(
             ui,

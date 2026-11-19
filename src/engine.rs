@@ -1515,6 +1515,30 @@ impl Engine {
         self.master_scope.clone()
     }
 
+    /// Push `frames` of silence into active scopes when the transport is stopped
+    /// and idle, so oscilloscope / spectrum displays decay cleanly to zero
+    /// instead of freezing on the last audio block.
+    pub fn push_silence_scopes(&self, frames: usize) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let zero = 0.0_f32.to_bits();
+        if self.master_scope.track.load(Relaxed) == 0 {
+            let mut at = self.master_scope.pos.load(Relaxed);
+            for _ in 0..frames {
+                self.master_scope.ring[at].store(zero, Relaxed);
+                at = (at + 1) % SCOPE_LEN;
+            }
+            self.master_scope.pos.store(at, Relaxed);
+        }
+        if self.scope.track.load(Relaxed) != usize::MAX {
+            let mut at = self.scope.pos.load(Relaxed);
+            for _ in 0..frames {
+                self.scope.ring[at].store(zero, Relaxed);
+                at = (at + 1) % SCOPE_LEN;
+            }
+            self.scope.pos.store(at, Relaxed);
+        }
+    }
+
     /// Start recording a mixer track. Gives the tap back when all are in use.
     pub fn add_tap(&mut self, tap: Tap) -> Result<(), Tap> {
         if self.taps.len() >= MAX_TAPS {

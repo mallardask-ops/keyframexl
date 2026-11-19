@@ -35,6 +35,17 @@ struct PlDrag {
     grab: Tick,
 }
 
+#[derive(Clone, Copy)]
+struct PlBox {
+    origin_screen: Pos2,
+    origin_tick: Tick,
+    origin_track: f32,
+    right: bool,
+    dragging: bool,
+    add: bool,
+}
+
+#[cfg(test)]
 pub(super) fn box_hits(selection: Rect, clip: Rect) -> bool {
     selection.intersects(clip)
 }
@@ -814,7 +825,12 @@ impl App {
             .data(|d| d.get_temp::<Option<(u32, String)>>(rename_id))
             .flatten();
         // Grid background for empty-cell placement (behind the clips).
-        let grid_seen = grid.intersect(view).intersect(rows_view);
+        // Reserve the bottom horizontal scrollbar strip when present so dragging
+        // the scrollbar never triggers a grid click or clears selection.
+        let mut grid_seen = grid.intersect(view).intersect(rows_view);
+        if max_scroll > 0.0 {
+            grid_seen.max.y = grid_seen.max.y.min(well.bottom() - 11.0).max(grid_seen.min.y);
+        }
         // Rows and clips: drawn and clickable below the pinned top only.
         let painter = painter.with_clip_rect(painter.clip_rect().intersect(rows_view));
         let full_clip = ui.clip_rect();
@@ -1476,7 +1492,7 @@ impl App {
                 } else {
                     CursorIcon::ResizeHorizontal
                 });
-                let ghost = match dd.mode {
+                match dd.mode {
                     DragMode::Move => {
                         let ns = song_snap(
                             &meters,
@@ -1487,7 +1503,41 @@ impl App {
                         )
                         .max(0);
                         let nt = track_at(pos.y, grid.top(), lane_h).min(999);
-                        Some(clip_rect(ns, len, nt))
+                        if selection.len() > 1 && selection.contains(&i) {
+                            let min_s = selection
+                                .iter()
+                                .filter_map(|&j| clips.get(j).map(|x| x.start))
+                                .min()
+                                .unwrap_or(0);
+                            let min_t = selection
+                                .iter()
+                                .filter_map(|&j| clips.get(j).map(|x| x.track as i64))
+                                .min()
+                                .unwrap_or(0);
+                            let dt = (ns - c.start).max(-min_s);
+                            let dr = (nt as i64 - c.track as i64).max(-min_t);
+                            for &j in &selection {
+                                if let Some(cj) = clips.get(j) {
+                                    let jlen = self.song.clip_len(cj);
+                                    let js = (cj.start + dt)
+                                        .min(keyframexl::sequence::MAX_BARS * BAR - jlen.max(1));
+                                    let jt = (cj.track as i64 + dr).clamp(0, 999) as u32;
+                                    painter.rect_stroke(
+                                        clip_rect(js, jlen, jt),
+                                        3.0,
+                                        Stroke::new(1.5_f32, t::TEXT),
+                                        egui::StrokeKind::Inside,
+                                    );
+                                }
+                            }
+                        } else {
+                            painter.rect_stroke(
+                                clip_rect(ns, len, nt),
+                                3.0,
+                                Stroke::new(1.5_f32, t::TEXT),
+                                egui::StrokeKind::Inside,
+                            );
+                        }
                     }
                     DragMode::Right => {
                         let min = if alt { 1 } else { grid_ticks.max(1) };
@@ -1499,7 +1549,12 @@ impl App {
                             true,
                         )
                         .max(c.start + min);
-                        Some(clip_rect(c.start, end - c.start, c.track.min(999)))
+                        painter.rect_stroke(
+                            clip_rect(c.start, end - c.start, c.track.min(999)),
+                            3.0,
+                            Stroke::new(1.5_f32, t::TEXT),
+                            egui::StrokeKind::Inside,
+                        );
                     }
                     DragMode::Left => {
                         let end = c.start + len;
@@ -1517,16 +1572,13 @@ impl App {
                         if hi >= lo {
                             ns = ns.clamp(lo, hi);
                         }
-                        Some(clip_rect(ns, end - ns, c.track.min(999)))
+                        painter.rect_stroke(
+                            clip_rect(ns, end - ns, c.track.min(999)),
+                            3.0,
+                            Stroke::new(1.5_f32, t::TEXT),
+                            egui::StrokeKind::Inside,
+                        );
                     }
-                };
-                if let Some(g) = ghost {
-                    painter.rect_stroke(
-                        g,
-                        6.0,
-                        Stroke::new(1.5_f32, t::TEXT),
-                        egui::StrokeKind::Inside,
-                    );
                 }
             }
             if resp.drag_stopped() && !marker_used[i] {
@@ -1632,55 +1684,76 @@ impl App {
             }
         }
 
-        let erase_id = ui.id().with("playlist-right-erase");
-        let (right_down, right_pressed, right_pos) = ui.input(|i| {
+        let can_edit_grid = ui.is_enabled() && !self.welcome_open;
+        let box_id = ui.id().with("playlist-box-v2");
+        let box_base_id = ui.id().with("playlist-box-base");
+        let mut pbox: Option<PlBox> = ui.data(|d| d.get_temp(box_id)).flatten();
+        let mut box_base: Vec<usize> = ui.data(|d| d.get_temp(box_base_id)).unwrap_or_default();
+
+        let (right_down, right_pressed, right_pos, shift_mod, ctrl_mod) = ui.input(|i| {
             (
                 i.pointer.secondary_down(),
                 i.pointer.secondary_pressed(),
                 i.pointer.interact_pos(),
+                i.modifiers.shift,
+                i.modifiers.command,
             )
         });
-        let mut erased: Option<usize> = ui.data(|d| d.get_temp(erase_id)).flatten();
-        if right_pressed {
-            erased = right_pos
-                .filter(|p| {
-                    grid_seen.contains(*p)
-                        && !marker_used.iter().enumerate().any(|(i, used)| {
-                            *used
-                                && clip_rect(
-                                    clips[i].start,
-                                    self.song.clip_len(&clips[i]),
-                                    clips[i].track.min(999),
-                                )
-                                .contains(*p)
-                        })
-                })
-                .map(|_| 0);
+
+        // RMB press inside the grid:
+        // - Dragging (> 4 px) sweeps a musical-coordinate marquee selection box.
+        // - A quick right-click on a clip (no drag) still deletes that clip.
+        if can_edit_grid
+            && right_pressed
+            && let Some(pos) = right_pos
+            && grid_seen.contains(pos)
+            && !marker_used.iter().enumerate().any(|(i, used)| {
+                *used
+                    && clip_rect(
+                        clips[i].start,
+                        self.song.clip_len(&clips[i]),
+                        clips[i].track.min(999),
+                    )
+                    .contains(pos)
+            })
+        {
+            box_base = if shift_mod {
+                selection.clone()
+            } else {
+                Vec::new()
+            };
+            pbox = Some(PlBox {
+                origin_screen: pos,
+                origin_tick: tick_at(pos.x, grid_l, bar_w),
+                origin_track: ((pos.y - grid.top()) / lane_h).max(0.0),
+                right: true,
+                dragging: false,
+                add: shift_mod,
+            });
         }
-        if right_down && let (Some(count), Some(pos)) = (&mut erased, right_pos) {
-            if grid_seen.contains(pos)
-                && let Some((i, _)) = clips.iter().enumerate().rev().find(|(_, c)| {
-                    clip_rect(c.start, self.song.clip_len(c), c.track.min(999)).contains(pos)
-                })
-            {
-                if *count == 0 {
-                    self.checkpoint();
-                }
-                self.song.clips.remove(i);
-                self.clip = None;
-                selection.clear();
-                *count += 1;
-                self.publish();
-                self.say(
-                    Tone::Quiet,
-                    format!("{} clip(s) deleted. Ctrl+Z undoes.", *count),
-                );
-            }
+
+        // LMB Select tool or Ctrl+drag in Draw tool starts the same musical marquee.
+        if can_edit_grid
+            && pbox.is_none()
+            && (tool == Tool::Select || (tool == Tool::Draw && ctrl_mod))
+            && grid_resp.drag_started_by(egui::PointerButton::Primary)
+            && let Some(o) = press_origin
+            && grid_seen.contains(o)
+        {
+            box_base = if shift_mod {
+                selection.clone()
+            } else {
+                Vec::new()
+            };
+            pbox = Some(PlBox {
+                origin_screen: o,
+                origin_tick: tick_at(o.x, grid_l, bar_w),
+                origin_track: ((o.y - grid.top()) / lane_h).max(0.0),
+                right: false,
+                dragging: true,
+                add: shift_mod,
+            });
         }
-        if !right_down {
-            erased = None;
-        }
-        ui.data_mut(|d| d.insert_temp(erase_id, erased));
 
         // Process a brush once per clip per gesture, even when the pointer stays still.
         let brush_id = ui.id().with("playlist-brush-seen");
@@ -1690,7 +1763,7 @@ impl App {
         if pressed || !down {
             seen.clear();
         }
-        if down && matches!(tool, Tool::Delete | Tool::Mute | Tool::Slice) {
+        if can_edit_grid && down && matches!(tool, Tool::Delete | Tool::Mute | Tool::Slice) {
             if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
                 if grid_seen.contains(pos) {
                     if let Some((i, c)) = clips.iter().enumerate().rev().find(|(_, c)| {
@@ -1742,10 +1815,11 @@ impl App {
 
         let zoom_drag_id = ui.id().with("playlist-zoom-drag");
         let mut zoom_origin: Option<Pos2> = ui.data(|d| d.get_temp(zoom_drag_id)).flatten();
-        if tool == Tool::Zoom && grid_resp.drag_started() {
+        if can_edit_grid && tool == Tool::Zoom && grid_resp.drag_started() {
             zoom_origin = press_origin;
         }
-        if tool == Tool::Zoom
+        if can_edit_grid
+            && tool == Tool::Zoom
             && (grid_resp.clicked() || grid_resp.secondary_clicked() || grid_resp.drag_stopped())
         {
             if let Some(pos) = grid_resp.interact_pointer_pos().or(grid_resp.hover_pos()) {
@@ -1775,41 +1849,102 @@ impl App {
             zoom_origin = None;
         }
         ui.data_mut(|d| d.insert_temp(zoom_drag_id, zoom_origin));
-        let box_id = ui.id().with("playlist-box");
-        let mut origin: Option<Pos2> = ui.data(|d| d.get_temp(box_id)).flatten();
-        if tool == Tool::Select && grid_resp.drag_started() {
-            origin = press_origin;
-        }
-        if let Some(a) = origin {
-            if let Some(b) = ui.input(|i| i.pointer.interact_pos()) {
-                let rect = Rect::from_two_pos(a, b);
-                painter.rect_stroke(
-                    rect,
-                    0.0,
-                    Stroke::new(1.5_f32, t::TEXT),
-                    egui::StrokeKind::Inside,
+
+        // Update / finalize active marquee selection (musical coordinates: survives scrolling!).
+        if let Some(mut b) = pbox {
+            let held = if b.right { right_down } else { down };
+            let cur_pos = ui
+                .input(|i| i.pointer.interact_pos().or_else(|| i.pointer.hover_pos()))
+                .unwrap_or(b.origin_screen);
+            if b.right && !b.dragging && (cur_pos - b.origin_screen).length() > 4.0 {
+                b.dragging = true;
+            }
+            if b.dragging {
+                let cur_tick = tick_at(cur_pos.x, grid_l, bar_w);
+                let cur_track = ((cur_pos.y - grid.top()) / lane_h).max(0.0);
+                let (t_min, t_max) = (b.origin_tick.min(cur_tick), b.origin_tick.max(cur_tick));
+                let (tr_min, tr_max) = (b.origin_track.min(cur_track), b.origin_track.max(cur_track));
+                let a_screen = pos2(
+                    grid_l + b.origin_tick as f32 / BAR as f32 * bar_w,
+                    grid.top() + b.origin_track * lane_h,
                 );
-                selection = clips
+                let rect = Rect::from_two_pos(a_screen, cur_pos).intersect(grid_seen);
+                if rect.is_positive() {
+                    painter.rect_filled(rect, 2.0, t::TEXT.gamma_multiply(0.08));
+                    painter.rect_stroke(
+                        rect,
+                        2.0,
+                        Stroke::new(1.5_f32, t::TEXT),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+                let hits: Vec<usize> = clips
                     .iter()
                     .enumerate()
                     .filter(|(_, c)| {
-                        box_hits(
-                            rect,
-                            clip_rect(c.start, self.song.clip_len(c), c.track.min(999)),
-                        )
+                        let clen = self.song.clip_len(c);
+                        let c_end = c.start + clen;
+                        let hit_t = if t_max > t_min {
+                            c.start < t_max && c_end > t_min
+                        } else {
+                            c.start <= t_min && c_end >= t_min
+                        };
+                        let tr = c.track.min(999) as f32;
+                        let hit_tr = (tr + 1.0) > tr_min && tr < tr_max;
+                        hit_t && hit_tr
                     })
                     .map(|(i, _)| i)
                     .collect();
-                self.clip = None;
+                selection = if b.add { box_base.clone() } else { Vec::new() };
+                for i in hits {
+                    if !selection.contains(&i) {
+                        selection.push(i);
+                    }
+                }
+                self.clip = if selection.len() == 1 {
+                    Some(selection[0])
+                } else {
+                    None
+                };
             }
-            if ui.input(|i| i.pointer.primary_released()) {
-                origin = None;
+            if !held {
+                if b.right && !b.dragging {
+                    // Quick right-click (no drag): delete clip under pointer, or clear selection on empty grid.
+                    if let Some((i, _)) = clips.iter().enumerate().rev().find(|(_, c)| {
+                        clip_rect(c.start, self.song.clip_len(c), c.track.min(999))
+                            .contains(b.origin_screen)
+                    }) {
+                        self.checkpoint();
+                        self.song.clips.remove(i);
+                        self.clip = None;
+                        selection.clear();
+                        self.publish();
+                        self.say(Tone::Quiet, "1 clip(s) deleted. Ctrl+Z undoes.");
+                    } else {
+                        selection.clear();
+                        self.clip = None;
+                    }
+                } else if b.dragging {
+                    self.say(
+                        Tone::Quiet,
+                        format!(
+                            "{} clip(s) selected. Drag to move together, Shift+drag to duplicate, Del deletes.",
+                            selection.len()
+                        ),
+                    );
+                }
+                pbox = None;
+            } else {
+                pbox = Some(b);
             }
         }
-        ui.data_mut(|d| d.insert_temp(box_id, origin));
+        ui.data_mut(|d| {
+            d.insert_temp(box_id, pbox);
+            d.insert_temp(box_base_id, box_base);
+        });
         let paint_id = ui.id().with("playlist-paint-active");
         let mut painting: Option<(Tick, u32, bool)> = ui.data(|d| d.get_temp(paint_id)).flatten();
-        if tool == Tool::Paint && pressed {
+        if can_edit_grid && tool == Tool::Paint && pressed {
             if let Some(pos) = press_origin.filter(|p| grid_seen.contains(*p)) {
                 painting = Some((
                     song_snap(
@@ -2203,8 +2338,21 @@ impl App {
             match p {
                 Pending::Select(i) => {
                     if i < clips.len() {
-                        self.clip = if tool == Tool::Select { None } else { Some(i) };
-                        selection = vec![i];
+                        if shift_mod {
+                            if let Some(pos) = selection.iter().position(|&x| x == i) {
+                                selection.remove(pos);
+                            } else {
+                                selection.push(i);
+                            }
+                            self.clip = if selection.len() == 1 {
+                                Some(selection[0])
+                            } else {
+                                None
+                            };
+                        } else {
+                            self.clip = if tool == Tool::Select { None } else { Some(i) };
+                            selection = vec![i];
+                        }
                         self.select_pattern(clips[i].pattern);
                     }
                 }
@@ -2231,7 +2379,7 @@ impl App {
                 Pending::Move { i, start, track } => {
                     if i < self.song.clips.len() {
                         self.checkpoint();
-                        if tool == Tool::Select && selection.contains(&i) {
+                        if selection.len() > 1 && selection.contains(&i) {
                             let dt = start - clips[i].start;
                             let dr = track as i64 - clips[i].track as i64;
                             let dt = dt
@@ -2244,28 +2392,36 @@ impl App {
                                     .unwrap_or(0),
                             );
                             for &j in &selection {
-                                self.song.clips[j].start = (clips[j].start + dt).min(
-                                    keyframexl::sequence::MAX_BARS * BAR
-                                        - self.song.clip_len(&clips[j]),
-                                );
-                                self.song.clips[j].track =
-                                    (clips[j].track as i64 + dr).min(999) as u32;
+                                if j < self.song.clips.len() {
+                                    self.song.clips[j].start = (clips[j].start + dt).min(
+                                        keyframexl::sequence::MAX_BARS * BAR
+                                            - self.song.clip_len(&clips[j]),
+                                    );
+                                    self.song.clips[j].track =
+                                        (clips[j].track as i64 + dr).clamp(0, 999) as u32;
+                                }
                             }
+                            self.clip = None;
+                            self.publish();
+                            self.say(
+                                Tone::Quiet,
+                                format!("{} clips moved. Ctrl+Z undoes.", selection.len()),
+                            );
                         } else {
                             self.song.clips[i].start = start;
                             self.song.clips[i].track = track;
                             selection = vec![i];
+                            self.clip = if tool == Tool::Select { None } else { Some(i) };
+                            self.publish();
+                            self.say(
+                                Tone::Quiet,
+                                format!(
+                                    "Clip moved to {} on track {}. Ctrl+Z undoes.",
+                                    song_bar_pos(&self.song.meters, start),
+                                    track + 1
+                                ),
+                            );
                         }
-                        self.clip = if tool == Tool::Select { None } else { Some(i) };
-                        self.publish();
-                        self.say(
-                            Tone::Quiet,
-                            format!(
-                                "Clip moved to {} on track {}. Ctrl+Z undoes.",
-                                song_bar_pos(&self.song.meters, start),
-                                track + 1
-                            ),
-                        );
                     }
                 }
                 Pending::Resize { i, len } => {
@@ -2310,20 +2466,56 @@ impl App {
                 Pending::Duplicate { i, start, track } => {
                     if i < self.song.clips.len() {
                         self.checkpoint();
-                        let mut nc = self.song.clips[i];
-                        nc.start = start;
-                        nc.track = track;
-                        self.song.clips.push(nc);
-                        self.clip = Some(self.song.clips.len() - 1);
-                        self.publish();
-                        self.say(
-                            Tone::Quiet,
-                            format!(
-                                "Clip duplicated to {} on track {}. Ctrl+Z undoes.",
-                                song_bar_pos(&self.song.meters, start),
-                                track + 1
-                            ),
-                        );
+                        if selection.len() > 1 && selection.contains(&i) {
+                            let dt = start - clips[i].start;
+                            let dr = track as i64 - clips[i].track as i64;
+                            let dt = dt
+                                .max(-selection.iter().map(|&j| clips[j].start).min().unwrap_or(0));
+                            let dr = dr.max(
+                                -selection
+                                    .iter()
+                                    .map(|&j| clips[j].track as i64)
+                                    .min()
+                                    .unwrap_or(0),
+                            );
+                            let mut new_sel = Vec::with_capacity(selection.len());
+                            for &j in &selection {
+                                if let Some(orig) = clips.get(j) {
+                                    let mut nc = *orig;
+                                    nc.start = (orig.start + dt).min(
+                                        keyframexl::sequence::MAX_BARS * BAR
+                                            - self.song.clip_len(orig),
+                                    );
+                                    nc.track = (orig.track as i64 + dr).clamp(0, 999) as u32;
+                                    self.song.clips.push(nc);
+                                    new_sel.push(self.song.clips.len() - 1);
+                                }
+                            }
+                            selection = new_sel;
+                            self.clip = None;
+                            self.publish();
+                            self.say(
+                                Tone::Quiet,
+                                format!("{} clips duplicated. Ctrl+Z undoes.", selection.len()),
+                            );
+                        } else {
+                            let mut nc = self.song.clips[i];
+                            nc.start = start;
+                            nc.track = track;
+                            self.song.clips.push(nc);
+                            let ni = self.song.clips.len() - 1;
+                            self.clip = Some(ni);
+                            selection = vec![ni];
+                            self.publish();
+                            self.say(
+                                Tone::Quiet,
+                                format!(
+                                    "Clip duplicated to {} on track {}. Ctrl+Z undoes.",
+                                    song_bar_pos(&self.song.meters, start),
+                                    track + 1
+                                ),
+                            );
+                        }
                     }
                 }
                 Pending::Delete(i) => {

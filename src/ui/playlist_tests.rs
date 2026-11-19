@@ -671,3 +671,97 @@ fn the_middle_button_pans_the_tracks_and_alt_wheel_sizes_them() {
     let (_, _, taller) = app.probe.pl_grid.expect("grid");
     assert!(taller > lane + 2.0, "taller tracks: {lane} → {taller}");
 }
+
+#[test]
+fn rmb_drag_selects_clips_survives_scroll_and_moves_all_together() {
+    let (ctx, mut app) = setup();
+    app.song.clips.push(Clip::new(1, 0, 0));
+    app.song.clips.push(Clip::new(1, BAR, 1));
+    // Push a far clip so horizontal scrolling has room to scroll.
+    app.song.clips.push(Clip::new(1, 20 * BAR, 0));
+    run(&ctx, &mut app, vec![]);
+    let (grid, bar_w, lane_h) = grid_of(&app);
+
+    // Hold RMB and drag across the first two clips to marquee-select both.
+    let from = pos2(grid.left() + 0.1 * bar_w, grid.top() + 0.1 * lane_h);
+    let to = pos2(grid.left() + 1.8 * bar_w, grid.top() + 1.8 * lane_h);
+    run(&ctx, &mut app, vec![Event::PointerMoved(from)]);
+    run(&ctx, &mut app, vec![button(from, false, true)]);
+    run(&ctx, &mut app, vec![Event::PointerMoved(to)]);
+    run(&ctx, &mut app, vec![button(to, false, false)]);
+    run(&ctx, &mut app, vec![]);
+
+    let sel_id = egui::Id::new("kfxl-playlist-selection");
+    let sel: Vec<usize> = ctx.data(|d| d.get_temp(sel_id)).unwrap_or_default();
+    assert_eq!(sel, vec![0, 1], "RMB drag selects both clips inside the box");
+    assert_eq!(app.song.clips.len(), 3, "RMB drag selects instead of deleting");
+
+    // Scroll right and back with Shift+wheel: selection must persist across scrolling.
+    let shift = Modifiers {
+        shift: true,
+        ..Default::default()
+    };
+    run_with(
+        &ctx,
+        &mut app,
+        vec![
+            Event::PointerMoved(to),
+            Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: Vec2::new(0.0, -240.0),
+                modifiers: shift,
+            },
+        ],
+        shift,
+    );
+    run(&ctx, &mut app, vec![]);
+    let sel_after_scroll: Vec<usize> = ctx.data(|d| d.get_temp(sel_id)).unwrap_or_default();
+    assert_eq!(
+        sel_after_scroll,
+        vec![0, 1],
+        "scrolling must not drop selected clips"
+    );
+    // Scroll back to bar 1 so clips 0 & 1 are back under the pointer.
+    run_with(
+        &ctx,
+        &mut app,
+        vec![
+            Event::PointerMoved(to),
+            Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: Vec2::new(0.0, 240.0),
+                modifiers: shift,
+            },
+        ],
+        shift,
+    );
+    run(&ctx, &mut app, vec![]);
+
+    // Drag clip 0 by +2 bars and +1 track with the default Draw tool:
+    // BOTH selected clips move together in one undo step.
+    let (grid, bar_w, lane_h) = grid_of(&app);
+    let h0 = app.history.len();
+    let grab = pos2(grid.left() + 0.5 * bar_w, grid.top() + 0.5 * lane_h);
+    let drop = pos2(grid.left() + 2.5 * bar_w, grid.top() + 1.5 * lane_h);
+    drag(&ctx, &mut app, grab, drop);
+    assert_eq!(
+        (app.song.clips[0].start, app.song.clips[0].track),
+        (2 * BAR, 1),
+        "anchor clip moved"
+    );
+    assert_eq!(
+        (app.song.clips[1].start, app.song.clips[1].track),
+        (3 * BAR, 2),
+        "second selected clip moved together with anchor clip"
+    );
+    assert_eq!(app.history.len(), h0 + 1, "mass move is a single undo step");
+
+    // Re-layout moved clips, then Shift+drag the moved group by +1 bar: duplicates BOTH clips together.
+    run(&ctx, &mut app, vec![]);
+    let (grid, bar_w, lane_h) = grid_of(&app);
+    let grab2 = pos2(grid.left() + 2.5 * bar_w, grid.top() + 1.5 * lane_h);
+    let drop2 = pos2(grid.left() + 3.5 * bar_w, grid.top() + 1.5 * lane_h);
+    drag_shift(&ctx, &mut app, grab2, drop2);
+    assert_eq!(app.song.clips.len(), 5, "Shift+drag duplicates all selected clips");
+}
+

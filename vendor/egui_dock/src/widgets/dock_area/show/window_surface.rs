@@ -229,7 +229,28 @@ impl<Tab> DockArea<'_, Tab> {
                         }
                     }
                 }
-                if let (true, Some(p)) = (mover.drag_started(), pointer) {
+                let ctrl_dock = ui.input(|i| i.modifiers.command);
+                if mover.dragged() && ctrl_dock {
+                    ctx.set_cursor_icon(CursorIcon::Grabbing);
+                    if let Some(p) = pointer {
+                        let start = *state.drag_start.get_or_insert(p);
+                        if (p - start).length() > 6.0 {
+                            ctx.memory_mut(|mem| {
+                                mem.data.insert_temp(
+                                    self.id.with("drag_data"),
+                                    Some(crate::dock_area::drag_and_drop::DragData {
+                                        src: crate::dock_area::drag_and_drop::TreeComponent::Surface(
+                                            surf_index,
+                                        ),
+                                        rect,
+                                    }),
+                                );
+                            });
+                        }
+                    }
+                    grab = None;
+                    ctx.data_mut(|d| d.remove::<Grab>(grab_id));
+                } else if let (true, Some(p)) = (mover.drag_started(), pointer) {
                     // Leaving a sector: back to the size it had, under the
                     // pointer at the same place along the title bar.
                     let mut start = rect;
@@ -311,7 +332,7 @@ impl<Tab> DockArea<'_, Tab> {
 
         let ws = self.dock_state.get_window_state_mut(surf_index).unwrap();
         if let Some(r) = moved {
-            ws.set_rect(r);
+            ws.set_rect_in(r, bounds);
         }
         match snap_to {
             Some(Some(sector)) => {
@@ -320,7 +341,10 @@ impl<Tab> DockArea<'_, Tab> {
             Some(None) => {
                 let size = restore.unwrap_or(rect.size() * 0.7).max(min);
                 ws.set_snap(None);
-                ws.set_rect(keep_inside(Rect::from_center_size(rect.center(), size), bounds));
+                ws.set_rect_in(
+                    keep_inside(Rect::from_center_size(rect.center(), size), bounds),
+                    bounds,
+                );
             }
             None => {}
         }

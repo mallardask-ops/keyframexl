@@ -99,6 +99,30 @@ pub const COLOR_PALETTE: [C; 10] = [
     C::from_rgb(201, 164, 83),
 ];
 
+// KeyFrame Tide faceplate tokens (abyssal slate + tidal cyan oscilloscope).
+pub const TIDE_CHASSIS: C = C::from_rgb(18, 23, 28);
+pub const TIDE_DECK: C = C::from_rgb(25, 32, 39);
+pub const TIDE_DECK_HI: C = C::from_rgb(33, 42, 51);
+pub const TIDE_WELL: C = C::from_rgb(9, 13, 18);
+pub const TIDE_LINE: C = C::from_rgb(42, 54, 66);
+pub const TIDE_CYAN: C = C::from_rgb(78, 205, 235);
+pub const TIDE_DEEP: C = C::from_rgb(32, 102, 128);
+pub const TIDE_CORAL: C = C::from_rgb(245, 146, 86);
+pub const TIDE_MINT: C = C::from_rgb(94, 214, 162);
+pub const TIDE_MIST: C = C::from_rgb(158, 177, 194);
+
+// DWP Sampler faceplate tokens (warm studio charcoal + brass/tape splice).
+pub const SMP_CHASSIS: C = C::from_rgb(24, 22, 20);
+pub const SMP_DECK: C = C::from_rgb(33, 30, 27);
+pub const SMP_DECK_HI: C = C::from_rgb(44, 40, 36);
+pub const SMP_WELL: C = C::from_rgb(14, 12, 10);
+pub const SMP_LINE: C = C::from_rgb(56, 51, 45);
+pub const SMP_GOLD: C = C::from_rgb(235, 182, 78);
+pub const SMP_LOOP: C = C::from_rgb(232, 114, 82);
+pub const SMP_START: C = C::from_rgb(104, 208, 151);
+pub const SMP_FILTER2: C = C::from_rgb(104, 174, 240);
+pub const SMP_SAND: C = C::from_rgb(180, 170, 158);
+
 // Segment display ink.
 pub const LCD_ON: C = TEXT;
 pub const LCD_OFF: C = C::from_rgb(27, 29, 31);

@@ -230,7 +230,10 @@ fn place(d: &mut DockState<Tab>, tab: Tab) {
         Kind::Rack => find_kind(d, Kind::Roll).or_else(|| find_kind(d, Kind::Mixer)),
         // Beside the rack and roll: the playlist above stays in view.
         Kind::Mixer => find_kind(d, Kind::Rack).or_else(|| find_kind(d, Kind::Roll)),
-        Kind::Playlist | Kind::Instrument | Kind::Riff | Kind::Settings => None,
+        // Reopening a closed Playlist lands in the currently focused main pane
+        // (instead of always jumping to the root / first pane).
+        Kind::Playlist => d.focused_leaf().filter(|(s, _)| s.is_main()),
+        Kind::Instrument | Kind::Riff | Kind::Settings => None,
     };
     if let Some((s, n)) = sibling {
         d[s][n].append_tab(tab.clone());
@@ -415,7 +418,10 @@ impl App {
         } else if tab_kind == Kind::Riff {
             egui::vec2(852.0f32.min(area.width()), 640.0f32.min(area.height()))
         } else if tab_kind == Kind::Settings {
-            egui::vec2(860.0f32.min(area.width()), 600.0f32.min(area.height()))
+            egui::vec2(
+                920.0f32.min((area.width() - 24.0).max(600.0)),
+                680.0f32.min((area.height() - 24.0).max(480.0)),
+            )
         } else if big {
             egui::vec2((area.width() * 0.86).min(1040.0), area.height() * 0.92)
         } else if let Some(rs) = rack_size {

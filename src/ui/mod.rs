@@ -3095,6 +3095,11 @@ impl eframe::App for App {
 
     /// A take in progress is written before the window goes away.
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if self.persist {
+            self.save_settings();
+            let text = self.ws.to_text();
+            let _ = workspace::Workspace::save(&text);
+        }
         if !self.rec.parts.is_empty() {
             self.finish_takes();
         }
@@ -3226,14 +3231,17 @@ impl eframe::App for App {
                 let a = self.ws.active;
                 let mut dock =
                     std::mem::replace(&mut self.ws.slots[a], egui_dock::DockState::new(vec![]));
-                egui_dock::DockArea::new(&mut dock)
-                    .id(egui::Id::new(("kfxl-dock", a)))
-                    .style(style)
-                    .show_add_buttons(false)
-                    .show_leaf_collapse_buttons(false)
-                    .show_leaf_close_all_buttons(false)
-                    .window_bounds(bounds)
-                    .show_inside(ui, &mut workspace::Viewer { app: self });
+                let modal_open = self.welcome_open || self.pending.is_some();
+                ui.add_enabled_ui(!modal_open, |ui| {
+                    egui_dock::DockArea::new(&mut dock)
+                        .id(egui::Id::new(("kfxl-dock", a)))
+                        .style(style)
+                        .show_add_buttons(false)
+                        .show_leaf_collapse_buttons(false)
+                        .show_leaf_close_all_buttons(false)
+                        .window_bounds(bounds)
+                        .show_inside(ui, &mut workspace::Viewer { app: self });
+                });
                 self.ws.slots[a] = dock;
                 if self.ws.dock().main_surface().is_empty() && self.ws.dock().surfaces_count() <= 1
                 {
@@ -3268,6 +3276,42 @@ impl eframe::App for App {
         }
         if self.persist {
             self.ws.zoom = z;
+            // Remember the OS logical window size (inner_rect is in egui points,
+            // which divide by zoom_factor, so multiply back by z for ViewportBuilder).
+            let (inner_rect, maximized, now) = ctx.input(|i| {
+                (i.viewport().inner_rect, i.viewport().maximized.unwrap_or(false), i.time)
+            });
+            let mut geom_dirty = false;
+            if maximized != self.settings.general.window_maximized {
+                self.settings.general.window_maximized = maximized;
+                geom_dirty = true;
+            }
+            if !maximized
+                && let Some(r) = inner_rect
+                && r.is_finite()
+                && r.width() > 200.0
+                && r.height() > 200.0
+            {
+                let logical = [(r.width() * z).round(), (r.height() * z).round()];
+                let changed = self
+                    .settings
+                    .general
+                    .window_size
+                    .is_none_or(|old| (old[0] - logical[0]).abs() >= 2.0 || (old[1] - logical[1]).abs() >= 2.0);
+                if changed {
+                    self.settings.general.window_size = Some(logical);
+                    geom_dirty = true;
+                }
+            }
+            let save_id = egui::Id::new("kfxl-window-geom-save");
+            if geom_dirty {
+                ctx.data_mut(|d| d.insert_temp(save_id, now));
+            } else if let Some(since) = ctx.data(|d| d.get_temp::<f64>(save_id))
+                && now - since > 0.8
+            {
+                ctx.data_mut(|d| d.remove::<f64>(save_id));
+                self.save_settings();
+            }
         }
         self.prune_tabs();
         self.autosave_layout(ctx.input(|i| i.time));

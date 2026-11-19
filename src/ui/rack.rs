@@ -968,7 +968,13 @@ impl App {
                     let shown = rect.intersect(ui.clip_rect());
                     pads.push((id, i, shown));
                     // The press point, not where the pointer got to by this frame.
-                    if origin.is_some_and(|p| shown.contains(p)) && (pp || sp) && !(shift && pp) {
+                    // Never trigger through disabled/background UI or modal overlays (e.g. Welcome Screen).
+                    if ui.is_enabled()
+                        && !self.welcome_open
+                        && origin.is_some_and(|p| shown.contains(p))
+                        && (pp || sp)
+                        && !(shift && pp)
+                    {
                         // FL: one value per stroke, from the pad it starts on.
                         stroke = Some(PadStroke {
                             right: sp,

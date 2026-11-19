@@ -36,6 +36,43 @@ pub struct WindowState {
     /// KeyFrameXL: the size it had before it was snapped, for unsnapping.
     #[cfg_attr(feature = "serde", serde(default))]
     restore: Option<Vec2>,
+
+    /// KeyFrameXL: normalized `[0..1]` rect inside the work area so UI scaling
+    /// and main window resizing preserve each floating window's relative spot.
+    #[cfg_attr(feature = "serde", serde(default))]
+    norm_rect: Option<Rect>,
+
+    /// KeyFrameXL: the work-area bounds used when `screen_rect` was last resolved.
+    #[cfg_attr(feature = "serde", serde(default))]
+    last_bounds: Option<Rect>,
+}
+
+/// Normalized `[0..1]` coordinates of `r` inside `bounds`.
+fn to_norm(r: Rect, bounds: Rect) -> Option<Rect> {
+    if !r.is_finite() || !r.is_positive() || !bounds.is_finite() || bounds.width() <= 1.0 || bounds.height() <= 1.0 {
+        return None;
+    }
+    let min = Pos2::new(
+        ((r.left() - bounds.left()) / bounds.width()).clamp(0.0, 1.0),
+        ((r.top() - bounds.top()) / bounds.height()).clamp(0.0, 1.0),
+    );
+    let max = Pos2::new(
+        ((r.right() - bounds.left()) / bounds.width()).clamp(0.0, 1.0),
+        ((r.bottom() - bounds.top()) / bounds.height()).clamp(0.0, 1.0),
+    );
+    if max.x > min.x && max.y > min.y {
+        Some(Rect::from_min_max(min, max))
+    } else {
+        None
+    }
+}
+
+fn bounds_changed(a: Option<Rect>, b: Rect) -> bool {
+    let Some(a) = a else { return false };
+    (a.left() - b.left()).abs() > 1.0
+        || (a.top() - b.top()).abs() > 1.0
+        || (a.width() - b.width()).abs() > 1.0
+        || (a.height() - b.height()).abs() > 1.0
 }
 
 /// A sector of the work area a floating window can snap to (KeyFrameXL).
@@ -109,6 +146,8 @@ impl Default for WindowState {
             minimized: false,
             snap: None,
             restore: None,
+            norm_rect: None,
+            last_bounds: None,
         }
     }
 }
@@ -159,19 +198,47 @@ impl WindowState {
 
     /// This frame's rect: pending position and size applied, snapped to its
     /// sector, else kept inside `bounds` and at least `min` in size.
+    /// When `bounds` changes (UI scale or main window resize), free windows
+    /// re-project from `norm_rect` so they stay in their relative place and
+    /// recover cleanly when scaled back.
     pub(crate) fn resolve(&mut self, bounds: Rect, min: Vec2) -> Rect {
         let min = min.min(bounds.size());
         if let Some(s) = self.snap {
             let r = s.rect(bounds);
             self.screen_rect = Some(r);
+            self.last_bounds = Some(bounds);
             self.next_position = None;
             self.next_size = None;
             return r;
         }
-        let mut r = self
-            .screen_rect
-            .filter(|r| r.is_finite() && r.is_positive())
-            .unwrap_or_else(|| Rect::from_center_size(bounds.center(), (bounds.size() * 0.6).max(min)));
+        let explicit = self.next_size.is_some() || self.next_position.is_some();
+        let resized_bounds = !explicit && bounds_changed(self.last_bounds, bounds);
+        let mut r = if resized_bounds {
+            if let Some(nr) = self.norm_rect {
+                Rect::from_min_max(
+                    Pos2::new(
+                        bounds.left() + nr.min.x * bounds.width(),
+                        bounds.top() + nr.min.y * bounds.height(),
+                    ),
+                    Pos2::new(
+                        bounds.left() + nr.max.x * bounds.width(),
+                        bounds.top() + nr.max.y * bounds.height(),
+                    ),
+                )
+            } else {
+                self.screen_rect
+                    .filter(|r| r.is_finite() && r.is_positive())
+                    .unwrap_or_else(|| {
+                        Rect::from_center_size(bounds.center(), (bounds.size() * 0.6).max(min))
+                    })
+            }
+        } else {
+            self.screen_rect
+                .filter(|r| r.is_finite() && r.is_positive())
+                .unwrap_or_else(|| {
+                    Rect::from_center_size(bounds.center(), (bounds.size() * 0.6).max(min))
+                })
+        };
         if let Some(size) = self.next_size.take() {
             r.set_width(size.x);
             r.set_height(size.y);
@@ -184,12 +251,19 @@ impl WindowState {
         let y = r.top().min(bounds.bottom() - size.y).max(bounds.top());
         let r = Rect::from_min_size(Pos2::new(x, y), size);
         self.screen_rect = Some(r);
+        self.last_bounds = Some(bounds);
+        if explicit || self.norm_rect.is_none() {
+            self.norm_rect = to_norm(r, bounds);
+        }
         r
     }
 
-    /// Put the window at `rect` now (dragging, resizing).
-    pub(crate) fn set_rect(&mut self, rect: Rect) {
+    /// Put the window at `rect` now (dragging, resizing) and update its
+    /// normalized position inside `bounds`.
+    pub(crate) fn set_rect_in(&mut self, rect: Rect, bounds: Rect) {
         self.screen_rect = Some(rect);
+        self.last_bounds = Some(bounds);
+        self.norm_rect = to_norm(rect, bounds);
         self.snap = None;
     }
 

@@ -333,6 +333,10 @@ pub struct GeneralSettings {
     pub show_welcome: bool,
     /// Interface language (English or Ukrainian).
     pub language: crate::i18n::Language,
+    /// Saved outer/inner OS logical window size `[width, height]` restored on next start.
+    pub window_size: Option<[f32; 2]>,
+    /// Whether the main OS window was maximized when last used.
+    pub window_maximized: bool,
 }
 
 /// Interface sizes offered in Settings and stepped through by VIEW → Interface size.
@@ -376,6 +380,8 @@ impl Default for GeneralSettings {
             skipped_version: None,
             show_welcome: true,
             language: crate::i18n::Language::English,
+            window_size: None,
+            window_maximized: false,
         }
     }
 }

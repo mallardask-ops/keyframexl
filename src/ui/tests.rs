@@ -534,6 +534,124 @@ fn presets_keep_their_own_layout_and_reset() {
 }
 
 #[test]
+fn reopening_closed_playlist_uses_focused_main_pane() {
+    let mut app = app();
+    let area = Rect::from_min_size(Pos2::ZERO, Vec2::new(1100.0, 640.0));
+    // Open Mixer as a tab beside Rack (not root/Playlist), focus it, close Playlist.
+    app.win(Cmd::Show(Tab::Mixer));
+    app.apply_win_cmds(area);
+    let (ms, mn, _) = app.ws.dock().find_tab(&Tab::Mixer).unwrap();
+    app.win(Cmd::Close(Tab::Playlist));
+    app.apply_win_cmds(area);
+    assert!(app.ws.dock().find_tab(&Tab::Playlist).is_none());
+    // Ensure Mixer's pane is the focused leaf in main surface.
+    app.win(Cmd::Show(Tab::Mixer));
+    app.apply_win_cmds(area);
+    // Reopening closed Playlist lands in the focused main pane (with Mixer).
+    app.win(Cmd::Show(Tab::Playlist));
+    app.apply_win_cmds(area);
+    let (ps, pn, _) = app.ws.dock().find_tab(&Tab::Playlist).expect("playlist reopened");
+    let (ms2, mn2, _) = app.ws.dock().find_tab(&Tab::Mixer).unwrap();
+    assert_eq!((ps, pn), (ms2, mn2));
+    assert!(ps.is_main() && ms.is_main());
+}
+
+#[test]
+fn group_move_node_and_surface_keeps_combined_tabs_together() {
+    let mut dock = egui_dock::DockState::new(vec![Tab::Rack]);
+    let [_, right] = dock
+        .main_surface_mut()
+        .split_right(egui_dock::NodeIndex::root(), 0.5, vec![Tab::Mixer, Tab::Playlist]);
+
+    // Tear the entire Mixer + Playlist group out into a single floating window.
+    dock.move_node(
+        (egui_dock::SurfaceIndex::main(), right),
+        egui_dock::TabDestination::Window(Rect::from_min_size(
+            Pos2::new(100.0, 80.0),
+            Vec2::new(500.0, 400.0),
+        )),
+    );
+    let (ms, mn, _) = dock.find_tab(&Tab::Mixer).expect("mixer floated");
+    let (ps, pn, _) = dock.find_tab(&Tab::Playlist).expect("playlist floated");
+    assert!(!ms.is_main());
+    assert_eq!((ms, mn), (ps, pn), "Mixer and Playlist float together in one window");
+
+    // Dock the entire floating surface back onto the main Rack pane as one group.
+    let (rs, rn, _) = dock.find_tab(&Tab::Rack).unwrap();
+    dock.move_surface(
+        ms,
+        egui_dock::TabDestination::Node(rs, rn, egui_dock::TabInsert::Append),
+    );
+    let (ms2, mn2, _) = dock.find_tab(&Tab::Mixer).expect("mixer re-docked");
+    let (ps2, pn2, _) = dock.find_tab(&Tab::Playlist).expect("playlist re-docked");
+    assert!(ms2.is_main());
+    assert_eq!((ms2, mn2), (rs, rn));
+    assert_eq!((ps2, pn2), (rs, rn));
+}
+
+#[test]
+fn push_silence_scopes_drains_frozen_waveform() {
+    let engine = keyframexl::engine::Engine::new(48_000);
+    let scope = engine.master_scope();
+    scope.track.store(0, std::sync::atomic::Ordering::Relaxed);
+    // Write non-zero signal into the ring buffer as if playback just stopped.
+    for slot in scope.ring.iter() {
+        slot.store(0.75_f32.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    }
+    let mut buf = [0.0f32; 256];
+    scope.read(&mut buf);
+    assert!(buf.iter().any(|&v| v.abs() > 0.5));
+    // Draining silence clears the buffer so the deck monitor settles to 0.
+    engine.push_silence_scopes(keyframexl::engine::SCOPE_LEN);
+    scope.read(&mut buf);
+    assert!(buf.iter().all(|&v| v == 0.0), "scope must settle to 0.0 after silence");
+}
+
+#[test]
+fn welcome_modal_blocks_background_rack_clicks_so_new_project_does_not_prompt() {
+    let mut app = app();
+    let ctx = egui::Context::default();
+    ctx.set_fonts(crate::theme::font_definitions(None));
+    // Start cleanly with Welcome modal open.
+    app.welcome_open = true;
+    let raw = egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200.0, 760.0))),
+        ..Default::default()
+    };
+    let _ = ctx.run(raw, |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.add_enabled_ui(!app.welcome_open, |ui| app.rack(ui));
+        });
+    });
+    // Click right on a rack step pad while Welcome modal is open.
+    let pad = app.probe.pad.expect("rack pad rect").center();
+    let raw_press = egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200.0, 760.0))),
+        events: vec![
+            egui::Event::PointerMoved(pad),
+            egui::Event::PointerButton {
+                pos: pad,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::default(),
+            },
+        ],
+        ..Default::default()
+    };
+    let _ = ctx.run(raw_press, |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.add_enabled_ui(!app.welcome_open, |ui| app.rack(ui));
+        });
+    });
+    assert!(!app.dirty(), "clicks behind Welcome modal must not dirty the project");
+    app.request(super::project::Pending::New);
+    assert!(
+        app.pending.is_none(),
+        "New project from Welcome must not trigger unsaved-changes confirmation"
+    );
+}
+
+#[test]
 fn two_piano_rolls_keep_separate_instruments() {
     let mut app = app();
     app.song
@@ -1490,4 +1608,60 @@ fn the_count_in_lasts_one_bar_of_the_first_meter() {
         den: 4,
     });
     assert_eq!(app.count_in_frames(), rate * 3 / 2, "3/4: three beats");
+}
+
+#[test]
+fn tide_renders_all_oscillators_and_lower_decks_cleanly() {
+    let (ctx, mut app) = setup();
+    let patch = keyframexl::synth::SynthPatch::factory(17);
+    let id = app.song.add_channel(
+        "Tide Test",
+        keyframexl::sequence::InstrumentKind::Synth { patch },
+    );
+    let mut tab = Tab::Instrument { id };
+    for (w, h) in [(1040.0_f32, 680.0_f32), (680.0_f32, 540.0_f32)] {
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(w, h))),
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| app.tab_ui(ui, &mut tab));
+        });
+    }
+}
+
+#[test]
+fn sampler_renders_empty_and_multizone_pages_cleanly() {
+    let (ctx, mut app) = setup();
+    let empty_id = app.add_sampler();
+    let mut empty_tab = Tab::Instrument { id: empty_id };
+    let input = egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1040.0, 680.0))),
+        ..Default::default()
+    };
+    let _ = ctx.run(input, |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| app.tab_ui(ui, &mut empty_tab));
+    });
+
+    app.song =
+        keyframexl::project_io::open(std::path::Path::new("artifacts/dwp-multizone/Zones.kfxl"))
+            .expect("fixture project");
+    let id = app.default_roll();
+    let mut tab = Tab::Instrument { id };
+    for page in 0..5 {
+        for zone in [Some(0), None] {
+            {
+                let st = app.sampler_ui(id);
+                st.page = page;
+                st.zone = zone;
+            }
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1040.0, 680.0))),
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.tab_ui(ui, &mut tab));
+            });
+        }
+    }
 }

@@ -216,8 +216,14 @@ pub(crate) enum Gesture {
         orig: Vec<Note>,
         duplicate: bool,
     },
-    /// Box selection (Ctrl+drag), from a grid point.
-    Select { from: Pos2, add: bool },
+    /// Box selection (Ctrl+drag or Select tool), anchored in musical coordinates
+    /// so scrolling while selecting never loses off-screen notes.
+    Select {
+        from_tick: Tick,
+        from_pitch: f32,
+        add: bool,
+        base: Vec<u64>,
+    },
     /// Right button held: erase what the pointer touches.
     Erase,
     /// Slide tool: drag stretches a new slide.
@@ -262,6 +268,20 @@ impl Geom {
     }
     pub fn y(&self, pitch: u8) -> f32 {
         self.grid.top() + (self.top as f32 - pitch as f32) * self.row
+    }
+    /// Screen y for a continuous pitch coordinate (where `pitch` occupies `[pitch, pitch+1]`).
+    pub fn y_f32(&self, pitch_f: f32) -> f32 {
+        self.grid.top() + (self.top as f32 + 1.0 - pitch_f) * self.row
+    }
+    /// Continuous pitch coordinate under screen y.
+    pub fn pitch_f32(&self, y: f32) -> f32 {
+        (self.top as f32 + 1.0 - (y - self.grid.top()) / self.row)
+            .clamp(LOWEST as f32, HIGHEST as f32 + 1.0)
+    }
+    /// Unsnapped tick under screen x, clamped to valid song ticks.
+    pub fn tick_f(&self, x: f32) -> Tick {
+        (self.x0 + ((x - self.grid.left()) / self.cell * STEP as f32).round() as Tick)
+            .clamp(0, MAX_BARS * BAR)
     }
     /// A point at `step` (fractional) and the middle of `pitch`'s row.
     #[allow(dead_code)]
@@ -684,7 +704,7 @@ impl App {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
         let resp = ui.interact(grid, ui.id().with("roll-grid"), Sense::click_and_drag());
-        self.roll_scrollbars(ui, &p, &g, plen);
+        let scrollbar_busy = self.roll_scrollbars(ui, &p, &g, plen);
         let ghost_key = ui.id().with("roll-ghost-click");
         let pointer = resp.interact_pointer_pos();
         let ghost = pointer.and_then(|q| {
@@ -704,7 +724,7 @@ impl App {
         });
         let now = ui.input(|i| i.time);
         let prior: Option<(u64, u64, u64, u64, f64)> = ui.data(|d| d.get_temp(ghost_key));
-        let switch = if resp.double_clicked() {
+        let switch = if resp.double_clicked() && !scrollbar_busy {
             pointer.and_then(|q| {
                 let own = self.note_at(&g, q);
                 let created = prior.filter(|(pattern, channel, _, target, time)| {
@@ -743,12 +763,15 @@ impl App {
             ui.ctx().request_repaint();
             return;
         }
-        let new_on_ghost = ui.input(|i| i.pointer.primary_pressed())
+        let new_on_ghost = ui.is_enabled()
+            && !self.welcome_open
+            && !scrollbar_busy
+            && ui.input(|i| i.pointer.primary_pressed())
             && resp.hovered()
             && ghost.is_some()
             && pointer.is_some_and(|q| self.note_at(&g, q).is_none());
         let count = self.pattern().notes.len();
-        self.roll_input(ui, &p, &g, &resp);
+        self.roll_input(ui, &p, &g, &resp, scrollbar_busy);
         if new_on_ghost && self.pattern().notes.len() > count {
             if let (Some(target), Some(&id)) = (ghost, self.roll_sel.first()) {
                 ui.data_mut(|d| d.insert_temp(ghost_key, (self.selected, me, id, target, now)));
@@ -757,6 +780,7 @@ impl App {
         self.paint_notes(&p.with_clip_rect(grid), &g);
         if self.is_vocal(me) {
             if resp.double_clicked()
+                && !scrollbar_busy
                 && let Some(q) = resp.interact_pointer_pos()
                 && let Some(n) = self.note_at(&g, q)
             {
@@ -765,17 +789,27 @@ impl App {
             }
             self.lyric_overlay(ui, &g);
         }
-        if let Some((_, Gesture::Select { from, .. })) = &self.roll_gesture
+        if let Some((
+            _,
+            Gesture::Select {
+                from_tick,
+                from_pitch,
+                ..
+            },
+        )) = &self.roll_gesture
             && let Some(now) = ui.input(|i| i.pointer.interact_pos())
         {
-            let r = Rect::from_two_pos(*from, now).intersect(grid);
-            p.rect_filled(r, 2.0, t::TEXT.gamma_multiply(0.06));
-            p.rect_stroke(
-                r,
-                2.0,
-                Stroke::new(1.0_f32, t::TEXT),
-                egui::StrokeKind::Inside,
-            );
+            let from = pos2(g.x(*from_tick), g.y_f32(*from_pitch));
+            let r = Rect::from_two_pos(from, now).intersect(grid);
+            if r.is_positive() {
+                p.rect_filled(r, 2.0, t::TEXT.gamma_multiply(0.06));
+                p.rect_stroke(
+                    r,
+                    2.0,
+                    Stroke::new(1.0_f32, t::TEXT),
+                    egui::StrokeKind::Inside,
+                );
+            }
         }
         if self.focus == Some(Tab::Roll { instrument: me }) {
             self.roll_keys(ui, &g);
@@ -1356,11 +1390,12 @@ impl App {
     /// Wheel: pitch, Shift = time, Ctrl = time zoom at the pointer, Alt = row height.
     /// Real scrollbars (FL): pitch on the right edge of the grid, time along
     /// the bottom. Drag the thumb; click the track to page.
-    fn roll_scrollbars(&mut self, ui: &mut Ui, p: &egui::Painter, g: &Geom, plen: Tick) {
+    fn roll_scrollbars(&mut self, ui: &mut Ui, p: &egui::Painter, g: &Geom, plen: Tick) -> bool {
         let me = self.roll_inst;
         let Some(mut v) = self.roll_view.get(&me).copied() else {
-            return;
+            return false;
         };
+        let mut busy = false;
         let bar = |ui: &mut Ui, track: Rect, thumb: Rect, id: &str| -> (egui::Response, f32) {
             let r = ui.interact(track, ui.id().with(id), Sense::click_and_drag());
             let lit = r.hovered() || r.dragged();
@@ -1411,6 +1446,9 @@ impl App {
                 ),
             );
             let (r, page) = bar(ui, track, thumb, "roll-vscroll");
+            if r.hovered() || r.dragged() || r.clicked() {
+                busy = true;
+            }
             if r.dragged() {
                 v.top -= r.drag_delta().y / track.height() * total;
             }
@@ -1434,6 +1472,9 @@ impl App {
                 ),
             );
             let (r, page) = bar(ui, track, thumb, "roll-hscroll");
+            if r.hovered() || r.dragged() || r.clicked() {
+                busy = true;
+            }
             if r.dragged() {
                 v.x0 += r.drag_delta().x / track.width() * span;
             }
@@ -1441,6 +1482,7 @@ impl App {
             v.x0 = v.x0.clamp(0.0, (span - view).max(0.0));
         }
         self.roll_view.insert(me, v);
+        busy
     }
 
     fn roll_wheel(&mut self, ui: &mut Ui, v: &mut RollView, grid_left: f32, grid_top: f32) {
@@ -2005,7 +2047,14 @@ impl App {
         MoveMode::Move
     }
 
-    fn roll_input(&mut self, ui: &Ui, p: &egui::Painter, g: &Geom, resp: &egui::Response) {
+    fn roll_input(
+        &mut self,
+        ui: &Ui,
+        p: &egui::Painter,
+        g: &Geom,
+        resp: &egui::Response,
+        scrollbar_busy: bool,
+    ) {
         let (alt, shift, ctrl) =
             ui.input(|i| (i.modifiers.alt, i.modifiers.shift, i.modifiers.command));
         let grid = self.snap.grid();
@@ -2019,10 +2068,12 @@ impl App {
                 i.pointer.secondary_down(),
             )
         });
-        let over = pointer.is_some_and(|q| g.grid.contains(q)) && resp.hovered();
+        let can_start = ui.is_enabled() && !self.welcome_open && !scrollbar_busy;
+        let over = can_start && pointer.is_some_and(|q| g.grid.contains(q)) && resp.hovered();
 
         // Cursor tells what a press will do.
-        if self.roll_gesture.is_none()
+        if can_start
+            && self.roll_gesture.is_none()
             && let Some(hp) = resp.hover_pos()
             && g.grid.contains(hp)
         {
@@ -2069,8 +2120,14 @@ impl App {
                 || (self.tool == Tool::Select && hit.is_none())
             {
                 Some(Gesture::Select {
-                    from: q,
+                    from_tick: g.tick_f(q.x),
+                    from_pitch: g.pitch_f32(q.y),
                     add: shift,
+                    base: if shift {
+                        self.roll_sel.clone()
+                    } else {
+                        Vec::new()
+                    },
                 })
             } else if let Some((index, mode)) = slide {
                 self.checkpoint();
@@ -2353,6 +2410,36 @@ impl App {
                     egui::StrokeKind::Inside,
                 );
             }
+            Gesture::Select {
+                from_tick,
+                from_pitch,
+                add,
+                base,
+            } if down => {
+                let cur_tick = g.tick_f(q.x);
+                let cur_pitch = g.pitch_f32(q.y);
+                let (t0, t1) = ((*from_tick).min(cur_tick), (*from_tick).max(cur_tick));
+                let (p0, p1) = (from_pitch.min(cur_pitch), from_pitch.max(cur_pitch));
+                let hits: Vec<u64> = self
+                    .pattern()
+                    .notes
+                    .iter()
+                    .filter(|n| {
+                        n.instrument == me
+                            && n.end() > t0
+                            && n.start <= t1
+                            && (n.pitch as f32 + 1.0) > p0
+                            && (n.pitch as f32) < p1
+                    })
+                    .map(|n| n.id)
+                    .collect();
+                self.roll_sel = if *add { base.clone() } else { Vec::new() };
+                for id in hits {
+                    if !self.roll_sel.contains(&id) {
+                        self.roll_sel.push(id);
+                    }
+                }
+            }
             Gesture::Erase if secondary_down || (self.tool == Tool::Delete && down) => {
                 if g.grid.contains(q) {
                     if self.tool == Tool::Slide {
@@ -2447,22 +2534,30 @@ impl App {
                 };
                 self.say(Tone::Quiet, text);
             }
-            Gesture::Select { from, add } => {
-                let r = Rect::from_two_pos(from, q);
+            Gesture::Select {
+                from_tick,
+                from_pitch,
+                add,
+                base,
+            } => {
+                let cur_tick = g.tick_f(q.x);
+                let cur_pitch = g.pitch_f32(q.y);
+                let (t0, t1) = (from_tick.min(cur_tick), from_tick.max(cur_tick));
+                let (p0, p1) = (from_pitch.min(cur_pitch), from_pitch.max(cur_pitch));
                 let hits: Vec<u64> = self
                     .pattern()
                     .notes
                     .iter()
                     .filter(|n| {
                         n.instrument == me
-                            && g.visible(n.pitch)
-                            && g.note_rect(n.start, n.length, n.pitch).intersects(r)
+                            && n.end() > t0
+                            && n.start <= t1
+                            && (n.pitch as f32 + 1.0) > p0
+                            && (n.pitch as f32) < p1
                     })
                     .map(|n| n.id)
                     .collect();
-                if !add {
-                    self.roll_sel.clear();
-                }
+                self.roll_sel = if add { base } else { Vec::new() };
                 for id in hits {
                     if !self.roll_sel.contains(&id) {
                         self.roll_sel.push(id);

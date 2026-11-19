@@ -87,17 +87,18 @@ impl<Tab> DockArea<'_, Tab> {
             let tab_dst = self.show_drag_drop_overlay(ui, &mut state, tab_viewer);
             if ui.input(|i| i.pointer.primary_released()) {
                 if let Some(destination) = tab_dst {
-                    let source = {
-                        match state.dnd.as_ref().unwrap().drag.src {
-                            TreeComponent::Tab(src_surf, src_node, src_tab) => {
-                                (src_surf, src_node, src_tab)
-                            }
-                            _ => todo!(
-                                "collections of tabs, like nodes and surfaces can't be docked (yet)"
-                            ),
+                    match state.dnd.as_ref().unwrap().drag.src {
+                        TreeComponent::Tab(src_surf, src_node, src_tab) => {
+                            self.dock_state
+                                .move_tab((src_surf, src_node, src_tab), destination);
                         }
-                    };
-                    self.dock_state.move_tab(source, destination);
+                        TreeComponent::Node(src_surf, src_node) => {
+                            self.dock_state.move_node((src_surf, src_node), destination);
+                        }
+                        TreeComponent::Surface(src_surf) => {
+                            self.dock_state.move_surface(src_surf, destination);
+                        }
+                    }
                 }
             }
         }
@@ -200,19 +201,28 @@ impl<Tab> DockArea<'_, Tab> {
         let drag_state = state.dnd.as_mut().unwrap();
         let style = self.style.as_ref().unwrap();
 
-        let deserted_node = {
-            match (
-                drag_state.drag.src.node_address(),
-                drag_state.hover.dst.node_address(),
-            ) {
-                ((src_surf, Some(src_node)), (dst_surf, Some(dst_node))) => {
-                    src_surf == dst_surf
-                        && src_node == dst_node
-                        && self.dock_state[src_surf][src_node].tabs_count() == 1
-                }
-                _ => false,
+        let deserted_node = match (
+            drag_state.drag.src.clone(),
+            drag_state.hover.dst.node_address(),
+        ) {
+            (TreeComponent::Tab(src_surf, src_node, _), (dst_surf, Some(dst_node))) => {
+                src_surf == dst_surf
+                    && src_node == dst_node
+                    && self.dock_state[src_surf][src_node].tabs_count() == 1
             }
+            (TreeComponent::Node(src_surf, src_node), (dst_surf, Some(dst_node))) => {
+                src_surf == dst_surf && src_node == dst_node
+            }
+            (TreeComponent::Surface(src_surf), (dst_surf, _)) => src_surf == dst_surf,
+            _ => false,
         };
+
+        // Never offer a dock overlay on top of the surface currently being dragged.
+        if let TreeComponent::Surface(src_surf) = drag_state.drag.src {
+            if drag_state.hover.dst.surface_address() == src_surf {
+                return None;
+            }
+        }
 
         // Not all scenarios can house all splits.
         let restricted_splits = if drag_state.hover.dst.is_surface() || deserted_node {
@@ -229,7 +239,15 @@ impl<Tab> DockArea<'_, Tab> {
                 };
                 tab_viewer.allowed_in_windows(&mut tabs[tab.0])
             }
-            _ => todo!("collections of tabs, like nodes or surfaces, can't be dragged! (yet)"),
+            TreeComponent::Node(surface, node) => {
+                let Node::Leaf { tabs, .. } = &mut self.dock_state[surface][node] else {
+                    unreachable!("node drags can only come from leaf nodes")
+                };
+                tabs.iter_mut().all(|t| tab_viewer.allowed_in_windows(t))
+            }
+            // A floating window surface is already a window: dropping outside a
+            // dock target leaves it floating where it is.
+            TreeComponent::Surface(_) => false,
         };
 
         if let Some(pointer) = state.last_hover_pos {

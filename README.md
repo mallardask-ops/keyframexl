@@ -16,12 +16,14 @@ KeyFrameXL is built with `eframe`/`egui` + `egui_dock`, inspired by classic patt
 
 ### Sequencing & Arrangement
 - **Channel Rack (`F6`)** — step sequencer with beat groups, per-step velocity (Shift+click), mute/solo, step operations, and inline note previews.
-- **Piano Roll (`F7`)** — chromatic MIDI note editor with Draw (`P`) and Slide (`S`) tools, snapping (`1/16`, `1/4`, `Bar`, or free with `Alt`), scale highlighting, velocity lane, note tools, and a built-in **Riff Machine**.
-- **Playlist (`F5`)** — multi-track arrangement for pattern and audio clips, **Tempo automation lane**, and **Automation clips**.
-- **Dockable Workspaces** — every editor is a tab that can be docked side-by-side, stacked, or floated into its own window. Three workspace presets (`Arrange`, `Compose`, `Edit` via `Alt+1..3`) persist to `~/.config/keyframexl/workspace.ron`.
+- **Piano Roll (`F7`)** — chromatic MIDI note editor with Draw (`P`), Paint (`B`), Delete (`D`), Mute (`T`), Slice (`C`), Select (`E`), Zoom (`Z`), and Slide (`S`) tools, snapping (`1/16`, `1/4`, `Bar`, or free with `Alt`), scale highlighting, scroll-safe marquee selection, velocity/property lanes, note tools, and a built-in **Riff Machine**.
+- **Playlist (`F5`)** — multi-track arrangement for pattern, audio, and automation clips, **Tempo automation lane**, right-drag marquee selection (quick right-click deletes), multi-clip move/duplicate, and song markers.
+- **Transport Deck & Live Monitor** — pattern selector with mouse-wheel switching and double-click rename, master VU meter, and live **Oscilloscope / Spectrum Analyzer** (`VIEW → Deck monitor`).
+- **Dockable Workspaces** — every editor is a tab that can be docked side-by-side, stacked, or floated into its own window. Combined tab groups and floating windows can be dragged and docked together via their grip handle (`⋮⋮`) or empty tab bar. Three workspace presets (`Arrange`, `Compose`, `Edit` via `Alt+1..3`), floating window relative positions across UI scaling, and main window size persist automatically.
+- **Welcome Screen & Localization** — startup hub with recent projects, 6 starter templates, and searchable KeyFrame Tide / Forge preset launchers. Full **English & Ukrainian** UI localization (`Settings → General → Language`).
 
 ### Built-in Instruments
-- **Multi-zone Sampler** — DirectWave-inspired sampler with key/velocity zone mapping, DAHDSR envelopes, forward/sustain/ping-pong loops, dual filters, dual LFOs, and a 16-slot modulation matrix. Imports DirectWave `.dwp` presets (via optional ConvertWithMoss).
+- **Multi-zone Sampler** — DirectWave-inspired sampler with **native `.dwp` reader** (no external converter required), key/velocity zone mapping, round-robin / random trigger groups, DAHDSR envelopes, forward/sustain/ping-pong loops, dual filters, dual LFOs, program LFOs & sends, per-voice FX (Bitcrusher, Ring Mod, Quantizer, Decimator, Phaser), and a 16-slot modulation matrix.
 - **KeyFrame Tide** — built-in polyphonic synthesizer with 18 factory presets.
 - **Forge (Game SFX Designer)** — procedural sound designer for jumps, coins, hits, lasers, and explosions with up to 6 layers (oscillators, noise, samples, Tide synth), drawn pitch/volume/filter curves, 4 character knobs (*Size, Energy, Dirt, Space*), style presets (*Retro, Cartoon, Heavy, Sci-fi*), **Mutate** variations, and batch WAV/OGG export. See [docs/forge.md](docs/forge.md).
 - **Vocal (UTAU Singing Channels)** — singing synthesis powered by the WORLD vocoder (`rsworld-sys`) using UTAU voicebanks (including one-click official Kasane Teto download) with per-note lyrics directly in the piano roll. See [docs/vocal.md](docs/vocal.md).
@@ -36,13 +38,14 @@ The Mixer (`F9`) ships with **32 native DSP effects** with custom visual faces a
 - **Stereo & Vocal:** Stereo, Stereo Shaper, Mid / Side, Balance, Vocoder
 
 ### Plugin Hosting & FL Studio Interop
-- **VST3 & VST2 Hosting** — out-of-process plugin bridge (`src/bridge/`) to isolate crashes, embedded X11 editor windows, and Wine/yabridge support for Windows plugins.
+- **CLAP 1.2, VST3 & VST2 Hosting** — native Linux CLAP 1.2 support alongside VST3 & VST2, out-of-process plugin bridge (`src/bridge/`) to isolate crashes, embedded X11 editor windows, and Wine/yabridge support for Windows plugins.
 - **FL Studio Interop** — imports `.flp` projects (`src/flp.rs`, `src/flp_fx.rs`), plus optional FL Link / channel freezing workflows.
 
-### Audio, MIDI & Export
-- **Shared Engine** — real-time playback (PipeWire/ALSA via `cpal`) and offline rendering share one voice engine (`src/engine.rs`).
-- **MIDI & Recording** — live MIDI input (`midir`), MIDI file import/export, and in-app audio recording.
-- **Portable Projects & Export** — saves self-contained `.kfxl` project files and exports to **WAV** (16/24-bit, 32-bit float), **FLAC** (16/24-bit), and **MP3** (128/192/320 kbps), plus WAV/OGG batch export in Forge.
+### Audio, MIDI, Export & Updates
+- **Shared Real-Time Engine** — real-time playback (PipeWire/ALSA via `cpal` with low-latency PipeWire tuning, automatic hot-reconnect, and a lock-free `rtrb` live parameter queue) and offline rendering share one voice engine (`src/engine.rs`).
+- **MIDI & Recording** — live MIDI input (`midir`), MIDI Clock Master/Slave & MIDI Out, MIDI file import/export, and in-app audio recording.
+- **Portable Projects, Bundles & Export** — saves self-contained `.kfxl` projects and shareable `.zip` **Project Bundles** (*Collect all & save*), exports to **WAV** (16/24-bit, 32-bit float), **FLAC** (16/24-bit), and **MP3** (128/192/320 kbps), plus WAV/OGG batch export in Forge.
+- **Built-in Update Checker** — non-blocking GitHub Releases check (`HELP → Check for updates…`) with direct release download links.
 
 ## Quick Start
 
@@ -55,7 +58,7 @@ The Mixer (`F9`) ships with **32 native DSP effects** with custom visual faces a
 ### System Requirements
 
 - **OS:** 64-bit Linux (`x86_64`)
-- **Display:** X11, or Wayland with **XWayland** (runs on X11/XWayland by default so embedded VST plugin GUIs work; pure Wayland is supported via `KFXL_X11=0` without X11 plugin embedding)
+- **Display:** X11, or Wayland with **XWayland** (runs on X11/XWayland by default so embedded VST/CLAP plugin GUIs work; pure Wayland is supported via `KFXL_X11=0` without X11 plugin embedding)
 - **Graphics:** OpenGL-capable GPU & drivers (for `eframe` / `glow`)
 - **Audio:** Working **PipeWire** (via PipeWire-ALSA) or **ALSA** output
 - **Display Resolution:** `1180×680` minimum (`1366×768` or higher recommended)
@@ -91,7 +94,7 @@ cargo run -- render-demo demo.wav
 # Play the built-in demo via PipeWire (pw-cat)
 cargo run -- play-demo
 
-# Scan VST3 folders and print plugin status
+# Scan CLAP / VST3 / VST2 folders and print plugin status
 cargo run -- plugin-scan
 ```
 
@@ -108,12 +111,14 @@ cargo run -- plugin-scan
 | `Ctrl+Z` / `Ctrl+Y` | Undo / Redo |
 | `Ctrl+Shift+N` / `Ctrl+O` / `Ctrl+S` | New / Open / Save project |
 | `Ctrl+Shift+S` | Save As |
-| `Ctrl+Shift+Ins` | New pattern |
-| `P` / `S` (Piano Roll) | Draw tool / Slide note tool |
+| `Ctrl+Shift+Ins` / `F4` | New pattern / Next empty pattern |
+| `F2` / Double-click Pattern | Rename current pattern (scroll wheel switches patterns) |
+| `P` / `S` / `E` (Piano Roll & Playlist) | Draw / Slide / Select tool (`RMB drag` selects in Playlist) |
+| `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Scale UI larger / smaller / reset |
 
 ## Optional Integrations
 
-- **DirectWave `.dwp` presets:** install [ConvertWithMoss](https://www.mossgrabers.de/Software/ConvertWithMoss/ConvertWithMoss.html) (20.2+) in `PATH` or set `KEYFRAMEXL_CONVERTER` to its executable. Once imported, samples and zone settings are embedded inside the `.kfxl` project.
+- **DirectWave `.dwp` presets:** parsed natively in Rust (`src/dwp.rs`) with embedded samples and zone/DSP parameters. [ConvertWithMoss](https://www.mossgrabers.de/Software/ConvertWithMoss/ConvertWithMoss.html) (20.2+) is supported as an optional fallback via `PATH` or `KEYFRAMEXL_CONVERTER`.
 - **Windows VST plugins:** configure Wine / yabridge paths in **Options → Settings → Plugins**. Native X11 window embedding is enabled automatically (via XWayland on Wayland sessions; override with `KFXL_X11=0`).
 - **UTAU voicebanks:** install `.zip` voicebanks or use the built-in one-click installer inside a Vocal channel.
 
@@ -124,15 +129,19 @@ assets/          App icon, brand lockup SVG, bundled IBM Plex fonts
 docs/            Feature guides (Forge, Vocal, UI rules, roadmap, DWP validation)
 scripts/         Fixture generators and live/UX helper scripts
 src/
-  bridge/        Out-of-process VST plugin host & shared memory protocol
+  bridge/        Out-of-process CLAP / VST3 / VST2 plugin host & shared memory protocol
+  clap/          Native CLAP 1.2 C ABI loader & host callbacks
   forge/         Procedural game SFX synthesizer & batch exporter
   fx/            32 built-in native audio effects + presets
-  ui/            egui/eframe shell, dockable editors, custom widgets
+  ui/            egui/eframe shell, dockable editors, welcome screen, custom widgets
   vocal/         UTAU voicebank parser, lyric mapper, WORLD vocoder renderer
-  engine.rs      Shared real-time & offline audio engine
+  dwp.rs         Native DirectWave .dwp preset & sample parser
+  engine.rs      Shared real-time & offline audio engine (lock-free rtrb param queue)
   flp.rs         FL Studio .flp project importer
-  sampler.rs     Multi-zone sampler engine
+  i18n.rs        English & Ukrainian UI localization
+  sampler.rs     Multi-zone sampler engine (DirectWave DSP, round-robin, per-voice FX)
   synth.rs       KeyFrame Tide synthesizer
+  updater.rs     Non-blocking GitHub Releases update checker
 tests/           Integration tests and audio fixtures
 vendor/          Patched local dependencies (cpal, egui_dock, vst3-host, winit)
 ```

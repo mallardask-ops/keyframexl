@@ -627,7 +627,7 @@ impl App {
                                 .color(t::MUTED),
                         );
                     });
-                let body_h = size.y - 74.0 - 52.0;
+                let body_h = (ui.available_height() - 52.0).max(120.0);
                 egui::ScrollArea::vertical()
                     .id_salt(("settings-body", page as u8))
                     .auto_shrink(false)

@@ -322,9 +322,58 @@ impl App {
                 }
             },
         );
+        // Double-click renames the active pattern (same as F2).
+        if r.double_clicked() {
+            ui.memory_mut(|m| m.close_popup());
+            self.renaming = Some((self.selected, name.clone()));
+        }
+        // Mouse wheel over the pattern selector switches patterns (FL style).
+        let wheel_hit = r.hovered() && !ui.memory(|m| m.any_popup_open());
+        if wheel_hit {
+            let dy = ui.input_mut(|i| {
+                let d = if i.raw_scroll_delta.y != 0.0 {
+                    i.raw_scroll_delta.y
+                } else {
+                    i.smooth_scroll_delta.y
+                };
+                if d != 0.0 {
+                    i.raw_scroll_delta = egui::Vec2::ZERO;
+                    i.smooth_scroll_delta = egui::Vec2::ZERO;
+                }
+                d
+            });
+            if dy != 0.0 {
+                let acc_id = ui.make_persistent_id("pattern_wheel_acc");
+                let mut acc: f32 = ui.data(|d| d.get_temp(acc_id)).unwrap_or(0.0);
+                // Reset accumulator on direction reversal.
+                if acc * dy < 0.0 {
+                    acc = 0.0;
+                }
+                acc += dy;
+                // A single mouse-wheel notch is typically 20–50 px; fire promptly
+                // on a notch while smoothing trackpad gestures.
+                let step = if acc.abs() >= 18.0 {
+                    let s = acc.signum() as i32;
+                    acc = 0.0;
+                    s
+                } else {
+                    0
+                };
+                ui.data_mut(|d| d.insert_temp(acc_id, acc));
+                if step > 0 {
+                    if let Some(j) = next {
+                        pick = Some(self.song.patterns[j].id);
+                    }
+                } else if step < 0 {
+                    if let Some(j) = prev {
+                        pick = Some(self.song.patterns[j].id);
+                    }
+                }
+            }
+        }
         kit::bar_hint(
             r,
-            "Pattern to edit and play. F2 renames, F4 jumps to the next empty one.",
+            "Pattern to edit and play. Scroll to switch, double-click or F2 renames, F4 jumps to the next empty one.",
         );
         if let Some(id) = pick {
             self.select_pattern(id);
@@ -512,7 +561,10 @@ impl App {
                         m = m.max(v);
                     }
                     let norm = ((m + 60.0) / 60.0).clamp(0.0, 1.0);
-                    *slot = norm.max(*slot * 0.84);
+                    *slot = norm.max(*slot * 0.82);
+                    if *slot < 0.004 {
+                        *slot = 0.0;
+                    }
                     let h = (*slot * inner.height()).max(1.0);
                     let x = inner.left() + i as f32 * (bw + gap);
                     let bar = Rect::from_min_max(
@@ -527,6 +579,9 @@ impl App {
                         t::ENC_BLUE
                     };
                     p.rect_filled(bar, 1.0, col);
+                }
+                if held.iter().any(|&v| v > 0.0) {
+                    ui.ctx().request_repaint();
                 }
                 ui.data_mut(|d| d.insert_temp(cache_id, held));
             }

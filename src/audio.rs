@@ -914,6 +914,7 @@ impl Audio {
                     if hold.load(Ordering::Relaxed) {
                         // An export is rendering with the plugin instances.
                         data.fill(0.0);
+                        engine.push_silence_scopes(data.len() / 2);
                         return;
                     }
                     if !p.load(Ordering::Relaxed) {
@@ -926,6 +927,7 @@ impl Audio {
                             engine.process_live(snap, data);
                         } else {
                             data.fill(0.0);
+                            engine.push_silence_scopes(data.len() / 2);
                         }
                         // Count-in: a bar of clicks, then Play by itself.
                         let left = cin.load(Ordering::Relaxed);

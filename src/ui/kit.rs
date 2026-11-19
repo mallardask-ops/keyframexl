@@ -487,13 +487,14 @@ pub fn menu_style(ui: &mut Ui) {
     s.spacing.button_padding = MENU_PAD;
     s.spacing.item_spacing = vec2(6.0, 1.0);
     s.spacing.interact_size.y = 24.0;
-    for w in [
-        &mut s.visuals.widgets.inactive,
-        &mut s.visuals.widgets.noninteractive,
-    ] {
-        w.weak_bg_fill = egui::Color32::TRANSPARENT;
-        w.bg_stroke = Stroke::NONE;
-    }
+    s.visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+    s.visuals.widgets.inactive.bg_stroke = Stroke::NONE;
+    // Keep noninteractive.weak_bg_fill opaque (the menu fill) so egui's
+    // fade_out_to_color() greys out disabled rows instead of fading them to
+    // alpha 0, and keep bg_stroke visible so ui.separator() renders a hairline.
+    s.visuals.widgets.noninteractive.weak_bg_fill = t::PANEL_TOP;
+    s.visuals.widgets.noninteractive.bg_fill = t::PANEL_TOP;
+    s.visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, t::LINE);
     s.visuals.widgets.hovered.bg_stroke = Stroke::NONE;
     s.visuals.widgets.active.bg_stroke = Stroke::NONE;
     s.wrap_mode = Some(egui::TextWrapMode::Extend);

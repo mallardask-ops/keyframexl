@@ -250,6 +250,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             if !args.iter().any(|a| a.starts_with("--capture-")) {
                 log_to_file();
             }
+            // Plugin editors (X11, also through yabridge) can only be placed inside
+            // an X11 window: unless turned off, run on X11 (XWayland under Wayland).
+            // Captures keep the default (the headless compositor has no XWayland).
+            let capture = args.iter().any(|a| a.starts_with("--capture-"));
+            let prefs = settings::Settings::load();
             // KFXL_CAPTURE_SIZE=WxH lets captures check narrow layouts.
             let size = env::var("KFXL_CAPTURE_SIZE")
                 .ok()
@@ -257,14 +262,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let (w, h) = s.split_once('x')?;
                     Some([w.parse::<f32>().ok()?, h.parse::<f32>().ok()?])
                 })
+                .or_else(|| {
+                    (!capture)
+                        .then_some(prefs.general.window_size)
+                        .flatten()
+                        .filter(|[w, h]| w.is_finite() && h.is_finite() && *w >= 600.0 && *h >= 400.0)
+                        .map(|[w, h]| [w.clamp(1180.0, 7680.0), h.clamp(680.0, 4320.0)])
+                })
                 .unwrap_or([1366.0, 768.0]);
-            // Plugin editors (X11, also through yabridge) can only be placed inside
-            // an X11 window: unless turned off, run on X11 (XWayland under Wayland).
-            // Captures keep the default (the headless compositor has no XWayland).
-            let capture = args.iter().any(|a| a.starts_with("--capture-"));
             let x11 = env::var("KFXL_X11")
                 .map(|v| v == "1")
-                .unwrap_or(!capture && settings::Settings::load().general.x11);
+                .unwrap_or(!capture && prefs.general.x11);
             if x11 && env::var_os("DISPLAY").is_some() {
                 // SAFETY: still single-threaded here; winit reads it when the loop starts.
                 unsafe { env::remove_var("WAYLAND_DISPLAY") };
@@ -272,15 +280,15 @@ fn main() -> Result<(), Box<dyn Error>> {
             let mut viewport = eframe::egui::ViewportBuilder::default()
                 .with_app_id("keyframexl")
                 .with_inner_size(size)
-                .with_decorations(
-                    !capture && settings::Settings::load().general.system_title_bar,
-                )
+                .with_maximized(!capture && prefs.general.window_maximized)
+                .with_decorations(!capture && prefs.general.system_title_bar)
                 .with_min_inner_size([1180.0, 680.0]);
             if let Some(icon) = app_icon() {
                 viewport = viewport.with_icon(icon);
             }
             let options = eframe::NativeOptions {
                 viewport,
+                persist_window: false,
                 ..Default::default()
             };
             eframe::run_native(

@@ -117,6 +117,116 @@ impl<Tab> DockArea<'_, Tab> {
             available_width -= Style::TAB_COLLAPSE_BUTTON_SIZE;
         }
 
+        let tabs_count_here = self.dock_state[surface_index][node_index].tabs_count();
+        let show_group_grip = self.draggable_tabs && (tabs_count_here > 1 || !surface_index.is_main());
+        let grip_w = if show_group_grip { 18.0 } else { 0.0 };
+        available_width -= grip_w;
+
+        let left_inset = if self.show_leaf_collapse_buttons {
+            Style::TAB_COLLAPSE_BUTTON_SIZE
+        } else {
+            0.0
+        };
+
+        // Subtle 6-dot drag grip on multi-tab groups & floating windows so the
+        // entire combined group can be dragged out or docked back together.
+        if show_group_grip {
+            let grip_rect = Rect::from_min_size(
+                tabbar_outer_rect.min + vec2(left_inset, 0.0),
+                vec2(grip_w, tabbar_outer_rect.height()),
+            );
+            let grip_id = self
+                .id
+                .with((surface_index, "surface"))
+                .with((node_index, "node"))
+                .with("group_grip");
+            let grip_resp = ui
+                .interact(grip_rect, grip_id, Sense::drag())
+                .on_hover_cursor(CursorIcon::Grab)
+                .on_hover_text("Drag to move or dock all tabs in this group together");
+            let dot_col = if grip_resp.hovered() || grip_resp.dragged() {
+                ui.visuals().strong_text_color()
+            } else {
+                ui.visuals().weak_text_color()
+            };
+            let cx = grip_rect.center().x;
+            let cy = grip_rect.center().y;
+            for dx in [-2.5_f32, 2.5] {
+                for dy in [-4.0_f32, 0.0, 4.0] {
+                    ui.painter().circle_filled(pos2(cx + dx, cy + dy), 1.15, dot_col);
+                }
+            }
+            if grip_resp.dragged() {
+                ui.output_mut(|o| o.cursor_icon = CursorIcon::Grabbing);
+                if let Some(pointer_pos) = ui.ctx().pointer_interact_pos() {
+                    let start = *state.drag_start.get_or_insert(pointer_pos);
+                    if (pointer_pos - start).length() > 4.0 {
+                        let (src, drag_rect, count) = if !surface_index.is_main() {
+                            let r = self
+                                .dock_state
+                                .get_window_state(surface_index)
+                                .map(|w| w.rect())
+                                .filter(|r| r.is_finite() && r.is_positive())
+                                .or_else(|| self.dock_state[surface_index][node_index].rect())
+                                .unwrap_or(tabbar_outer_rect);
+                            (
+                                TreeComponent::Surface(surface_index),
+                                r,
+                                self.dock_state[surface_index].num_tabs(),
+                            )
+                        } else {
+                            (
+                                TreeComponent::Node(surface_index, node_index),
+                                self.dock_state[surface_index][node_index]
+                                    .rect()
+                                    .unwrap_or(tabbar_outer_rect),
+                                tabs_count_here,
+                            )
+                        };
+                        ui.memory_mut(|mem| {
+                            mem.data.insert_temp(
+                                self.id.with("drag_data"),
+                                Some(DragData {
+                                    src,
+                                    rect: drag_rect,
+                                }),
+                            );
+                        });
+                        // Floating pill badge showing how many tabs are moving together.
+                        let p = ui
+                            .ctx()
+                            .layer_painter(LayerId::new(Order::Tooltip, grip_id.with("badge")));
+                        let label = if count == 1 {
+                            "Move window".to_string()
+                        } else {
+                            format!("{count} tabs")
+                        };
+                        let galley = p.layout_no_wrap(
+                            label,
+                            egui::FontId::proportional(12.5),
+                            ui.visuals().strong_text_color(),
+                        );
+                        let badge = Rect::from_min_size(
+                            pointer_pos + vec2(12.0, -10.0),
+                            galley.size() + vec2(16.0, 10.0),
+                        );
+                        p.rect_filled(badge, CornerRadius::same(6), style.tab_bar.bg_fill);
+                        p.rect_stroke(
+                            badge,
+                            CornerRadius::same(6),
+                            Stroke::new(1.0_f32, ui.visuals().widgets.active.fg_stroke.color),
+                            StrokeKind::Inside,
+                        );
+                        p.galley(
+                            badge.center() - galley.size() / 2.0,
+                            galley,
+                            ui.visuals().strong_text_color(),
+                        );
+                    }
+                }
+            }
+        }
+
         let actual_width = {
             let Node::Leaf { tabs, scroll, .. } = &mut self.dock_state[surface_index][node_index]
             else {
@@ -124,16 +234,8 @@ impl<Tab> DockArea<'_, Tab> {
             };
 
             let tabbar_inner_rect = Rect::from_min_size(
-                (tabbar_outer_rect.min - pos2(-*scroll, 0.0)
-                    + vec2(
-                        if self.show_leaf_collapse_buttons {
-                            Style::TAB_COLLAPSE_BUTTON_SIZE
-                        } else {
-                            0.0
-                        },
-                        0.0,
-                    ))
-                .to_pos2(),
+                (tabbar_outer_rect.min - pos2(-*scroll, 0.0) + vec2(left_inset + grip_w, 0.0))
+                    .to_pos2(),
                 vec2(tabbar_outer_rect.width(), tabbar_outer_rect.height()),
             );
 
@@ -145,10 +247,8 @@ impl<Tab> DockArea<'_, Tab> {
             );
 
             let mut clip_rect = tabbar_outer_rect;
-            clip_rect.set_width(available_width);
-            if self.show_leaf_collapse_buttons {
-                clip_rect = clip_rect.translate(vec2(Style::TAB_COLLAPSE_BUTTON_SIZE, 0.0));
-            }
+            clip_rect.set_width(available_width.max(0.0));
+            clip_rect = clip_rect.translate(vec2(left_inset + grip_w, 0.0));
             tabs_ui.set_clip_rect(clip_rect);
 
             // Desired size for tabs in "expanded" mode.
@@ -167,12 +267,53 @@ impl<Tab> DockArea<'_, Tab> {
                 fade_style,
             );
 
+            // Dragging the empty tab-bar space of a docked multi-tab leaf drags
+            // the entire tab group together (tear out or re-dock as one).
+            let tabs_right = tabs_ui.min_rect().right().min(clip_rect.right());
+            if self.draggable_tabs
+                && surface_index.is_main()
+                && tabs_count_here > 1
+                && clip_rect.right() - tabs_right > 12.0
+            {
+                let empty_rect = Rect::from_min_max(
+                    pos2(tabs_right, tabbar_outer_rect.top()),
+                    pos2(clip_rect.right(), tabbar_outer_rect.bottom()),
+                );
+                let empty_id = self
+                    .id
+                    .with((surface_index, "surface"))
+                    .with((node_index, "node"))
+                    .with("group_bar");
+                let empty_resp = ui
+                    .interact(empty_rect, empty_id, Sense::drag())
+                    .on_hover_cursor(CursorIcon::Grab);
+                if empty_resp.dragged() {
+                    ui.output_mut(|o| o.cursor_icon = CursorIcon::Grabbing);
+                    if let Some(pointer_pos) = ui.ctx().pointer_interact_pos() {
+                        let start = *state.drag_start.get_or_insert(pointer_pos);
+                        if (pointer_pos - start).length() > 6.0 {
+                            ui.memory_mut(|mem| {
+                                mem.data.insert_temp(
+                                    self.id.with("drag_data"),
+                                    Some(DragData {
+                                        src: TreeComponent::Node(surface_index, node_index),
+                                        rect: self.dock_state[surface_index][node_index]
+                                            .rect()
+                                            .unwrap_or(tabbar_outer_rect),
+                                    }),
+                                );
+                            });
+                        }
+                    }
+                }
+            }
+
             // Draw hline from tab end to edge of tab bar.
             let px = ui.ctx().pixels_per_point().recip();
             let style = fade_style.unwrap_or_else(|| self.style.as_ref().unwrap());
 
             ui.painter().hline(
-                tabs_ui.min_rect().right().min(clip_rect.right())..=tabbar_outer_rect.right(),
+                tabs_right..=tabbar_outer_rect.right(),
                 tabbar_outer_rect.bottom() - px,
                 (px, style.tab_bar.hline_color),
             );

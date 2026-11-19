@@ -254,6 +254,173 @@ impl<Tab> DockState<Tab> {
         }
     }
 
+    /// Moves all tabs of a leaf node together to `dst` (float as one window,
+    /// dock as a split, or merge into another leaf's tabs).
+    pub fn move_node(
+        &mut self,
+        (src_surface, src_node): (SurfaceIndex, NodeIndex),
+        dst: impl Into<TabDestination>,
+    ) {
+        let dst = dst.into();
+        if let TabDestination::Node(dst_surface, dst_node, _) = dst {
+            if src_surface == dst_surface && src_node == dst_node {
+                return;
+            }
+        }
+        let (tabs, active) = match &mut self[src_surface][src_node] {
+            Node::Leaf { tabs, active, .. } if !tabs.is_empty() => {
+                (std::mem::take(tabs), *active)
+            }
+            _ => return,
+        };
+        let active_idx = active.0.min(tabs.len().saturating_sub(1));
+        match dst {
+            TabDestination::Window(window_rect) => {
+                let surface_index = self.add_window(tabs);
+                if let Some(Node::Leaf { active: a, .. }) =
+                    self[surface_index].root_node_mut()
+                {
+                    *a = TabIndex(active_idx);
+                }
+                let state = self.get_window_state_mut(surface_index).unwrap();
+                state.set_position(window_rect.min);
+                if src_surface.is_main() {
+                    state.set_size(window_rect.size() * 0.85);
+                } else {
+                    state.set_size(window_rect.size());
+                }
+            }
+            TabDestination::Node(dst_surface, dst_node, insert) => match insert {
+                TabInsert::Split(split) => {
+                    let mut leaf = Node::leaf_with(tabs);
+                    if let Node::Leaf { active: a, .. } = &mut leaf {
+                        *a = TabIndex(active_idx);
+                    }
+                    self[dst_surface].split(dst_node, split, 0.5, leaf);
+                }
+                TabInsert::Insert(index) => {
+                    let base = index.0;
+                    for (k, tab) in tabs.into_iter().enumerate() {
+                        self[dst_surface][dst_node].insert_tab(TabIndex(base + k), tab);
+                    }
+                    if let Node::Leaf { active: a, tabs: dst_tabs, .. } =
+                        &mut self[dst_surface][dst_node]
+                    {
+                        *a = TabIndex((base + active_idx).min(dst_tabs.len().saturating_sub(1)));
+                    }
+                }
+                TabInsert::Append => {
+                    let base = self[dst_surface][dst_node].tabs_count();
+                    for tab in tabs {
+                        self[dst_surface][dst_node].append_tab(tab);
+                    }
+                    if let Node::Leaf { active: a, tabs: dst_tabs, .. } =
+                        &mut self[dst_surface][dst_node]
+                    {
+                        *a = TabIndex((base + active_idx).min(dst_tabs.len().saturating_sub(1)));
+                    }
+                }
+            },
+            TabDestination::EmptySurface(dst_surface) => {
+                assert!(self[dst_surface].is_empty());
+                let mut tree = Tree::new(tabs);
+                if let Some(Node::Leaf { active: a, .. }) = tree.root_node_mut() {
+                    *a = TabIndex(active_idx);
+                }
+                self[dst_surface] = tree;
+            }
+        }
+        if self[src_surface][src_node].is_leaf() && self[src_surface][src_node].tabs_count() == 0 {
+            self[src_surface].remove_leaf(src_node);
+        }
+        if self[src_surface].is_empty() && !src_surface.is_main() {
+            self.remove_surface(src_surface);
+        }
+    }
+
+    /// Docks all tabs of a floating window surface together into `dst` (main
+    /// surface or another floating window) and removes the source surface.
+    pub fn move_surface(&mut self, src_surface: SurfaceIndex, dst: impl Into<TabDestination>) {
+        if src_surface.is_main() {
+            return;
+        }
+        let dst = dst.into();
+        match dst {
+            TabDestination::Window(_) => return,
+            TabDestination::Node(dst_surface, _, _)
+            | TabDestination::EmptySurface(dst_surface)
+                if dst_surface == src_surface =>
+            {
+                return;
+            }
+            _ => {}
+        }
+        let focused = self[src_surface].focused_leaf();
+        let mut tabs = Vec::new();
+        let mut active_idx = 0usize;
+        let nodes: Vec<NodeIndex> = self[src_surface].breadth_first_index_iter().collect();
+        for n in nodes {
+            if let Node::Leaf {
+                tabs: leaf_tabs,
+                active,
+                ..
+            } = &mut self[src_surface][n]
+            {
+                if Some(n) == focused {
+                    active_idx = tabs.len() + active.0.min(leaf_tabs.len().saturating_sub(1));
+                }
+                tabs.append(leaf_tabs);
+            }
+        }
+        if tabs.is_empty() {
+            return;
+        }
+        let active_idx = active_idx.min(tabs.len().saturating_sub(1));
+        self.remove_surface(src_surface);
+        match dst {
+            TabDestination::Window(_) => unreachable!(),
+            TabDestination::Node(dst_surface, dst_node, insert) => match insert {
+                TabInsert::Split(split) => {
+                    let mut leaf = Node::leaf_with(tabs);
+                    if let Node::Leaf { active: a, .. } = &mut leaf {
+                        *a = TabIndex(active_idx);
+                    }
+                    self[dst_surface].split(dst_node, split, 0.5, leaf);
+                }
+                TabInsert::Insert(index) => {
+                    let base = index.0;
+                    for (k, tab) in tabs.into_iter().enumerate() {
+                        self[dst_surface][dst_node].insert_tab(TabIndex(base + k), tab);
+                    }
+                    if let Node::Leaf { active: a, tabs: dst_tabs, .. } =
+                        &mut self[dst_surface][dst_node]
+                    {
+                        *a = TabIndex((base + active_idx).min(dst_tabs.len().saturating_sub(1)));
+                    }
+                }
+                TabInsert::Append => {
+                    let base = self[dst_surface][dst_node].tabs_count();
+                    for tab in tabs {
+                        self[dst_surface][dst_node].append_tab(tab);
+                    }
+                    if let Node::Leaf { active: a, tabs: dst_tabs, .. } =
+                        &mut self[dst_surface][dst_node]
+                    {
+                        *a = TabIndex((base + active_idx).min(dst_tabs.len().saturating_sub(1)));
+                    }
+                }
+            },
+            TabDestination::EmptySurface(dst_surface) => {
+                assert!(self[dst_surface].is_empty());
+                let mut tree = Tree::new(tabs);
+                if let Some(Node::Leaf { active: a, .. }) = tree.root_node_mut() {
+                    *a = TabIndex(active_idx);
+                }
+                self[dst_surface] = tree;
+            }
+        }
+    }
+
     /// Takes a tab out of its current surface and puts it in a new window.
     /// Returns the surface index of the new window.
     pub fn detach_tab(
