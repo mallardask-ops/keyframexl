@@ -329,6 +329,10 @@ pub struct GeneralSettings {
     pub last_update_check: u64,
     /// Version tag the user chose to skip (e.g. "0.2.0").
     pub skipped_version: Option<String>,
+    /// Show the Welcome Screen hub with recent projects and templates on startup.
+    pub show_welcome: bool,
+    /// Interface language (English or Ukrainian).
+    pub language: crate::i18n::Language,
 }
 
 /// Interface sizes offered in Settings and stepped through by VIEW → Interface size.
@@ -370,6 +374,8 @@ impl Default for GeneralSettings {
             check_updates: true,
             last_update_check: 0,
             skipped_version: None,
+            show_welcome: true,
+            language: crate::i18n::Language::English,
         }
     }
 }

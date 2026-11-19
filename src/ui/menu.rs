@@ -87,27 +87,32 @@ impl App {
                         .data_mut(|d| d.insert_temp(egui::Id::new("about-open"), true));
                 }
                 ui.add_space(6.0);
+                let tr = crate::i18n::strings(self.settings.general.language);
                 let title = |s: &str| {
                     RichText::new(s)
                         .font(t::medium(12.0))
                         .extra_letter_spacing(0.8)
                         .color(t::MUTED)
                 };
-                ui.menu_button(title("FILE"), |ui| self.menu_file(ui));
-                ui.menu_button(title("EDIT"), |ui| self.menu_edit(ui));
-                ui.menu_button(title("ADD"), |ui| self.menu_add(ui));
-                ui.menu_button(title("PATTERNS"), |ui| self.menu_patterns(ui));
-                ui.menu_button(title("VIEW"), |ui| self.menu_view(ui));
-                ui.menu_button(title("OPTIONS"), |ui| self.menu_options(ui));
-                ui.menu_button(title("TOOLS"), |ui| self.menu_tools(ui));
-                ui.menu_button(title("HELP"), |ui| self.menu_help(ui));
+                ui.menu_button(title(tr.menu_file), |ui| self.menu_file(ui));
+                ui.menu_button(title(tr.menu_edit), |ui| self.menu_edit(ui));
+                ui.menu_button(title(tr.menu_add), |ui| self.menu_add(ui));
+                ui.menu_button(title(tr.menu_patterns), |ui| self.menu_patterns(ui));
+                ui.menu_button(title(tr.menu_view), |ui| self.menu_view(ui));
+                ui.menu_button(title(tr.menu_options), |ui| self.menu_options(ui));
+                ui.menu_button(title(tr.menu_tools), |ui| self.menu_tools(ui));
+                ui.menu_button(title(tr.menu_help), |ui| self.menu_help(ui));
                 let name = self
                     .path
                     .as_ref()
                     .and_then(|p| p.file_name())
                     .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "Untitled".into());
-                let dirty = if self.dirty() { "  ·  unsaved" } else { "" };
+                    .unwrap_or_else(|| tr.untitled.into());
+                let dirty = if self.dirty() {
+                    format!("  ·  {}", tr.unsaved)
+                } else {
+                    String::new()
+                };
                 if own_bar {
                     // Window buttons at the right end; the title centred in the row.
                     let menus_end = ui.min_rect().right();
@@ -305,22 +310,23 @@ impl App {
 
     fn menu_file(&mut self, ui: &mut Ui) {
         kit::menu_style(ui);
-        if item(ui, "New", "Ctrl+Shift+N", true, "") {
+        let tr = crate::i18n::strings(self.settings.general.language);
+        if item(ui, tr.file_new, "Ctrl+Shift+N", true, "") {
             self.request(super::Pending::New);
         }
-        if item(ui, "Open…", "Ctrl+O", true, "") {
+        if item(ui, tr.file_open, "Ctrl+O", true, "") {
             self.request(super::Pending::Open(None));
         }
         self.recent_menu(ui);
         self.recover_item(ui);
         ui.separator();
-        if item(ui, "Save", "Ctrl+S", true, "") {
+        if item(ui, tr.file_save, "Ctrl+S", true, "") {
             self.save();
         }
-        if item(ui, "Save as…", "Ctrl+Shift+S", true, "") {
+        if item(ui, tr.file_save_as, "Ctrl+Shift+S", true, "") {
             self.save_as();
         }
-        if item(ui, "Save new version", "Ctrl+N", true, "") {
+        if item(ui, tr.file_save_new_version, "Ctrl+N", true, "") {
             self.save_new_version();
         }
         if item(ui, "Project info…", "F11", true, "") {
@@ -329,20 +335,14 @@ impl App {
         ui.separator();
         ui.menu_button(RichText::new("Export").font(t::sans(13.0)), |ui| {
             kit::menu_style(ui);
-            if item(ui, "Audio file (WAV, FLAC, MP3)…", "Ctrl+R", true, "") {
+            if item(ui, tr.file_export_audio, "Ctrl+R", true, "") {
                 self.export();
             }
-            if item(ui, "MIDI file…", "Ctrl+Shift+M", true, "") {
+            if item(ui, tr.file_export_midi, "Ctrl+Shift+M", true, "") {
                 self.export_midi();
             }
             ui.separator();
-            if item(
-                ui,
-                "Project bundle (.zip, Collect all & save)…",
-                "",
-                true,
-                "",
-            ) {
+            if item(ui, tr.file_export_bundle, "", true, "") {
                 self.export_project_bundle();
             }
         });
@@ -358,25 +358,29 @@ impl App {
                 let id = self.add_sampler();
                 self.load_preset_dialog(id);
             }
-            if item(ui, "MIDI file…", "", true, "") {
+            if item(ui, tr.file_import_midi, "", true, "") {
                 self.import_midi_dialog();
             }
+            if item(ui, tr.file_import_flp, "", true, "") {
+                self.import_flp_dialog();
+            }
             ui.separator();
-            if item(ui, "Project bundle (.zip)…", "", true, "") {
+            if item(ui, tr.file_import_bundle, "", true, "") {
                 self.import_project_bundle();
             }
         });
         ui.separator();
-        if item(ui, "Exit", "", true, "") {
+        if item(ui, tr.file_quit, "", true, "") {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
 
     fn menu_edit(&mut self, ui: &mut Ui) {
         kit::menu_style(ui);
+        let tr = crate::i18n::strings(self.settings.general.language);
         if item(
             ui,
-            "Undo",
+            tr.edit_undo,
             "Ctrl+Z",
             !self.history.is_empty(),
             "Nothing to undo",
@@ -385,7 +389,7 @@ impl App {
         }
         if item(
             ui,
-            "Redo",
+            tr.edit_redo,
             "Ctrl+Y",
             !self.future.is_empty(),
             "Nothing to redo",
@@ -728,6 +732,11 @@ impl App {
 
     fn menu_help(&mut self, ui: &mut Ui) {
         kit::menu_style(ui);
+        let tr = crate::i18n::strings(self.settings.general.language);
+        if item(ui, tr.help_welcome, "", true, "") {
+            self.welcome_open = true;
+        }
+        ui.separator();
         if item(ui, "Keyboard shortcuts", "F1", true, "") {
             self.show_shortcuts = true;
         }
@@ -743,11 +752,11 @@ impl App {
                 self.say(Tone::Bad, format!("Could not open {}: {e}", page.display()));
             }
         }
-        if item(ui, "Check for updates…", "", true, "") {
+        if item(ui, tr.help_check_updates, "", true, "") {
             self.check_for_updates(ui.ctx());
         }
         ui.separator();
-        if item(ui, "About KeyFrameXL", "", true, "") {
+        if item(ui, tr.help_about, "", true, "") {
             ui.ctx()
                 .data_mut(|d| d.insert_temp(egui::Id::new("about-open"), true));
         }

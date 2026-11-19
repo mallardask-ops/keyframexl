@@ -36,6 +36,7 @@ This document tracks what has already been built in KeyFrameXL and what remains 
 - **FL Studio Interop (`src/flp.rs`, `src/flp_fx.rs`, `src/fl_link.rs`, `src/flp_freeze.rs`)** — `.flp` project importer plus experimental FL Link and channel freezing helpers.
 - **Project I/O, Packaging & Audio Export (`src/project_io.rs`, `src/bundle.rs`, `src/render.rs`, `src/ui/export.rs`)** — self-contained `.kfxl` projects (Save, Save As, Recent files, unsaved-change guard, autosave recovery), **Project bundle (`.zip`, "Collect all & save")** export & import with external IR packaging, plugin/voicebank inventory (`manifest.json` + `README.txt`), and multi-format rendering to **WAV** (16/24-bit, 32-bit float), **FLAC** (16/24-bit), and **MP3** (128/192/320 kbps).
 - **Deck Monitor & Update Checker (`src/ui/deck.rs`, `src/updater.rs`, `src/ui/updater_ui.rs`)** — optional recessed Master **Oscilloscope / Spectrum** monitor in the top transport deck (`VIEW → Deck monitor`), and a non-intrusive, zero-telemetry GitHub Releases/Tags **Update Checker** (`HELP → Check for updates…`, daily rate-limited background check with `KFXL_NO_UPDATE_CHECK=1` opt-out and skip-version support).
+- **Welcome Screen, Localization & Release CI (`src/ui/welcome.rs`, `src/i18n.rs`, `.github/workflows/`)** — FL-style startup hub (`HELP → Welcome screen…`, toggleable in `Settings → General`) with Recent projects, 6 starter templates, searchable KeyFrame Tide & Forge preset launchers, and quick actions; live **English / Ukrainian** UI localization (`Settings → General → Language`, Cyrillic-ready bundled IBM Plex Sans); and automated Ubuntu Linux GitHub Actions CI (`ci.yml`) + tagged `keyframexl-linux-x86_64.tar.gz` release publishing (`release.yml`).
 
 ---
 
@@ -50,7 +51,7 @@ This document tracks what has already been built in KeyFrameXL and what remains 
 
 ### Workflow & UI Polish
 - **Vocal engine upgrades** — dynamic mid-phrase tempo-map stretching, clip-offset vocal slicing, and per-note pitch-bend curves.
-- **UI polish** — optional Light theme, toolbar/deck customization, and potential Ukrainian UI localization.
+- **UI polish** — optional Light theme and toolbar/deck customization.
 
 ---
 

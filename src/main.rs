@@ -5,6 +5,7 @@ mod dwp;
 mod fl_link;
 mod fl_native;
 mod flp_freeze;
+mod i18n;
 mod import;
 mod midi_in;
 mod midi_out;

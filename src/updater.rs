@@ -149,11 +149,16 @@ pub fn disabled_by_env() -> bool {
     }
 }
 
+/// Pure interval check independent of process environment (for deterministic tests).
+fn should_auto_check_inner(enabled: bool, last_check: u64, now_secs: u64, env_disabled: bool) -> bool {
+    enabled
+        && !env_disabled
+        && (last_check == 0 || now_secs.saturating_sub(last_check) >= AUTO_CHECK_INTERVAL_SECS)
+}
+
 /// Whether an automatic startup check is due.
 pub fn should_auto_check(enabled: bool, last_check: u64, now_secs: u64) -> bool {
-    enabled
-        && !disabled_by_env()
-        && (last_check == 0 || now_secs.saturating_sub(last_check) >= AUTO_CHECK_INTERVAL_SECS)
+    should_auto_check_inner(enabled, last_check, now_secs, disabled_by_env())
 }
 
 /// True when the user previously chose "Skip this version".
@@ -540,10 +545,16 @@ mod tests {
     #[test]
     fn auto_check_interval_and_skip_matching() {
         let now = 1_700_100_000;
-        assert!(should_auto_check(true, 0, now));
-        assert!(!should_auto_check(false, 0, now));
-        assert!(!should_auto_check(true, now - 3600, now));
-        assert!(should_auto_check(true, now - AUTO_CHECK_INTERVAL_SECS, now));
+        assert!(should_auto_check_inner(true, 0, now, false));
+        assert!(!should_auto_check_inner(true, 0, now, true));
+        assert!(!should_auto_check_inner(false, 0, now, false));
+        assert!(!should_auto_check_inner(true, now - 3600, now, false));
+        assert!(should_auto_check_inner(
+            true,
+            now - AUTO_CHECK_INTERVAL_SECS,
+            now,
+            false
+        ));
 
         assert!(is_skipped(Some("0.2.0"), "v0.2.0"));
         assert!(is_skipped(Some("v0.2.0"), "0.2.0"));

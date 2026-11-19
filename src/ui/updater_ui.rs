@@ -50,7 +50,8 @@ impl App {
         let mut action_skip: Option<String> = None;
         let mut action_save_prefs = false;
 
-        egui::Window::new("Check for updates")
+        let tr = crate::i18n::strings(self.settings.general.language);
+        egui::Window::new(tr.update_title)
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
@@ -80,10 +81,12 @@ impl App {
                                 .color(t::MUTED),
                         );
                         ui.horizontal(|ui| {
-                            if kit::button(ui, "Check now", kit::Kind::Normal, true).clicked() {
+                            if kit::button(ui, tr.update_check_again, kit::Kind::Normal, true)
+                                .clicked()
+                            {
                                 action_retry = true;
                             }
-                            if kit::button(ui, "Open GitHub releases", kit::Kind::Ghost, true)
+                            if kit::button(ui, tr.update_open_release, kit::Kind::Ghost, true)
                                 .clicked()
                             {
                                 action_open_url = Some(RELEASES_URL.to_string());
@@ -94,7 +97,7 @@ impl App {
                         ui.horizontal(|ui| {
                             ui.spinner();
                             ui.label(
-                                RichText::new("Checking GitHub for updates…")
+                                RichText::new(tr.update_checking)
                                     .font(t::sans(13.0))
                                     .color(t::MUTED),
                             );
@@ -106,17 +109,18 @@ impl App {
                                 ui.allocate_exact_size(vec2(12.0, 14.0), egui::Sense::hover());
                             kit::led(ui.painter(), r.center(), 4.0, Some(t::OK));
                             let line = match latest {
-                                Some(ver) => format!("You're up to date (latest: v{ver})."),
-                                None => "You're up to date (no GitHub releases published yet)."
-                                    .to_string(),
+                                Some(ver) => format!("{} (v{ver})", tr.update_up_to_date),
+                                None => tr.update_up_to_date.to_string(),
                             };
                             ui.label(RichText::new(line).font(t::sans(13.0)).color(t::OK));
                         });
                         ui.horizontal(|ui| {
-                            if kit::button(ui, "Check again", kit::Kind::Normal, true).clicked() {
+                            if kit::button(ui, tr.update_check_again, kit::Kind::Normal, true)
+                                .clicked()
+                            {
                                 action_retry = true;
                             }
-                            if kit::button(ui, "Open GitHub releases", kit::Kind::Ghost, true)
+                            if kit::button(ui, tr.update_open_release, kit::Kind::Ghost, true)
                                 .clicked()
                             {
                                 action_open_url = Some(RELEASES_URL.to_string());
@@ -131,10 +135,12 @@ impl App {
                             ui.label(RichText::new(msg).font(t::sans(13.0)).color(t::BAD));
                         });
                         ui.horizontal(|ui| {
-                            if kit::button(ui, "Retry", kit::Kind::Normal, true).clicked() {
+                            if kit::button(ui, tr.update_check_again, kit::Kind::Normal, true)
+                                .clicked()
+                            {
                                 action_retry = true;
                             }
-                            if kit::button(ui, "Open GitHub releases", kit::Kind::Ghost, true)
+                            if kit::button(ui, tr.update_open_release, kit::Kind::Ghost, true)
                                 .clicked()
                             {
                                 action_open_url = Some(RELEASES_URL.to_string());
@@ -148,8 +154,8 @@ impl App {
                             kit::led(ui.painter(), r.center(), 4.0, Some(t::WAIT));
                             ui.label(
                                 RichText::new(format!(
-                                    "Update available: v{CURRENT_VERSION} → v{}",
-                                    info.version
+                                    "{}: v{CURRENT_VERSION} → v{}",
+                                    tr.update_available, info.version
                                 ))
                                 .font(t::semibold(13.5))
                                 .color(t::WAIT),
@@ -184,14 +190,19 @@ impl App {
                         }
 
                         ui.horizontal_wrapped(|ui| {
-                            if kit::button(ui, "Open release page", kit::Kind::Normal, true)
+                            if kit::button(ui, tr.update_open_release, kit::Kind::Normal, true)
                                 .clicked()
                             {
                                 action_open_url = Some(info.html_url.clone());
                             }
                             if let Some(asset) = &info.linux_asset_url
-                                && kit::button(ui, "Download Linux build", kit::Kind::Ghost, true)
-                                    .clicked()
+                                && kit::button(
+                                    ui,
+                                    tr.update_download_linux,
+                                    kit::Kind::Ghost,
+                                    true,
+                                )
+                                .clicked()
                             {
                                 action_open_url = Some(asset.clone());
                             }
@@ -201,7 +212,7 @@ impl App {
                             {
                                 action_copy_cmd = true;
                             }
-                            if kit::button(ui, "Skip this version", kit::Kind::Ghost, true)
+                            if kit::button(ui, tr.update_skip_version, kit::Kind::Ghost, true)
                                 .clicked()
                             {
                                 action_skip = Some(info.version.clone());

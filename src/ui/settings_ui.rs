@@ -1289,6 +1289,26 @@ fn general_page(ui: &mut egui::Ui, s: &mut Settings, checking_updates: bool) -> 
                 kit_switch(ui, &mut s.general.x11);
             },
         );
+        let tr = crate::i18n::strings(s.general.language);
+        row(
+            ui,
+            tr.setting_language,
+            Some(tr.setting_language_hint),
+            |ui| {
+                let names: Vec<&str> = crate::i18n::Language::ALL
+                    .iter()
+                    .map(|l| l.label())
+                    .collect();
+                let cur = crate::i18n::Language::ALL
+                    .iter()
+                    .position(|l| *l == s.general.language)
+                    .unwrap_or(0);
+                let (pick, _) = kit::chips(ui, "gen-lang", &names, cur, None);
+                if let Some(i) = pick {
+                    s.general.language = crate::i18n::Language::ALL[i];
+                }
+            },
+        );
         row(
             ui,
             "System title bar",
@@ -1299,6 +1319,15 @@ fn general_page(ui: &mut egui::Ui, s: &mut Settings, checking_updates: bool) -> 
         );
     });
     card(ui, "projects", |ui| {
+        let tr = crate::i18n::strings(s.general.language);
+        row(
+            ui,
+            tr.setting_show_welcome,
+            Some(tr.setting_show_welcome_hint),
+            |ui| {
+                kit_switch(ui, &mut s.general.show_welcome);
+            },
+        );
         row(ui, "Autosave", None, |ui| {
             let mins = [0u32, 1, 2, 5, 10];
             let names = ["Off", "1 min", "2 min", "5 min", "10 min"];

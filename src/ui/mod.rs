@@ -31,6 +31,7 @@ mod synth;
 mod tempo_lane;
 mod updater_ui;
 mod vocal;
+mod welcome;
 mod workspace;
 
 pub(crate) use project::Pending;
@@ -350,7 +351,10 @@ pub struct App {
     pub(crate) midi_cc_last: Option<std::time::Instant>,
     /// Non-blocking GitHub Releases update checker.
     pub(crate) updater: crate::updater::UpdateChecker,
-    /// Hosted plugins (VST3).
+    /// Startup / hub welcome screen state and visibility.
+    pub(crate) welcome: welcome::WelcomeState,
+    pub(crate) welcome_open: bool,
+    /// Hosted plugins (VST3, VST2, CLAP).
     pub(crate) plugins: plugins_ui::PluginState,
     /// Built-in effects open in their own windows: (mixer track, slot).
     pub(crate) fx_windows: Vec<(usize, usize)>,
@@ -839,6 +843,7 @@ impl App {
         }
         // A project file on the command line (double-click / Open With in the
         // file manager): open it instead of the default empty project.
+        let mut opened_cli = false;
         if !capture
             && let Some(arg) = args.iter().skip(1).find(|a| !a.starts_with('-'))
             && (arg.to_ascii_lowercase().ends_with(".kfxl")
@@ -847,8 +852,11 @@ impl App {
             let p = std::path::PathBuf::from(arg);
             if p.is_file() {
                 app.open_path(&p);
+                opened_cli = true;
             }
         }
+        app.welcome_open = (!capture && !opened_cli && app.settings.general.show_welcome)
+            || (capture && std::env::var_os("KFXL_CAPTURE_WELCOME").is_some());
         // Live checks: KFXL_CAPTURE_MIDI_IN=1 listens to MIDI keyboards,
         // KFXL_CAPTURE_PLUGINS=1 starts the plugin host and scan.
         if capture && std::env::var_os("KFXL_CAPTURE_MIDI_IN").is_some() {
@@ -1141,6 +1149,8 @@ impl App {
             midi_learn: None,
             midi_cc_last: None,
             updater: Default::default(),
+            welcome: Default::default(),
+            welcome_open: false,
             plugins: Default::default(),
             fx_windows: Vec::new(),
             waiting_input: false,
@@ -1813,6 +1823,139 @@ impl App {
             Err(e) => {
                 self.recent.retain(|p| p != path);
                 self.say(Tone::Bad, format!("Cannot open {}: {e}", path.display()));
+            }
+        }
+    }
+
+    pub(crate) fn import_flp_dialog(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("FL Studio project", &["flp"])
+            .pick_file()
+        {
+            self.import_flp(&path);
+        }
+    }
+
+    fn load_welcome_song(
+        &mut self,
+        song: Song,
+        status: impl Into<String>,
+        with_default_kit: bool,
+        open_instrument: Option<u64>,
+    ) {
+        self.flp_freeze = None;
+        self.close_riff();
+        self.unload_all_plugins();
+        self.checkpoint();
+        self.selected = song.patterns.first().map(|p| p.id).unwrap_or(1);
+        if let Some(id) = open_instrument.or_else(|| song.instruments.first().map(|i| i.id)) {
+            self.instrument = id;
+            self.roll_inst = id;
+        }
+        self.song = song;
+        self.clip = None;
+        self.path = None;
+        self.saved_edits = self.edits;
+        self.publish();
+        if with_default_kit {
+            self.load_default_kit();
+        }
+        if let Some(id) = open_instrument {
+            self.win(Cmd::Show(Tab::Instrument { id }));
+        }
+        self.say(Tone::Done, status);
+    }
+
+    pub(super) fn welcome_frame(&mut self, ctx: &egui::Context) {
+        if !self.welcome_open {
+            return;
+        }
+        let copy = welcome::WelcomeCopy::for_language(self.settings.general.language);
+        let update_version = match &self.updater.state {
+            crate::updater::CheckState::Available(info)
+                if !crate::updater::is_skipped(
+                    self.settings.general.skipped_version.as_deref(),
+                    &info.version,
+                ) =>
+            {
+                Some(info.version.clone())
+            }
+            _ => None,
+        };
+        let was_show = self.settings.general.show_welcome;
+        let action = welcome::show_welcome(
+            ctx,
+            &mut self.welcome,
+            &copy,
+            &self.recent,
+            &mut self.settings.general.show_welcome,
+            update_version.as_deref(),
+        );
+        if self.settings.general.show_welcome != was_show {
+            self.save_settings();
+        }
+        let Some(action) = action else {
+            return;
+        };
+        self.welcome_open = false;
+        match action {
+            welcome::WelcomeAction::Close => {}
+            welcome::WelcomeAction::NewProject => self.request(Pending::New),
+            welcome::WelcomeAction::OpenProject => self.request(Pending::Open(None)),
+            welcome::WelcomeAction::OpenRecent(path) => self.request(Pending::Open(Some(path))),
+            welcome::WelcomeAction::ImportBundle => self.import_project_bundle(),
+            welcome::WelcomeAction::ImportFlp => self.import_flp_dialog(),
+            welcome::WelcomeAction::OpenSettings => self.open_settings(settings_ui::Page::Audio),
+            welcome::WelcomeAction::OpenUpdater => {
+                self.updater.dialog_open = true;
+            }
+            welcome::WelcomeAction::LoadTemplate(kind) => {
+                let song = welcome::build_template(kind);
+                let title = copy.template_titles[kind.index()];
+                let with_kit = matches!(
+                    kind,
+                    welcome::TemplateKind::EmptyBeat
+                        | welcome::TemplateKind::DemoBeat
+                        | welcome::TemplateKind::TideStudio
+                        | welcome::TemplateKind::VocalSession
+                );
+                let open_inst = match kind {
+                    welcome::TemplateKind::TideStudio => song
+                        .instruments
+                        .iter()
+                        .find(|i| {
+                            matches!(i.kind, keyframexl::sequence::InstrumentKind::Synth { .. })
+                        })
+                        .map(|i| i.id),
+                    welcome::TemplateKind::ForgeSfx => song
+                        .instruments
+                        .iter()
+                        .find(|i| {
+                            matches!(i.kind, keyframexl::sequence::InstrumentKind::Forge { .. })
+                        })
+                        .map(|i| i.id),
+                    welcome::TemplateKind::VocalSession => song
+                        .instruments
+                        .iter()
+                        .find(|i| {
+                            matches!(i.kind, keyframexl::sequence::InstrumentKind::Vocal { .. })
+                        })
+                        .map(|i| i.id),
+                    _ => None,
+                };
+                self.load_welcome_song(song, format!("Started template: {title}"), with_kit, open_inst);
+            }
+            welcome::WelcomeAction::LoadTidePreset(idx) => {
+                let song = welcome::build_tide_preset_song(idx);
+                let open_inst = song.instruments.first().map(|i| i.id);
+                let name = song.info.title.clone();
+                self.load_welcome_song(song, format!("Loaded Tide preset: {name}"), false, open_inst);
+            }
+            welcome::WelcomeAction::LoadForgeRecipe(idx) => {
+                let song = welcome::build_forge_recipe_song(idx);
+                let open_inst = song.instruments.first().map(|i| i.id);
+                let name = song.info.title.clone();
+                self.load_welcome_song(song, format!("Loaded Forge recipe: {name}"), false, open_inst);
             }
         }
     }
@@ -3110,6 +3253,7 @@ impl eframe::App for App {
         self.lyrics_window(ctx);
         self.project_frame(ctx);
         self.updater_frame(ctx);
+        self.welcome_frame(ctx);
         // egui's own Ctrl+= / Ctrl+− have no limits; keep the layout usable.
         use crate::settings::{UI_SCALE_MAX, UI_SCALE_MIN};
         let z = ctx.zoom_factor();
