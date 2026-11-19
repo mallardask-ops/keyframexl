@@ -9,7 +9,7 @@ This document tracks what has already been built in KeyFrameXL and what remains 
 ## Implemented
 
 ### Core Engine, Sequencing & Workspaces
-- **Unified Voice Engine (`src/engine.rs`)** — stateful polyphonic voice pool (128 voices, oldest-voice stealing, allocation-free note-on in the audio callback) with sample-accurate event dispatch. Real-time playback and offline audio export execute the exact same render path (verified byte-identical).
+- **Unified Voice Engine (`src/engine.rs`, `src/link.rs`, `src/audio.rs`)** — stateful polyphonic voice pool (128 voices, oldest-voice stealing, allocation-free note-on in the audio callback) with sample-accurate event dispatch, lock-free `rtrb` **live parameter streaming** (generation-tagged mixer/channel/FX parameter tweaks without cloning `Song`), PipeWire low-latency quantum hints (`PIPEWIRE_LATENCY`), backend detection, and automatic **audio-device hot-reconnection & stall recovery** with exponential backoff. Real-time playback and offline audio export execute the exact same render path (verified byte-identical).
 - **Channel Rack (`F6`)** — every channel supports both step-sequencer pads (grouped in 4-beat trays) and full Piano Roll notes, per-channel mute/solo (`Ctrl+1..0`), mini Pan/Volume knobs, target mixer track selector, and global Swing.
 - **Piano Roll (`F7`)** — chromatic editor with Draw (`P`), Paint (`B`), Delete (`D`), Mute (`T`), Slice (`C`), Select (`E`), Zoom (`Z`), and Slide (`S`) tools; Ghost notes, scale highlighting, independent X/Y zoom, multi-target bottom control lane (*Velocity, Pan, Release, Fine, Mod X, Mod Y*), portamento notes, note colors, and a built-in **Riff Machine** (`src/riff.rs`).
 - **Playlist (`F5`)** — multi-track arrangement for pattern and audio clips, shared clip instances with **Make unique**, **Tempo automation lane** (`src/tempo.rs`), and **Automation clips** (`src/automation.rs`).
@@ -42,8 +42,8 @@ This document tracks what has already been built in KeyFrameXL and what remains 
 ## Planned / Open Work
 
 ### Audio Backend & Realtime Polish
-- **Native PipeWire streams** — move from the PipeWire-ALSA bridge (`cpal 0.15`) to native PipeWire (`cpal 0.18+` or `pipewire-rs`), with qualified low-latency tuning and automatic audio-device hot-reconnection.
-- **Lock-free command queue** — expand `rtrb` command streaming for all live parameter and sequence edits instead of cloning song state snapshots.
+- **Native PipeWire streams** — move from the PipeWire-ALSA bridge (`cpal 0.15` + `PIPEWIRE_LATENCY` tuning) to direct native PipeWire (`cpal 0.18+` or `pipewire-rs`) graph nodes.
+- **Lock-free sequence edit streaming** — extend the `rtrb` live parameter queue to stream pattern note/clip mutations without snapshotting `Song`.
 
 ### Sampler & DirectWave Fidelity
 - **Time Stretch / Beat Sync / Tick Slice** — tempo-synced granular/phase-vocoder sample stretching and slice playback modes.

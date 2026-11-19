@@ -3,7 +3,13 @@
 //! The UI sends each edited song as an `Arc<Song>`; the audio thread takes
 //! the newest one at the start of every block. Replaced songs travel back on a
 //! second ring so the UI frees them: the audio thread never deallocates.
+//!
+//! Each song carries a generation number. Live parameter commands (a fader or
+//! knob moved between two song snapshots) ride a third ring stamped with the
+//! generation of the song they were made against, so the audio thread can
+//! tell a command the newest song already contains from one it still lacks.
 
+use crate::automation::Target;
 use crate::engine::Engine;
 use crate::fx::{FxKind, FxState};
 use crate::sequence::Song;
@@ -14,20 +20,26 @@ use std::sync::Arc;
 const SEND_CAP: usize = 64;
 /// Replaced songs waiting for the UI to free them.
 const TRASH_CAP: usize = 256;
+/// Live parameter commands in flight before the audio thread drains them.
+const PARAM_CAP: usize = 512;
 
 /// UI side: send songs, free the ones the audio thread has replaced.
 pub struct SongSender {
-    tx: Producer<Arc<Song>>,
+    tx: Producer<(u64, Arc<Song>)>,
     trash: Consumer<Arc<Song>>,
     /// The newest song when the ring was full; retried by [`SongSender::tick`].
-    pending: Option<Arc<Song>>,
+    pending: Option<(u64, Arc<Song>)>,
+    /// Generation of the newest song handed to `send` (0 = the initial song).
+    generation: u64,
 }
 
 /// Audio side: the song to play now.
 pub struct SongReceiver {
-    rx: Consumer<Arc<Song>>,
+    rx: Consumer<(u64, Arc<Song>)>,
     trash: Producer<Arc<Song>>,
     current: Arc<Song>,
+    /// Generation of `current`.
+    generation: u64,
     /// Old songs kept because the trash ring was full; handed back later.
     held: Option<Arc<Song>>,
 }
@@ -40,11 +52,13 @@ pub fn song_link(song: Song) -> (SongSender, SongReceiver) {
             tx,
             trash: trash_rx,
             pending: None,
+            generation: 0,
         },
         SongReceiver {
             rx,
             trash: trash_tx,
             current: Arc::new(song),
+            generation: 0,
             held: None,
         },
     )
@@ -53,17 +67,24 @@ pub fn song_link(song: Song) -> (SongSender, SongReceiver) {
 impl SongSender {
     /// Queue `song` for the audio thread. Never blocks; latest wins when full.
     pub fn send(&mut self, song: Arc<Song>) {
-        self.pending = Some(song);
+        self.generation += 1;
+        self.pending = Some((self.generation, song));
         self.tick();
+    }
+
+    /// Generation of the newest song queued so far. Stamp live parameter
+    /// commands with it: they apply on top of that song.
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// Retry a pending song and free replaced ones. Call once per UI frame.
     /// Returns how many songs were freed.
     pub fn tick(&mut self) -> usize {
-        if let Some(song) = self.pending.take()
-            && let Err(PushError::Full(song)) = self.tx.push(song)
+        if let Some(msg) = self.pending.take()
+            && let Err(PushError::Full(msg)) = self.tx.push(msg)
         {
-            self.pending = Some(song);
+            self.pending = Some(msg);
         }
         let mut freed = 0;
         while self.trash.pop().is_ok() {
@@ -81,14 +102,28 @@ impl SongReceiver {
     /// Audio thread, once per block: switch to the newest song. No allocation
     /// and no deallocation happen here.
     pub fn update(&mut self) -> &Song {
+        self.update_with_changed().0
+    }
+
+    /// [`SongReceiver::update`], also saying whether a newer song arrived in
+    /// this call (the caller then drops live overrides the song now carries).
+    pub fn update_with_changed(&mut self) -> (&Song, bool) {
         if let Some(old) = self.held.take() {
             self.give_back(old);
         }
-        while let Ok(song) = self.rx.pop() {
+        let mut changed = false;
+        while let Ok((generation, song)) = self.rx.pop() {
             let old = std::mem::replace(&mut self.current, song);
+            self.generation = generation;
+            changed = true;
             self.give_back(old);
         }
-        &self.current
+        (&self.current, changed)
+    }
+
+    /// Generation of the song playing now (0 = the initial song).
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     pub fn current(&self) -> &Song {
@@ -106,6 +141,62 @@ impl SongReceiver {
         if let Err(PushError::Full(old)) = self.trash.push(old) {
             self.held = Some(old);
         }
+    }
+}
+
+/// A control the UI moved, made against the song of `generation`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ParamCmd {
+    pub generation: u64,
+    pub target: Target,
+    pub value: f32,
+}
+
+/// UI side of live parameter commands.
+pub struct ParamSender {
+    tx: Producer<ParamCmd>,
+}
+
+/// Audio side: applies the commands the playing song does not contain yet.
+pub struct ParamReceiver {
+    rx: Consumer<ParamCmd>,
+}
+
+pub fn param_link() -> (ParamSender, ParamReceiver) {
+    let (tx, rx) = RingBuffer::new(PARAM_CAP);
+    (ParamSender { tx }, ParamReceiver { rx })
+}
+
+impl ParamSender {
+    /// Queue a move of `target` to `value`, made against song `generation`
+    /// (`SongSender::generation`). Never blocks; `false` means the ring is
+    /// full and the command was dropped.
+    pub fn send(&mut self, generation: u64, target: Target, value: f32) -> bool {
+        self.tx
+            .push(ParamCmd {
+                generation,
+                target,
+                value,
+            })
+            .is_ok()
+    }
+}
+
+impl ParamReceiver {
+    /// Audio thread, once per block after `SongReceiver::update`: apply every
+    /// waiting command. One made against an older song than `current_gen` is
+    /// dropped (the newer song already holds its value). Returns how many were
+    /// applied. No allocation happens here.
+    pub fn drain(&mut self, current_gen: u64, engine: &mut Engine) -> usize {
+        let mut applied = 0;
+        while let Ok(cmd) = self.rx.pop() {
+            if cmd.generation < current_gen {
+                continue;
+            }
+            engine.apply_live_param(cmd.target, cmd.value);
+            applied += 1;
+        }
+        applied
     }
 }
 
@@ -284,6 +375,98 @@ mod tests {
     }
 
     #[test]
+    fn generations_count_sent_songs_and_follow_the_audio_side() {
+        let (mut tx, mut rx) = song_link(Song::default());
+        assert_eq!((tx.generation(), rx.generation()), (0, 0));
+        tx.send(song(100.0));
+        tx.send(song(110.0));
+        assert_eq!(tx.generation(), 2);
+        assert_eq!(rx.generation(), 0, "nothing popped yet");
+        let (current, changed) = rx.update_with_changed();
+        assert_eq!(current.tempo, 110.0);
+        assert!(changed);
+        assert_eq!(rx.generation(), 2);
+        let (_, changed) = rx.update_with_changed();
+        assert!(!changed, "no new song: unchanged");
+        assert_eq!(rx.update().tempo, 110.0);
+    }
+
+    #[test]
+    fn a_full_ring_still_numbers_the_pending_song() {
+        let (mut tx, mut rx) = song_link(Song::default());
+        for i in 0..SEND_CAP + 5 {
+            tx.send(song(60.0 + i as f64));
+        }
+        let newest = (SEND_CAP + 5) as u64;
+        assert_eq!(tx.generation(), newest);
+        rx.update();
+        tx.tick();
+        rx.update();
+        assert_eq!(rx.generation(), newest, "the retried song keeps its number");
+    }
+
+    #[test]
+    fn param_commands_round_trip_into_the_engine() {
+        use crate::automation::Target;
+        let (mut tx, mut rx) = param_link();
+        let mut engine = Engine::new(48_000);
+        engine.reserve(4, 64);
+        let t = Target::MixerVolume { track: 1 };
+        assert!(tx.send(0, t, 0.25));
+        assert!(tx.send(0, Target::MixerPan { track: 1 }, -0.5));
+        assert_eq!(rx.drain(0, &mut engine), 2);
+        assert_eq!(rx.drain(0, &mut engine), 0, "drained once");
+        let mut song = Song::default();
+        song.instruments[0].mixer = 1;
+        let mut out = vec![0.0f32; 128];
+        engine.process_live(&song, &mut out);
+        assert!(out.iter().all(|x| x.is_finite()));
+    }
+
+    #[test]
+    fn a_full_param_ring_refuses_instead_of_blocking() {
+        use crate::automation::Target;
+        let (mut tx, mut rx) = param_link();
+        let t = Target::MixerVolume { track: 0 };
+        for _ in 0..PARAM_CAP {
+            assert!(tx.send(0, t, 0.5));
+        }
+        assert!(!tx.send(0, t, 0.5), "full: the command is refused");
+        let mut engine = Engine::new(48_000);
+        assert_eq!(rx.drain(0, &mut engine), PARAM_CAP);
+        assert!(tx.send(0, t, 0.5), "room again after a drain");
+    }
+
+    #[test]
+    fn commands_made_against_an_older_song_are_discarded() {
+        use crate::automation::Target;
+        let (mut stx, mut srx) = song_link(Song::default());
+        let (mut ptx, mut prx) = param_link();
+        let mut engine = Engine::new(48_000);
+        engine.reserve(4, 64);
+        let old = Target::MixerVolume { track: 1 };
+        let new = Target::MixerVolume { track: 2 };
+        // A fader moved against song 0, then song 1 (which holds it) is sent,
+        // then another fader moved against song 1.
+        assert!(ptx.send(stx.generation(), old, 0.1));
+        stx.send(song(130.0));
+        assert!(ptx.send(stx.generation(), new, 0.9));
+        let (current, changed) = srx.update_with_changed();
+        assert!(changed);
+        assert_eq!(current.tempo, 130.0);
+        if changed {
+            engine.clear_live_params();
+        }
+        assert_eq!(
+            prx.drain(srx.generation(), &mut engine),
+            1,
+            "the stale command is dropped, the current one kept"
+        );
+        assert_eq!(engine.live_param(old), None, "baked into song 1");
+        assert_eq!(engine.live_param(new), Some(0.9));
+    }
+
+    #[test]
     fn effect_states_are_built_once_per_change_and_installed() {
         use crate::fx::FxSlot;
         let mut song = Song::default();
@@ -445,5 +628,63 @@ mod realtime_tests {
             1,
             "the UI frees the song the audio thread replaced"
         );
+    }
+
+    #[test]
+    fn live_params_cost_the_audio_block_no_allocation() {
+        use crate::automation::Target;
+        let mut song = Song::default();
+        for s in 0..16 {
+            song.add_note(1, Note::new(1, s * STEP, STEP, 60, 100));
+        }
+        song.instruments[0].mixer = 1;
+        song.mixer[1].fx.push(FxSlot::new(FxKind::Reverb));
+        song.mixer[1].fx.push(FxSlot::new(FxKind::Delay));
+        let (mut fx_tx, mut fx_rx) = fx_link(48_000);
+        let (mut tx, mut rx) = song_link(song.clone());
+        let (mut ptx, mut prx) = param_link();
+        let mut engine = Engine::new(48_000);
+        engine.reserve(128, 1024);
+        fx_tx.sync(&song);
+        fx_rx.drain(&mut engine);
+        let mut out = vec![0.0f32; 1024];
+        let mut at = 0u64;
+        // A fader, a pan, an effect mix and a knob move while blocks render;
+        // a new song then supersedes them.
+        let allocations = alloc_probe::count(|| {
+            for block in 0..200u32 {
+                if block == 20 {
+                    ptx.send(tx.generation(), Target::MixerVolume { track: 1 }, 0.4);
+                    ptx.send(tx.generation(), Target::MixerPan { track: 1 }, 0.3);
+                    ptx.send(tx.generation(), Target::FxMix { track: 1, slot: 0 }, 0.5);
+                    ptx.send(
+                        tx.generation(),
+                        Target::FxParam {
+                            track: 1,
+                            slot: 1,
+                            param: 0,
+                        },
+                        3.0,
+                    );
+                }
+                // The returned song borrows the receiver, so read the
+                // generation and take the song again afterwards.
+                if rx.update_with_changed().1 {
+                    engine.clear_live_params();
+                }
+                prx.drain(rx.generation(), &mut engine);
+                at = engine.process(rx.current(), 1, false, at, &mut out, true);
+            }
+        });
+        assert_eq!(allocations, 0, "allocations or frees in the audio path");
+        assert_eq!(
+            engine.live_param(Target::MixerVolume { track: 1 }),
+            Some(0.4)
+        );
+        tx.send(Arc::new(song));
+        let (_, changed) = rx.update_with_changed();
+        assert!(changed);
+        engine.clear_live_params();
+        assert_eq!(engine.live_param(Target::MixerVolume { track: 1 }), None);
     }
 }

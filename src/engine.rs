@@ -1249,6 +1249,10 @@ pub struct Engine {
     auto: Vec<crate::automation::ValueAt>,
     /// An automated effect's parameters for one process call.
     auto_params: Vec<f32>,
+    /// Live overrides from the UI (`link::ParamReceiver`): a fader or effect
+    /// knob moved while the song plays or sits stopped. Automation wins over
+    /// them; a newer song snapshot supersedes them (`clear_live_params`).
+    live_params: Vec<LiveParam>,
     /// Rendered singing the UI side publishes; read without locking.
     pub vocal: std::sync::Arc<arc_swap::ArcSwap<crate::vocal::VocalMap>>,
     /// Lyric hash (`vocal::lyric_hash`) the next live vocal note sings; 0 = the channel's default.
@@ -1263,6 +1267,26 @@ pub struct Engine {
 
 /// Plugin instances one engine holds (reserved up front).
 pub const MAX_PLUGINS: usize = 64;
+
+/// Distinct controls the UI may override live at once (reserved up front).
+pub const MAX_LIVE_PARAMS: usize = 256;
+
+/// One live override: the control and the value it holds until the next song.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LiveParam {
+    pub target: crate::automation::Target,
+    pub value: f32,
+}
+
+/// The value of `target` from automation, else from a live override.
+fn override_of(
+    auto: &[crate::automation::ValueAt],
+    live: &[LiveParam],
+    target: crate::automation::Target,
+) -> Option<f32> {
+    crate::automation::find(auto, target)
+        .or_else(|| live.iter().find(|p| p.target == target).map(|p| p.value))
+}
 
 impl Engine {
     pub fn new(rate: u32) -> Self {
@@ -1323,6 +1347,7 @@ impl Engine {
             sps_block: seconds_per_step(120.0),
             auto: Vec::with_capacity(64),
             auto_params: Vec::with_capacity(64),
+            live_params: Vec::new(),
             vocal: std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
                 crate::vocal::VocalMap::default(),
             )),
@@ -1416,6 +1441,7 @@ impl Engine {
     /// to `frames` and mixers of up to `tracks` never allocate in `process`.
     pub fn reserve(&mut self, tracks: usize, frames: usize) {
         self.grow_buses(tracks, frames);
+        self.live_params.reserve(MAX_LIVE_PARAMS);
         for c in &mut self.synth_fx {
             if c.buf.len() < frames * 2 {
                 c.buf.resize(frames * 2, 0.0);
@@ -1426,6 +1452,33 @@ impl Engine {
                 c.buf.resize(frames * 2, 0.0);
             }
         }
+    }
+
+    /// Hold `target` at `value` until a newer song supersedes it (a fader or
+    /// effect knob the UI moved). Never allocates once `reserve` has run; a
+    /// full list drops the newest control instead of growing.
+    pub fn apply_live_param(&mut self, target: crate::automation::Target, value: f32) {
+        if let Some(p) = self.live_params.iter_mut().find(|p| p.target == target) {
+            p.value = value;
+            return;
+        }
+        // `reserve` holds `MAX_LIVE_PARAMS`; an offline engine that never
+        // reserved grows up to the same count.
+        if self.live_params.len() < MAX_LIVE_PARAMS {
+            self.live_params.push(LiveParam { target, value });
+        }
+    }
+
+    /// The live override held for `target`, if any.
+    pub fn live_param(&self, target: crate::automation::Target) -> Option<f32> {
+        override_of(&[], &self.live_params, target)
+    }
+
+    /// Forget every live override (a newer song snapshot carries them). Keeps
+    /// the reserved capacity. Stopping the transport does not call this: a
+    /// fader moved while stopped still holds when Play is hit.
+    pub fn clear_live_params(&mut self) {
+        self.live_params.clear();
     }
 
     /// Install a slot state built off the audio thread. Returns the state it
@@ -2005,7 +2058,7 @@ impl Engine {
             let target = if inst.muted {
                 [0.0; 2]
             } else {
-                channel_gains(&self.auto, inst).unwrap_or_else(|| inst.gains())
+                channel_gains(&self.auto, &self.live_params, inst).unwrap_or_else(|| inst.gains())
             };
             // A fresh instance starts at the channel's gains, not gliding to them.
             let mut g = pl.gain_state.unwrap_or(target);
@@ -2176,8 +2229,9 @@ impl Engine {
                     );
                     continue;
                 }
-                let mix_target = crate::automation::find(
+                let mix_target = override_of(
                     &self.auto,
+                    &self.live_params,
                     crate::automation::Target::FxMix {
                         track: t as u16,
                         slot: k as u8,
@@ -2286,19 +2340,29 @@ impl Engine {
                     mix = mix_target;
                 }
                 let st = slots[k].as_mut().expect("built");
-                // Automated parameters: a copy with the envelope values in it.
+                // Overridden parameters: a copy with the live values in it, then
+                // the envelope values on top (automation wins).
                 let mut params: &[f32] = &slot.params;
-                let automated = self.auto.iter().any(|sample| matches!(sample.target, crate::automation::Target::FxParam { track: at, slot: s, .. } if at as usize == t && s as usize == k));
+                let is_slot = |target: crate::automation::Target| matches!(target, crate::automation::Target::FxParam { track: at, slot: s, .. } if at as usize == t && s as usize == k);
+                let automated = self.auto.iter().any(|sample| is_slot(sample.target))
+                    || self.live_params.iter().any(|sample| is_slot(sample.target));
                 if automated {
                     self.auto_params.clear();
-                    self.auto_params.extend(slot.params.iter().take(self.auto_params.capacity()));
-                    for sample in &self.auto {
-                        if let crate::automation::Target::FxParam { track: at, slot: s, param } = sample.target
+                    self.auto_params
+                        .extend(slot.params.iter().take(self.auto_params.capacity()));
+                    let live = self.live_params.iter().map(|p| (p.target, p.value));
+                    let auto = self.auto.iter().map(|p| (p.target, p.value));
+                    for (target, value) in live.chain(auto) {
+                        if let crate::automation::Target::FxParam {
+                            track: at,
+                            slot: s,
+                            param,
+                        } = target
                             && at as usize == t
                             && s as usize == k
                             && let Some(p) = self.auto_params.get_mut(param as usize)
                         {
-                            *p = sample.value;
+                            *p = value;
                         }
                     }
                     params = &self.auto_params;
@@ -2403,7 +2467,7 @@ impl Engine {
                 }
             }
             // Fader and pan, smoothed per sample (~5 ms); skipped at unity.
-            let target = mixer_gains(&self.auto, t, track);
+            let target = mixer_gains(&self.auto, &self.live_params, t, track);
             // A fresh engine starts at the fader, not at unity.
             let start = self.gain_state[t].unwrap_or(target);
             let mut end = start;
@@ -3178,6 +3242,7 @@ impl Engine {
             return;
         }
         let auto = &self.auto;
+        let live = &self.live_params;
         let alpha = smooth_alpha(self.rate);
         for pv in &mut self.phrases {
             let inst = song.instrument(pv.inst);
@@ -3186,7 +3251,7 @@ impl Engine {
                 .filter(|b| *b < self.buses.len())
                 .unwrap_or(0);
             let target = inst
-                .map(|i| channel_gains(auto, i).unwrap_or_else(|| i.gains()))
+                .map(|i| channel_gains(auto, live, i).unwrap_or_else(|| i.gains()))
                 .unwrap_or([1.0, 1.0]);
             // A fresh phrase starts at the channel's gains, not gliding to them.
             let mut gain = pv.gain_state.unwrap_or(target);
@@ -3232,6 +3297,7 @@ impl Engine {
         let chans = &mut self.synth_fx;
         let sfx = &mut self.sampler_fx;
         let auto = &self.auto;
+        let live = &self.live_params;
         let ctl = &self.ctl;
         for v in &mut self.voices {
             let inst = song.instrument(v.inst);
@@ -3292,7 +3358,7 @@ impl Engine {
             // Channel volume and pan, smoothed ~5 ms toward the block's target;
             // skipped at unity so old renders stay bit-exact.
             let target = inst
-                .and_then(|i| channel_gains(auto, i))
+                .and_then(|i| channel_gains(auto, live, i))
                 .or_else(|| {
                     inst.filter(|i| i.volume != 1.0 || i.pan != 0.0)
                         .map(|i| i.gains())
@@ -3478,11 +3544,12 @@ fn reset_fx_smoothers(
 /// A channel's left/right gains with automated volume or pan, if either is automated.
 fn channel_gains(
     auto: &[crate::automation::ValueAt],
+    live: &[LiveParam],
     inst: &crate::sequence::Instrument,
 ) -> Option<[f64; 2]> {
-    use crate::automation::{Target, find};
-    let vol = find(auto, Target::ChannelVolume { inst: inst.id });
-    let pan = find(auto, Target::ChannelPan { inst: inst.id });
+    use crate::automation::Target;
+    let vol = override_of(auto, live, Target::ChannelVolume { inst: inst.id });
+    let pan = override_of(auto, live, Target::ChannelPan { inst: inst.id });
     if vol.is_none() && pan.is_none() {
         return None;
     }
@@ -3496,15 +3563,17 @@ fn channel_gains(
 /// A mixer track's fader and pan gains, automation applied.
 fn mixer_gains(
     auto: &[crate::automation::ValueAt],
+    live: &[LiveParam],
     t: usize,
     track: &crate::sequence::MixerTrack,
 ) -> [f32; 2] {
-    use crate::automation::{Target, find};
-    if auto.is_empty() {
+    use crate::automation::Target;
+    if auto.is_empty() && live.is_empty() {
         return track.gains();
     }
-    let v = find(auto, Target::MixerVolume { track: t as u16 }).unwrap_or(track.volume);
-    let p = find(auto, Target::MixerPan { track: t as u16 }).unwrap_or(track.pan);
+    let v =
+        override_of(auto, live, Target::MixerVolume { track: t as u16 }).unwrap_or(track.volume);
+    let p = override_of(auto, live, Target::MixerPan { track: t as u16 }).unwrap_or(track.pan);
     [v * (1.0 - p.max(0.0)), v * (1.0 + p.min(0.0))]
 }
 
@@ -4571,6 +4640,208 @@ mod tests {
         auto.automation = Some(crate::automation::Envelope::flat(target, value, bar));
         song.patterns.push(auto);
         song.clips.push(crate::sequence::Clip::new(id, bar, 1));
+    }
+
+    /// The last frame after `blocks` 64-frame blocks of pattern 1 played from
+    /// the start (the smoothers settle well inside 150 blocks).
+    fn live_tail(e: &mut Engine, song: &Song, blocks: usize) -> [f32; 2] {
+        // Restarting at 0 would stack a second note on the sounding one.
+        e.stop();
+        let mut buf = [0.0f32; 64 * 2];
+        let mut pos = 0;
+        for _ in 0..blocks {
+            pos = e.process(song, 1, false, pos, &mut buf, true);
+        }
+        [buf[126], buf[127]]
+    }
+
+    fn near(got: [f32; 2], want: [f32; 2], what: &str) {
+        assert!(
+            (got[0] - want[0]).abs() < 1e-4 && (got[1] - want[1]).abs() < 1e-4,
+            "{what}: {got:?} vs {want:?}"
+        );
+    }
+
+    #[test]
+    fn live_params_move_faders_pans_and_channels() {
+        use crate::automation::Target;
+        let song = held_tone_song();
+        let mut e = Engine::new(RATE);
+        near(live_tail(&mut e, &song, 150), [0.5, 0.5], "untouched");
+        for (target, value, want) in [
+            (Target::MixerVolume { track: 0 }, 0.2, [0.1, 0.1]),
+            (Target::MixerPan { track: 0 }, 1.0, [0.0, 0.1]),
+            (Target::ChannelVolume { inst: 4 }, 0.5, [0.0, 0.05]),
+            (Target::MixerPan { track: 0 }, 0.0, [0.05, 0.05]),
+            (Target::ChannelPan { inst: 4 }, -1.0, [0.05, 0.0]),
+        ] {
+            e.apply_live_param(target, value);
+            // Cumulative: each step adds to the ones before it.
+            near(live_tail(&mut e, &song, 150), want, &format!("{target:?}"));
+        }
+        e.clear_live_params();
+        near(live_tail(&mut e, &song, 150), [0.5, 0.5], "cleared");
+    }
+
+    #[test]
+    fn a_live_param_updates_in_place_and_survives_stop() {
+        use crate::automation::Target;
+        let song = held_tone_song();
+        let mut e = Engine::new(RATE);
+        let t = Target::MixerVolume { track: 0 };
+        e.apply_live_param(t, 0.2);
+        e.apply_live_param(t, 0.4);
+        assert_eq!(e.live_params.len(), 1, "one entry per control");
+        e.stop();
+        assert_eq!(e.live_params.len(), 1, "a fader moved while stopped holds");
+        near(live_tail(&mut e, &song, 150), [0.2, 0.2], "after Play");
+    }
+
+    #[test]
+    fn live_params_respect_the_reserved_capacity() {
+        use crate::automation::Target;
+        let mut e = Engine::new(RATE);
+        e.reserve(4, 64);
+        let cap = e.live_params.capacity();
+        assert!(cap >= MAX_LIVE_PARAMS);
+        for track in 0..(cap as u16 + 50) {
+            e.apply_live_param(Target::MixerVolume { track }, 0.5);
+        }
+        assert_eq!(
+            e.live_params.len(),
+            MAX_LIVE_PARAMS,
+            "a full list drops, never grows"
+        );
+        assert_eq!(e.live_params.capacity(), cap);
+        e.clear_live_params();
+        assert_eq!(e.live_params.capacity(), cap, "clearing keeps the room");
+        // An engine that never reserved still takes up to the cap.
+        let mut offline = Engine::new(RATE);
+        for track in 0..(MAX_LIVE_PARAMS as u16 + 10) {
+            offline.apply_live_param(Target::MixerVolume { track }, 0.5);
+        }
+        assert_eq!(offline.live_params.len(), MAX_LIVE_PARAMS);
+    }
+
+    #[test]
+    fn a_live_fx_mix_and_param_change_the_sound() {
+        use crate::automation::Target;
+        let mut song = held_tone_song();
+        // Balance at 0% volume is silent at full mix.
+        let mut bal = crate::fx::FxSlot::new(crate::fx::FxKind::Balance);
+        bal.params[0] = 0.0;
+        song.mixer[0].fx.push(bal);
+        let mut e = Engine::new(RATE);
+        near(live_tail(&mut e, &song, 150), [0.0, 0.0], "silent balance");
+        e.apply_live_param(
+            Target::FxParam {
+                track: 0,
+                slot: 0,
+                param: 0,
+            },
+            50.0,
+        );
+        near(
+            live_tail(&mut e, &song, 150),
+            [0.25, 0.25],
+            "live volume 50%",
+        );
+        e.apply_live_param(Target::FxMix { track: 0, slot: 0 }, 0.0);
+        near(
+            live_tail(&mut e, &song, 150),
+            [0.5, 0.5],
+            "live mix fully dry",
+        );
+        e.clear_live_params();
+        near(
+            live_tail(&mut e, &song, 150),
+            [0.0, 0.0],
+            "back to the song",
+        );
+    }
+
+    #[test]
+    fn automation_wins_over_live_params() {
+        use crate::automation::Target;
+        let mut song = held_tone_song();
+        let mut bal = crate::fx::FxSlot::new(crate::fx::FxKind::Balance);
+        bal.params[0] = 100.0;
+        song.mixer[0].fx.push(bal);
+        // Bar 1: master fader 0.5 and balance volume 50%, both automated.
+        for (id, target, value) in [
+            (7u64, Target::MixerVolume { track: 0 }, 0.5f32),
+            (
+                8,
+                Target::FxParam {
+                    track: 0,
+                    slot: 0,
+                    param: 0,
+                },
+                50.0,
+            ),
+        ] {
+            let mut clip = Pattern::new(id, "Held");
+            clip.length = crate::sequence::BAR;
+            clip.automation = Some(crate::automation::Envelope::flat(
+                target,
+                value,
+                crate::sequence::BAR,
+            ));
+            song.patterns.push(clip);
+            song.clips.push(crate::sequence::Clip::new(id, 0, 1));
+        }
+        let run = |live: &[(Target, f32)]| {
+            let mut e = Engine::new(RATE);
+            for &(t, v) in live {
+                e.apply_live_param(t, v);
+            }
+            let mut buf = [0.0f32; 64 * 2];
+            let mut pos = 0;
+            for _ in 0..150 {
+                pos = e.process(&song, 1, true, pos, &mut buf, true);
+            }
+            [buf[126], buf[127]]
+        };
+        let base = run(&[]);
+        near(base, [0.5 * 0.5 * 0.5; 2], "automation alone");
+        let both = [
+            (Target::MixerVolume { track: 0 }, 1.0),
+            (
+                Target::FxParam {
+                    track: 0,
+                    slot: 0,
+                    param: 0,
+                },
+                100.0,
+            ),
+        ];
+        assert_eq!(run(&both), base, "automated controls ignore live values");
+        // A control no clip drives still takes the live value.
+        let pan = [(Target::MixerPan { track: 0 }, 1.0)];
+        near(run(&pan), [0.0, base[1]], "an undriven pan follows live");
+    }
+
+    #[test]
+    fn a_live_param_moves_a_stopped_live_note() {
+        use crate::automation::Target;
+        let song = song_with(vec![[0.5; 2]; RATE as usize * 4], |_, _| {});
+        let mut e = Engine::new(RATE);
+        let mut block = vec![0.0f32; 64 * 2];
+        e.live_on(&song, 1, 4, 60, 100);
+        for _ in 0..150 {
+            e.process_live(&song, &mut block);
+        }
+        near([block[126], block[127]], [0.5, 0.5], "live note");
+        e.apply_live_param(Target::MixerVolume { track: 0 }, 0.5);
+        e.apply_live_param(Target::ChannelPan { inst: 4 }, 1.0);
+        for _ in 0..150 {
+            e.process_live(&song, &mut block);
+        }
+        near(
+            [block[126], block[127]],
+            [0.0, 0.25],
+            "live params while stopped",
+        );
     }
 
     #[test]

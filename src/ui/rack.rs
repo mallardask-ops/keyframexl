@@ -1553,12 +1553,17 @@ impl App {
                 self.checkpoint();
             }
             if changed && let Some(i) = self.song.instruments.iter_mut().find(|i| i.id == id) {
-                if k == 0 {
+                let (target, sent) = if k == 0 {
                     i.pan = val as f32;
+                    (keyframexl::automation::Target::ChannelPan { inst: id }, i.pan)
                 } else {
                     i.volume = keyframexl::sequence::volume_gain(val as f32);
-                }
-                self.publish();
+                    (
+                        keyframexl::automation::Target::ChannelVolume { inst: id },
+                        i.volume,
+                    )
+                };
+                self.publish_param(target, sent);
                 self.say(
                     Tone::Quiet,
                     format!(

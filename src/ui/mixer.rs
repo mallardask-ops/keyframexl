@@ -859,8 +859,9 @@ impl App {
             self.checkpoint();
         }
         if changed {
-            self.song.mixer[i].pan = pan as f32;
-            self.publish();
+            let v = pan as f32;
+            self.song.mixer[i].pan = v;
+            self.publish_param(keyframexl::automation::Target::MixerPan { track: i as u16 }, v);
         }
         // Fader and meter.
         // The fader travels along the shared volume taper; `v` is its position.
@@ -887,8 +888,12 @@ impl App {
             self.checkpoint();
         }
         if changed {
-            self.song.mixer[i].volume = volume_gain(v as f32);
-            self.publish();
+            let gain = volume_gain(v as f32);
+            self.song.mixer[i].volume = gain;
+            self.publish_param(
+                keyframexl::automation::Target::MixerVolume { track: i as u16 },
+                gain,
+            );
         }
         let meter = Rect::from_min_max(
             pos2(cx + 11.0, fr.top() + 8.0),
@@ -1240,8 +1245,12 @@ impl App {
                     self.checkpoint();
                 }
                 if changed {
-                    self.song.mixer[i].pan = pan as f32;
-                    self.publish();
+                    let v = pan as f32;
+                    self.song.mixer[i].pan = v;
+                    self.publish_param(
+                        keyframexl::automation::Target::MixerPan { track: i as u16 },
+                        v,
+                    );
                 }
                 let mut sep = self.song.mixer[i].sep as f64;
                 let sep_fmt = |v: f64| if v.abs() < 0.005 { "0".to_string() } else if v < 0.0 { format!("{:.0}% narrower", -v * 100.0) } else { format!("{:.0}% wider", v * 100.0) };
@@ -1364,8 +1373,15 @@ impl App {
                     self.checkpoint();
                 }
                 if changed {
-                    self.song.mixer[track].fx[k].mix = mix as f32;
-                    self.publish();
+                    let v = mix as f32;
+                    self.song.mixer[track].fx[k].mix = v;
+                    self.publish_param(
+                        keyframexl::automation::Target::FxMix {
+                            track: track as u16,
+                            slot: k as u8,
+                        },
+                        v,
+                    );
                 }
             }
             None => {
@@ -2179,8 +2195,16 @@ impl App {
                     ui.data_mut(|d| d.insert_temp(egui::Id::new(("eq-focus", track, k)), Some(b)));
                 }
                 if changed {
-                    self.song.mixer[track].fx[k].params[pi] = v as f32;
-                    self.publish();
+                    let v = v as f32;
+                    self.song.mixer[track].fx[k].params[pi] = v;
+                    self.publish_param(
+                        keyframexl::automation::Target::FxParam {
+                            track: track as u16,
+                            slot: k as u8,
+                            param: pi as u16,
+                        },
+                        v,
+                    );
                 }
                 let shown = keyframexl::fx::format(spec, self.song.mixer[track].fx[k].params[pi]);
                 p.text(
@@ -2365,9 +2389,16 @@ impl App {
                                     v.round()
                                 } else {
                                     v
-                                };
-                                self.song.mixer[track].fx[k].params[pi] = v as f32;
-                                self.publish();
+                                } as f32;
+                                self.song.mixer[track].fx[k].params[pi] = v;
+                                self.publish_param(
+                                    keyframexl::automation::Target::FxParam {
+                                        track: track as u16,
+                                        slot: k as u8,
+                                        param: pi as u16,
+                                    },
+                                    v,
+                                );
                             }
                         },
                     );

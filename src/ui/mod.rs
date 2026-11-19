@@ -1222,6 +1222,16 @@ impl App {
         }
     }
 
+    /// Stream a single live parameter tweak lock-free over `rtrb` without cloning the song.
+    /// Falls back to a full song snapshot only if the parameter ring is full.
+    pub(crate) fn publish_param(&self, target: keyframexl::automation::Target, value: f32) {
+        if let Some(a) = &self.audio
+            && !a.send_param(target, value)
+        {
+            a.send_song(self.song.clone());
+        }
+    }
+
     pub(crate) fn pattern(&self) -> &keyframexl::sequence::Pattern {
         self.song
             .patterns

@@ -81,35 +81,26 @@ impl App {
     }
 
     /// Reopen the output with the current audio settings; the song carries over.
-    pub(crate) fn restart_audio(&mut self) {
+    fn reopen_audio(&mut self) -> Result<crate::audio::Running, String> {
         if !self.rec.parts.is_empty() {
             self.finish_takes();
         }
         self.audio = None;
-        match crate::audio::Audio::open(self.song.clone(), &self.settings.audio) {
-            Ok(a) => {
-                a.pattern.store(self.selected, Ordering::Relaxed);
-                a.song_mode.store(self.song_mode, Ordering::Relaxed);
-                a.metronome
-                    .store(self.settings.general.metronome, Ordering::Relaxed);
-                let r = a.running.clone();
-                self.audio = Some(a);
-                self.route_midi(None);
-                self.reopen_plugins();
-                let buf = r
-                    .buffer
-                    .map(|b| format!("{b} frames"))
-                    .unwrap_or_else(|| "default buffer".into());
-                self.say(
-                    Tone::Done,
-                    format!(
-                        "Audio: {} · {} Hz · {buf} · {:.1} ms",
-                        r.device,
-                        r.rate,
-                        r.latency_ms()
-                    ),
-                );
-            }
+        let a = crate::audio::Audio::open(self.song.clone(), &self.settings.audio)?;
+        a.pattern.store(self.selected, Ordering::Relaxed);
+        a.song_mode.store(self.song_mode, Ordering::Relaxed);
+        a.metronome
+            .store(self.settings.general.metronome, Ordering::Relaxed);
+        let r = a.running.clone();
+        self.audio = Some(a);
+        self.route_midi(None);
+        self.reopen_plugins();
+        Ok(r)
+    }
+
+    pub(crate) fn restart_audio(&mut self) {
+        match self.reopen_audio() {
+            Ok(r) => self.say(Tone::Done, format!("Audio: {}", audio_summary(&r))),
             Err(e) => self.say(
                 Tone::Bad,
                 format!("Audio output failed: {e}. Pick another device in Settings (F10)."),
@@ -117,36 +108,92 @@ impl App {
         }
     }
 
-    /// A stream that failed (device gone, ALSA stuck after an underrun) is
-    /// reopened, at most every 3 s; playback goes on from where it was.
+    /// Keeps the output alive: a stream that failed (device gone, ALSA stuck
+    /// after an underrun), one whose callbacks stopped (PipeWire restarted),
+    /// or no stream at all after a failed reopen is retried with a growing
+    /// pause; the transport carries on from where it was. While the output
+    /// named in Settings is missing, a returning device switches back to it.
     pub(crate) fn audio_watch(&mut self, ctx: &egui::Context) {
-        let Some(a) = &self.audio else { return };
-        if !a.failed.load(Ordering::Relaxed) {
-            return;
-        }
+        use crate::audio::{AudioRecovery, Reconnect, StreamHealth};
+        let id = egui::Id::new("audio-recovery");
+        let mut rec = ctx
+            .data(|d| d.get_temp::<AudioRecovery>(id))
+            .unwrap_or_default();
         let now = ctx.input(|i| i.time);
-        let id = egui::Id::new("audio-retry");
-        if ctx
-            .data(|d| d.get_temp::<f64>(id))
-            .is_some_and(|t| now - t < 3.0)
-        {
-            ctx.request_repaint_after(std::time::Duration::from_millis(500));
-            return;
-        }
-        ctx.data_mut(|d| d.insert_temp(id, now));
-        let (playing, at) = (
-            a.playing.load(Ordering::Relaxed),
-            a.position.load(Ordering::Relaxed),
+        let health = self.audio.as_ref().map(|a| StreamHealth {
+            failed: a.failed.load(Ordering::Relaxed),
+            callbacks: a.callbacks.load(Ordering::Relaxed),
+            fallback: a.running.fallback,
+            transport: (
+                a.playing.load(Ordering::Relaxed),
+                a.position.load(Ordering::Relaxed),
+            ),
+        });
+        let last_error = self
+            .audio
+            .as_ref()
+            .and_then(|a| a.last_error.lock().ok().and_then(|e| e.clone()));
+        let want = self.settings.audio.output.clone();
+        let why = rec.observe(
+            now,
+            health,
+            || last_error,
+            || {
+                let devices = crate::audio::output_devices();
+                match &want {
+                    Some(w) => devices.contains(w),
+                    None => !devices.is_empty(),
+                }
+            },
         );
-        self.restart_audio();
-        if let Some(a) = &self.audio {
-            a.position.store(at, Ordering::Relaxed);
-            a.playing.store(playing, Ordering::Relaxed);
-            self.say(
-                Tone::Bad,
-                "The audio output stopped with an error and was reopened.",
-            );
+        if let Some(why) = why {
+            let had_error = rec.last_error.clone();
+            match self.reopen_audio() {
+                Ok(r) => {
+                    rec.reconnected(now, true, None);
+                    if let (Some((playing, at)), Some(a)) = (rec.saved_transport, &self.audio) {
+                        a.position.store(at, Ordering::Relaxed);
+                        a.playing.store(playing, Ordering::Relaxed);
+                    }
+                    let how = match why {
+                        Reconnect::PreferredBack => {
+                            "Reconnected to the preferred output".to_string()
+                        }
+                        Reconnect::Error => "Audio recovered after an error".to_string(),
+                        Reconnect::Stalled => {
+                            "Audio recovered after the stream stalled".to_string()
+                        }
+                        Reconnect::DeviceBack | Reconnect::Retry => {
+                            "Audio recovered after a disconnect".to_string()
+                        }
+                    };
+                    let tone = if why == Reconnect::PreferredBack {
+                        Tone::Done
+                    } else {
+                        Tone::Bad
+                    };
+                    self.say(tone, format!("{how}: {}", audio_summary(&r)));
+                }
+                Err(e) => {
+                    rec.reconnected(now, false, Some(e.clone()));
+                    let wait = rec.retry_at.map_or(0.0, |t| (t - now).max(0.0));
+                    let cause = had_error.unwrap_or(e);
+                    self.say(
+                        Tone::Bad,
+                        format!("Audio output lost: {cause}. Retrying in {wait:.1} s."),
+                    );
+                }
+            }
         }
+        // A frame now and then keeps the watch running while nothing else repaints.
+        if rec.armed {
+            ctx.request_repaint_after(std::time::Duration::from_millis(if self.audio.is_some() {
+                1000
+            } else {
+                250
+            }));
+        }
+        ctx.data_mut(|d| d.insert_temp(id, rec));
     }
 
     /// Point MIDI callbacks at the current output (after start or a restart).
@@ -690,6 +737,16 @@ impl App {
         }
         if restart {
             self.restart_audio();
+            if self.audio.is_none() {
+                // A failed manual restart is not left silent: the watch keeps trying.
+                let id = egui::Id::new("audio-recovery");
+                let mut rec = ui
+                    .ctx()
+                    .data(|d| d.get_temp::<crate::audio::AudioRecovery>(id))
+                    .unwrap_or_default();
+                rec.reconnected(ui.input(|i| i.time), false, None);
+                ui.ctx().data_mut(|d| d.insert_temp(id, rec));
+            }
         }
         if bridge_changed && self.plugins.host.is_some() {
             self.restart_plugin_host(ui.ctx());
@@ -796,6 +853,9 @@ impl App {
             );
             row(ui, "Running", None, |ui| {
                 ui.vertical(|ui| {
+                    let rec = ui
+                        .ctx()
+                        .data(|d| d.get_temp::<crate::audio::AudioRecovery>(egui::Id::new("audio-recovery")));
                     match &self.audio {
                         Some(a) => {
                             let r = &a.running;
@@ -804,15 +864,25 @@ impl App {
                                 .map(|b| format!("{b} frames"))
                                 .unwrap_or_else(|| "device buffer".into());
                             let load = a.load.load(Ordering::Relaxed) as f64 / 10.0;
+                            let overruns = a.overruns.load(Ordering::Relaxed);
+                            ui.horizontal(|ui| {
+                                badge(ui, r.backend.label(), t::TEXT);
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} · {} Hz · {buf}",
+                                        r.device, r.rate
+                                    ))
+                                    .font(t::sans(13.0))
+                                    .color(t::TEXT),
+                                );
+                            });
                             ui.label(
                                 RichText::new(format!(
-                                    "{} · {} Hz · {buf} · ≈{:.1} ms · CPU {load:.0}%",
-                                    r.device,
-                                    r.rate,
+                                    "Latency ≈{:.1} ms · CPU {load:.0}% · Overruns {overruns}",
                                     r.latency_ms()
                                 ))
-                                .font(t::sans(13.0))
-                                .color(t::TEXT),
+                                .font(t::mono(13.0))
+                                .color(if overruns > 0 { t::WAIT } else { t::MUTED }),
                             );
                             if r.rate != s.audio.rate {
                                 ui.label(
@@ -824,6 +894,28 @@ impl App {
                                     .color(t::WAIT),
                                 );
                             }
+                            if r.fallback {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} is not available; playing through {}. It reconnects when the device returns.",
+                                        s.audio.output.as_deref().unwrap_or("The chosen output"),
+                                        r.device
+                                    ))
+                                    .font(t::sans(12.0))
+                                    .color(t::WAIT),
+                                );
+                            }
+                            if a.failed.load(Ordering::Relaxed) {
+                                let why = a.last_error.lock().ok().and_then(|e| e.clone());
+                                ui.label(
+                                    RichText::new(format!(
+                                        "Stream error: {}. Reconnecting.",
+                                        why.unwrap_or_else(|| "unknown".into())
+                                    ))
+                                    .font(t::sans(12.0))
+                                    .color(t::BAD),
+                                );
+                            }
                         }
                         None => {
                             ui.label(
@@ -831,6 +923,25 @@ impl App {
                                     .font(t::sans(13.0))
                                     .color(t::BAD),
                             );
+                            if let Some(rec) = rec.as_ref().filter(|r| r.armed && r.recovering()) {
+                                let now = ui.input(|i| i.time);
+                                let next = rec.retry_at.map_or(0.0, |t| (t - now).max(0.0));
+                                ui.label(
+                                    RichText::new(format!(
+                                        "Reconnecting: attempt {}, next in {next:.1} s.",
+                                        rec.attempts + 1
+                                    ))
+                                    .font(t::sans(12.0))
+                                    .color(t::WAIT),
+                                );
+                                if let Some(e) = &rec.last_error {
+                                    ui.label(
+                                        RichText::new(format!("Last error: {e}"))
+                                            .font(t::sans(12.0))
+                                            .color(t::BAD),
+                                    );
+                                }
+                            }
                         }
                     }
                     if kit::tool_button(ui, "Restart audio", kit::Kind::Ghost, true).clicked() {
@@ -1324,6 +1435,33 @@ fn nav(ui: &mut egui::Ui, page: Page, height: f32) -> Option<Page> {
         }
     }
     pick
+}
+
+/// `PipeWire · device · 48000 Hz · 256 frames · 5.3 ms`
+fn audio_summary(r: &crate::audio::Running) -> String {
+    let buf = r
+        .buffer
+        .map(|b| format!("{b} frames"))
+        .unwrap_or_else(|| "default buffer".into());
+    format!(
+        "{} · {} · {} Hz · {buf} · {:.1} ms",
+        r.backend.label(),
+        r.device,
+        r.rate,
+        r.latency_ms()
+    )
+}
+
+/// A small sunken label (backend name).
+fn badge(ui: &mut egui::Ui, text: &str, ink: egui::Color32) {
+    egui::Frame::new()
+        .fill(t::SUNKEN)
+        .stroke(egui::Stroke::new(1.0_f32, t::EDGE))
+        .corner_radius(4.0)
+        .inner_margin(egui::Margin::symmetric(6, 2))
+        .show(ui, |ui| {
+            ui.label(RichText::new(text).font(t::mono(12.0)).color(ink));
+        });
 }
 
 /// A group of rows under a small caps heading, on a raised panel.

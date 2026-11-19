@@ -126,7 +126,8 @@ impl App {
             return true;
         }
         if target.set(&mut self.song, value) {
-            self.publish();
+            let clamped = target.current(&self.song).unwrap_or(value);
+            self.publish_param(target, clamped);
             true
         } else {
             false
