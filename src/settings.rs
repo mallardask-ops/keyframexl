@@ -325,6 +325,8 @@ pub struct GeneralSettings {
     pub deck_monitor: DeckMonitor,
     /// Automatically check GitHub Releases once per day for newer versions.
     pub check_updates: bool,
+    /// Follow nightly builds (GitHub prereleases) instead of stable releases only.
+    pub nightly_updates: bool,
     /// Unix timestamp (seconds) of the last automatic update check.
     pub last_update_check: u64,
     /// Version tag the user chose to skip (e.g. "0.2.0").
@@ -376,6 +378,7 @@ impl Default for GeneralSettings {
             ui_scale: 1.0,
             deck_monitor: DeckMonitor::Scope,
             check_updates: true,
+            nightly_updates: true,
             last_update_check: 0,
             skipped_version: None,
             show_welcome: true,

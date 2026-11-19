@@ -13,6 +13,7 @@ mod fx_views;
 mod instrument;
 mod kit;
 mod library;
+mod markdown;
 mod menu;
 mod midi_io;
 mod mixer;
@@ -305,6 +306,8 @@ pub struct App {
     pub(crate) pending: Option<Pending>,
     /// The close was confirmed (or nothing was unsaved).
     quit_ok: bool,
+    /// An installed update to start once this window has closed.
+    pub(crate) relaunch: Option<std::path::PathBuf>,
     /// Open recent, newest first.
     pub(crate) recent: Vec<std::path::PathBuf>,
     title: String,
@@ -640,6 +643,37 @@ impl App {
                     comments: "Kick from Kit 3, pad resampled from take 2.".into(),
                 };
                 app.toggle_info(&cc.egui_ctx);
+            }
+            // KFXL_CAPTURE_UPDATE=notes.md[:stage] opens the update window on a
+            // made-up v9.9.9 with those notes; stage: idle|download|ready|failed.
+            if let Ok(spec) = std::env::var("KFXL_CAPTURE_UPDATE") {
+                use crate::updater::{CheckState, InstallState, ReleaseInfo};
+                let (file, stage) = spec.rsplit_once(':').unwrap_or((spec.as_str(), "idle"));
+                app.updater.state = CheckState::Available(ReleaseInfo {
+                    version: "9.9.9".into(),
+                    tag: "v9.9.9".into(),
+                    title: "KeyFrameXL v9.9.9".into(),
+                    notes: std::fs::read_to_string(file).unwrap_or_default(),
+                    html_url: crate::updater::RELEASES_URL.into(),
+                    linux_asset_url: Some(
+                        "https://example.com/keyframexl-linux-x86_64.tar.gz".into(),
+                    ),
+                    linux_sha256_url: None,
+                    published_at: Some("2026-11-19".into()),
+                });
+                app.updater.install = match stage {
+                    "download" => InstallState::Downloading {
+                        downloaded: 7_340_032,
+                        total: Some(18_874_368),
+                    },
+                    "ready" => InstallState::ReadyToRestart {
+                        version: "9.9.9".into(),
+                        exe_path: std::path::PathBuf::from("/opt/keyframexl/keyframexl"),
+                    },
+                    "failed" => InstallState::Failed("SHA-256 checksum mismatch.".into()),
+                    _ => InstallState::Idle,
+                };
+                app.updater.dialog_open = true;
             }
             // KFXL_CAPTURE_EXPORT=path.wav opens the export dialog on that file.
             if let Ok(path) = std::env::var("KFXL_CAPTURE_EXPORT") {
@@ -1127,6 +1161,7 @@ impl App {
             show_shortcuts: false,
             pending: None,
             quit_ok: false,
+            relaunch: None,
             recent: Vec::new(),
             title: String::new(),
             autosaved: (0, 0.0),
@@ -2749,23 +2784,31 @@ impl App {
         // Right-aligned alerts: no audio output, and a quiet update pill if available.
         let mut right_edge = match &self.audio {
             Some(_) => rect.right() - PAGE,
-            None => kit::caps(
-                p,
-                Pos2::new(rect.right() - PAGE, y),
-                Align2::RIGHT_CENTER,
-                "no audio output",
-                12.0,
-                t::BAD,
-            )
-            .left()
-                - 14.0,
+            None => {
+                kit::caps(
+                    p,
+                    Pos2::new(rect.right() - PAGE, y),
+                    Align2::RIGHT_CENTER,
+                    "no audio output",
+                    12.0,
+                    t::BAD,
+                )
+                .left()
+                    - 14.0
+            }
         };
         if let Some(info) = self
             .updater
             .available(self.settings.general.skipped_version.as_deref())
             .cloned()
         {
-            let label = format!("update v{}", info.version);
+            let label = match &self.updater.install {
+                crate::updater::InstallState::ReadyToRestart { version, .. } => {
+                    format!("restart for v{version}")
+                }
+                _ if self.updater.is_installing() => format!("updating to v{}", info.version),
+                _ => format!("update v{}", info.version),
+            };
             let galley = kit::caps_galley(p, &label, 11.0, t::WAIT);
             let pill_w = galley.size().x + 16.0;
             let pill_h = 18.0;
@@ -3104,6 +3147,11 @@ impl eframe::App for App {
             self.finish_takes();
         }
         self.shutdown_plugins();
+        if let Some(exe) = self.relaunch.take()
+            && let Err(e) = crate::updater::relaunch_binary(&exe)
+        {
+            eprintln!("{e}");
+        }
     }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {

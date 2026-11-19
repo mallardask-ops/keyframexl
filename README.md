@@ -45,7 +45,7 @@ The Mixer (`F9`) ships with **32 native DSP effects** with custom visual faces a
 - **Shared Real-Time Engine** — real-time playback (PipeWire/ALSA via `cpal` with low-latency PipeWire tuning, automatic hot-reconnect, and a lock-free `rtrb` live parameter queue) and offline rendering share one voice engine (`src/engine.rs`).
 - **MIDI & Recording** — live MIDI input (`midir`), MIDI Clock Master/Slave & MIDI Out, MIDI file import/export, and in-app audio recording.
 - **Portable Projects, Bundles & Export** — saves self-contained `.kfxl` projects and shareable `.zip` **Project Bundles** (*Collect all & save*), exports to **WAV** (16/24-bit, 32-bit float), **FLAC** (16/24-bit), and **MP3** (128/192/320 kbps), plus WAV/OGG batch export in Forge.
-- **Built-in Update Checker** — non-blocking GitHub Releases check (`HELP → Check for updates…`) with direct release download links.
+- **Self-Updater** — non-blocking GitHub Releases check (`HELP → Check for updates…`) that downloads, SHA-256-verifies and installs the new build in place, then restarts. Follows **Nightly builds** (a prerelease for every push to `main`) or stable releases only (*Settings → General*). Builds run from a cargo `target/` directory are updated from source instead.
 
 ## Quick Start
 
@@ -141,7 +141,7 @@ src/
   i18n.rs        English & Ukrainian UI localization
   sampler.rs     Multi-zone sampler engine (DirectWave DSP, round-robin, per-voice FX)
   synth.rs       KeyFrame Tide synthesizer
-  updater.rs     Non-blocking GitHub Releases update checker
+  updater.rs     GitHub Releases update checker and in-place self-installer
 tests/           Integration tests and audio fixtures
 vendor/          Patched local dependencies (cpal, egui_dock, vst3-host, winit)
 ```

@@ -66,8 +66,11 @@ define_strings! {
     tpl_forge_title, tpl_forge_desc, tpl_vocal_title, tpl_vocal_desc, tpl_blank_title,
     tpl_blank_desc,
     // Update checker
-    update_title, update_checking, update_up_to_date, update_available, update_download_linux,
-    update_open_release, update_skip_version, update_check_again, update_close,
+    update_title, update_checking, update_up_to_date, update_available, update_install_now,
+    update_downloading, update_verifying, update_installing, update_ready_restart,
+    update_restart_now, update_restart_save_hint, update_download_linux, update_open_release,
+    update_skip_version, update_check_again, update_close, update_later, update_source_build,
+    update_copy_command, update_failed, update_nightly, update_nightly_hint,
 }
 
 pub const EN: Strings = Strings {
@@ -160,11 +163,24 @@ pub const EN: Strings = Strings {
     update_checking: "Checking for updates…",
     update_up_to_date: "You are on the latest version.",
     update_available: "A new version is available",
-    update_download_linux: "Download for Linux",
+    update_install_now: "Install update",
+    update_downloading: "Downloading update…",
+    update_verifying: "Verifying SHA-256 checksum…",
+    update_installing: "Extracting and installing…",
+    update_ready_restart: "Update installed! Restart KeyFrameXL to use the new version.",
+    update_restart_now: "Restart now",
+    update_restart_save_hint: "You have unsaved changes — save your project before restarting.",
+    update_download_linux: "Download manually",
     update_open_release: "Open release page",
     update_skip_version: "Skip this version",
     update_check_again: "Check again",
     update_close: "Close",
+    update_later: "Later",
+    update_source_build: "This copy is built from source, so it updates with git:",
+    update_copy_command: "Copy update command",
+    update_failed: "Update failed",
+    update_nightly: "Nightly builds",
+    update_nightly_hint: "Get every new build from main (GitHub prereleases), not only stable releases.",
 };
 
 pub const UK: Strings = Strings {
@@ -257,11 +273,24 @@ pub const UK: Strings = Strings {
     update_checking: "Перевірка оновлень…",
     update_up_to_date: "У вас остання версія.",
     update_available: "Доступна нова версія",
-    update_download_linux: "Завантажити для Linux",
+    update_install_now: "Оновити зараз",
+    update_downloading: "Завантаження оновлення…",
+    update_verifying: "Перевірка контрольної суми SHA-256…",
+    update_installing: "Розпакування та встановлення…",
+    update_ready_restart: "Оновлення встановлено! Перезапустіть KeyFrameXL для запуску нової версії.",
+    update_restart_now: "Перезапустити зараз",
+    update_restart_save_hint: "Є незбережені зміни — збережіть проєкт перед перезапуском.",
+    update_download_linux: "Завантажити вручну",
     update_open_release: "Відкрити сторінку релізу",
     update_skip_version: "Пропустити цю версію",
     update_check_again: "Перевірити ще раз",
     update_close: "Закрити",
+    update_later: "Пізніше",
+    update_source_build: "Ця копія зібрана з вихідного коду, тому оновлюється через git:",
+    update_copy_command: "Скопіювати команду оновлення",
+    update_failed: "Не вдалося оновити",
+    update_nightly: "Нічні збірки",
+    update_nightly_hint: "Отримувати кожну нову збірку з main (пре-релізи GitHub), а не лише стабільні релізи.",
 };
 
 pub const fn strings(lang: Language) -> &'static Strings {

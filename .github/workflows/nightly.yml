@@ -1,0 +1,143 @@
+name: Nightly
+
+# Every push to main publishes a nightly prerelease
+# (v<next-patch>-nightly.<UTC yyyymmddHHMM>). Stable releases still come from
+# pushing a vX.Y.Z tag (release.yml). The in-app updater follows nightlies
+# when Settings → General → Nightly builds is on (the default).
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  KFXL_NO_UPDATE_CHECK: "1"
+  KEEP_NIGHTLIES: "10"
+
+jobs:
+  nightly-linux:
+    name: nightly-linux-x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Version
+        id: ver
+        run: |
+          set -euo pipefail
+          # A commit that is itself a stable release gets no nightly.
+          if git tag --points-at HEAD | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
+          IFS=. read -r major minor patch <<< "$base"
+          version="${major}.${minor}.$((patch + 1))-nightly.$(date -u +%Y%m%d%H%M)"
+          prev=$(git tag --sort=-creatordate --merged HEAD | grep -E '^v[0-9]' | head -n1 || true)
+          {
+            echo "skip=false"
+            echo "version=${version}"
+            echo "prev=${prev}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Nightly ${version} (since ${prev:-start})"
+
+      - name: Install native build packages
+        if: steps.ver.outputs.skip != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev \
+            libxcb1-dev \
+            libxcb-xtest0-dev \
+            libvorbis-dev \
+            libogg-dev \
+            pkg-config \
+            libgtk-3-dev \
+            libglib2.0-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.ver.outputs.skip != 'true'
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.ver.outputs.skip != 'true'
+
+      - name: Test
+        if: steps.ver.outputs.skip != 'true'
+        run: cargo test --lib && cargo test --bin keyframexl
+
+      - name: Build nightly binary
+        if: steps.ver.outputs.skip != 'true'
+        env:
+          KFXL_BUILD_VERSION: ${{ steps.ver.outputs.version }}
+        run: cargo build --release --locked
+
+      - name: Package
+        if: steps.ver.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          name=keyframexl-linux-x86_64
+          rm -rf dist
+          mkdir -p "dist/${name}/docs"
+          install -m 755 target/release/keyframexl "dist/${name}/keyframexl"
+          cp README.md "dist/${name}/README.md"
+          cp docs/roadmap.md "dist/${name}/docs/roadmap.md"
+          tar -C dist -czf "${name}.tar.gz" "${name}"
+          sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256"
+
+      - name: Release notes
+        if: steps.ver.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          prev="${{ steps.ver.outputs.prev }}"
+          range="${prev:+${prev}..}HEAD"
+          {
+            echo "## Nightly ${{ steps.ver.outputs.version }}"
+            echo
+            echo "> **Nightly build** from \`main\` at \`$(git rev-parse --short HEAD)\`. It may have rough edges; the in-app updater installs it when *Nightly builds* is on."
+            echo
+            echo "### Changes${prev:+ since \`${prev}\`}"
+            echo
+            git log --no-merges --pretty='- %s (`%h`)' "$range" | head -n 60
+          } > notes.md
+          cat notes.md
+
+      - name: Publish nightly prerelease
+        if: steps.ver.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: KeyFrameXL Nightly ${{ steps.ver.outputs.version }}
+          body_path: notes.md
+          prerelease: true
+          make_latest: false
+          files: |
+            keyframexl-linux-x86_64.tar.gz
+            keyframexl-linux-x86_64.tar.gz.sha256
+
+      - name: Prune old nightlies
+        if: steps.ver.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release list --limit 100 --json tagName,createdAt \
+            -q '[.[] | select(.tagName | test("-nightly\\."))] | sort_by(.createdAt) | reverse | .[].tagName' \
+            | tail -n +$((KEEP_NIGHTLIES + 1)) \
+            | while read -r tag; do
+                echo "Deleting old nightly ${tag}"
+                gh release delete "$tag" --yes --cleanup-tag
+              done

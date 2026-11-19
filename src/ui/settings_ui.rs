@@ -1370,6 +1370,10 @@ fn general_page(ui: &mut egui::Ui, s: &mut Settings, checking_updates: bool) -> 
                 kit_switch(ui, &mut s.general.check_updates);
             },
         );
+        let tr = crate::i18n::strings(s.general.language);
+        row(ui, tr.update_nightly, Some(tr.update_nightly_hint), |ui| {
+            kit_switch(ui, &mut s.general.nightly_updates);
+        });
         row(ui, "Current version", None, |ui| {
             ui.label(
                 RichText::new(format!("v{}", crate::updater::CURRENT_VERSION))

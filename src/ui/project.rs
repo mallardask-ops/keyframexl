@@ -285,6 +285,8 @@ impl App {
                     }
                     if kit::button(ui, "Cancel", kit::Kind::Normal, true).clicked() || esc {
                         self.pending = None;
+                        // A cancelled close is not a restart into the update either.
+                        self.relaunch = None;
                     }
                 });
             });
