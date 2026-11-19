@@ -18,8 +18,16 @@ use crate::sequence::{
 const MAX_VOICES: usize = 128;
 /// Fade used when a voice is stolen or cut by its group.
 const KILL_SECONDS: f64 = 0.005;
+/// Time constant of the parameter smoothers (faders, slot mixes, channel
+/// gains, effect parameters): ~5 ms, independent of rate and block size.
+const SMOOTH_TAU_SEC: f64 = 0.005;
 /// Offline renders stop this long after the last voice at the latest.
 const MAX_TAIL_SECONDS: f64 = 30.0;
+
+/// Per-sample one-pole coefficient toward a new parameter target.
+fn smooth_alpha(rate: f64) -> f64 {
+    1.0 - (-1.0 / (SMOOTH_TAU_SEC * rate)).exp()
+}
 
 /// Topology-preserving state-variable filter (Simper/Cytomic). Stable under
 /// fast cutoff modulation, which a sampler's envelopes and LFOs need.
@@ -124,6 +132,9 @@ struct Voice {
     ratio_cache: (f64, f64),
     /// Per filter: last (cutoff mod, emphasis mod) and its (g, k).
     coeff_cache: [(f64, f64, (f64, f64)); 2],
+    /// Channel volume/pan gains reached at the last rendered frame
+    /// (smoothing); `None` starts at the next block's target.
+    gain_state: Option<[f64; 2]>,
 }
 
 impl Voice {
@@ -170,6 +181,7 @@ impl Voice {
             done: false,
             ratio_cache: (f64::NAN, 0.0),
             coeff_cache: [(f64::NAN, f64::NAN, (0.0, 0.0)); 2],
+            gain_state: None,
         }
     }
 
@@ -718,6 +730,9 @@ struct PhraseVoice {
     pos: usize,
     /// Frames of fade-out left once cut (transport change), else `None`.
     fade: Option<(usize, usize)>,
+    /// Channel volume/pan gains reached at the last rendered frame
+    /// (smoothing); `None` starts at the next block's target.
+    gain_state: Option<[f64; 2]>,
 }
 
 /// `KFXL_VOCAL_TRACE=1`: log vocal triggers (debugging only; prints on the audio thread).
@@ -937,6 +952,16 @@ pub struct Engine {
     eq: Vec<Option<crate::fx::FxState>>,
     /// Fader gains reached at the end of the last block (smoothing).
     gain_state: Vec<Option<[f32; 2]>>,
+    /// Wet/dry mix reached at the end of the last block per effect slot
+    /// (`track * FX_SLOTS + slot`), for the ~5 ms mix smoother.
+    fx_mix_state: Vec<Option<f32>>,
+    /// The hosted plugin each slot's mix smoother last saw: a swap resets it.
+    fx_mix_plugin: Vec<Option<u64>>,
+    /// Smoothed built-in effect parameters per effect slot. An empty value
+    /// list means "not started": the next block snaps to its target. The
+    /// vectors are reserved in `grow_buses` and never freed on the audio
+    /// thread (a reset only clears them).
+    fx_param_state: Vec<Option<(crate::fx::FxKind, Vec<f32>)>>,
     /// Post-fader peak per mixer track for the last block.
     peaks: Vec<f32>,
     scratch: Vec<f32>,
@@ -1004,6 +1029,9 @@ impl Engine {
             mix_feeds: Vec::new(),
             fx: Vec::new(),
             gain_state: Vec::new(),
+            fx_mix_state: Vec::new(),
+            fx_mix_plugin: Vec::new(),
+            fx_param_state: Vec::new(),
             eq: Vec::new(),
             peaks: Vec::new(),
             scratch: Vec::new(),
@@ -1142,6 +1170,12 @@ impl Engine {
             }
             slots.resize_with(slot + 1, || None);
         }
+        reset_fx_smoothers(
+            &mut self.fx_mix_state,
+            &mut self.fx_mix_plugin,
+            &mut self.fx_param_state,
+            track * crate::sequence::FX_SLOTS + slot,
+        );
         slots[slot].replace(state)
     }
 
@@ -1387,6 +1421,14 @@ impl Engine {
                 Some(crate::fx::FxState::new(crate::fx::FxKind::Eq, rate))
             });
             self.gain_state.resize(tracks, None);
+            self.fx_mix_state
+                .resize(tracks * crate::sequence::FX_SLOTS, None);
+            self.fx_mix_plugin
+                .resize(tracks * crate::sequence::FX_SLOTS, None);
+            self.fx_param_state
+                .resize_with(tracks * crate::sequence::FX_SLOTS, || {
+                    Some((crate::fx::FxKind::Eq, Vec::with_capacity(64)))
+                });
             self.peaks.resize(tracks, 0.0);
             self.mix_order
                 .reserve(tracks.saturating_sub(self.mix_order.capacity()));
@@ -1594,29 +1636,65 @@ impl Engine {
                 d.run(&mut self.extra[k * n..(k + 1) * n], wait);
             }
             let bus = (inst.mixer as usize).min(self.buses.len() - 1);
-            let g = if inst.muted {
+            let target = if inst.muted {
                 [0.0; 2]
             } else {
                 channel_gains(&self.auto, inst).unwrap_or_else(|| inst.gains())
             };
-            let add = |d: &mut [f32], s: &[f32]| {
-                for (d, s) in d.chunks_exact_mut(2).zip(s.chunks_exact(2)) {
-                    d[0] += (s[0] as f64 * g[0]) as f32;
-                    d[1] += (s[1] as f64 * g[1]) as f32;
-                }
-            };
-            add(&mut self.buses[bus][..n], io);
+            // A fresh instance starts at the channel's gains, not gliding to them.
+            let mut g = pl.gain_state.unwrap_or(target);
             // Extra outputs go to their mixer tracks (FL: the plugin's output
             // routing); an unrouted one joins the main output.
             let outs = inst.plugin().map(|p| p.outs.as_slice()).unwrap_or(&[]);
-            for k in 0..wrote {
-                let to = outs
-                    .get(k)
-                    .map(|&t| t as usize)
-                    .filter(|&t| t > 0 && t < self.buses.len())
-                    .unwrap_or(bus);
-                add(&mut self.buses[to][..n], &self.extra[k * n..(k + 1) * n]);
+            if g == target {
+                let add = |d: &mut [f32], s: &[f32]| {
+                    for (d, s) in d.chunks_exact_mut(2).zip(s.chunks_exact(2)) {
+                        d[0] += (s[0] as f64 * g[0]) as f32;
+                        d[1] += (s[1] as f64 * g[1]) as f32;
+                    }
+                };
+                add(&mut self.buses[bus][..n], io);
+                for k in 0..wrote {
+                    let to = outs
+                        .get(k)
+                        .map(|&t| t as usize)
+                        .filter(|&t| t > 0 && t < self.buses.len())
+                        .unwrap_or(bus);
+                    add(&mut self.buses[to][..n], &self.extra[k * n..(k + 1) * n]);
+                }
+            } else {
+                // Smooth the channel gain per sample, advancing the curve once
+                // for the main output and every extra pair alike.
+                let alpha = smooth_alpha(self.rate);
+                let mut dest = [bus; crate::plugin::MAX_EXTRA_PAIRS];
+                for (k, d) in dest.iter_mut().enumerate().take(wrote) {
+                    *d = outs
+                        .get(k)
+                        .map(|&t| t as usize)
+                        .filter(|&t| t > 0 && t < self.buses.len())
+                        .unwrap_or(bus);
+                }
+                for i in 0..frames {
+                    g[0] += (target[0] - g[0]) * alpha;
+                    g[1] += (target[1] - g[1]) * alpha;
+                    if (target[0] - g[0]).abs() < 1e-6 {
+                        g[0] = target[0];
+                    }
+                    if (target[1] - g[1]).abs() < 1e-6 {
+                        g[1] = target[1];
+                    }
+                    let f = &mut self.buses[bus][i * 2..i * 2 + 2];
+                    f[0] += (io[i * 2] as f64 * g[0]) as f32;
+                    f[1] += (io[i * 2 + 1] as f64 * g[1]) as f32;
+                    for k in 0..wrote {
+                        let s = &self.extra[k * n + i * 2..k * n + i * 2 + 2];
+                        let f = &mut self.buses[dest[k]][i * 2..i * 2 + 2];
+                        f[0] += (s[0] as f64 * g[0]) as f32;
+                        f[1] += (s[1] as f64 * g[1]) as f32;
+                    }
+                }
             }
+            pl.gain_state = Some(g);
         }
     }
 
@@ -1721,10 +1799,18 @@ impl Engine {
                 slots.resize_with(track.fx.len(), || None);
             }
             for (k, slot) in track.fx.iter().enumerate() {
+                let si = t * crate::sequence::FX_SLOTS + k;
                 if !slot.enabled {
+                    // A bypassed slot forgets its smoothers: re-enabling snaps.
+                    reset_fx_smoothers(
+                        &mut self.fx_mix_state,
+                        &mut self.fx_mix_plugin,
+                        &mut self.fx_param_state,
+                        si,
+                    );
                     continue;
                 }
-                let mix = crate::automation::find(
+                let mix_target = crate::automation::find(
                     &self.auto,
                     crate::automation::Target::FxMix {
                         track: t as u16,
@@ -1732,6 +1818,13 @@ impl Engine {
                     },
                 )
                 .unwrap_or(slot.mix);
+                // A fresh slot starts at its mix, not gliding to it.
+                let mut mix = self
+                    .fx_mix_state
+                    .get(si)
+                    .copied()
+                    .flatten()
+                    .unwrap_or(mix_target);
                 // This insert's signal, and the sidechain key's (mixed earlier).
                 let (bus, key) = bus_and_key(
                     &mut self.buses,
@@ -1743,11 +1836,27 @@ impl Engine {
                 );
                 if let Some(pref) = &slot.plugin {
                     // Hosted effect: the instance runs in place, with the slot mix.
+                    if self.fx_mix_plugin.get(si).copied().flatten() != Some(pref.id) {
+                        // A different plugin in the slot: start the smoothers fresh.
+                        reset_fx_smoothers(
+                            &mut self.fx_mix_state,
+                            &mut self.fx_mix_plugin,
+                            &mut self.fx_param_state,
+                            si,
+                        );
+                        if let Some(p) = self.fx_mix_plugin.get_mut(si) {
+                            *p = Some(pref.id);
+                        }
+                        mix = mix_target;
+                    }
                     let Some(pl) = self.plugins.iter_mut().find(|p| p.id == pref.id) else {
                         continue;
                     };
+                    let blending = mix < 1.0 || mix != mix_target;
                     let dry = &mut self.scratch[..n];
-                    dry.copy_from_slice(bus);
+                    if blending {
+                        dry.copy_from_slice(bus);
+                    }
                     let mut lag = 0;
                     if let Ok(mut proc) = pl.proc.lock() {
                         lag = proc.latency(frames);
@@ -1759,24 +1868,62 @@ impl Engine {
                         }
                     }
                     pl.events.clear();
-                    if mix < 1.0 {
+                    if blending {
                         // The dry signal waits for the wet one (no comb filter).
                         pl.pdc.run(dry, lag);
-                        for (w, d) in bus.iter_mut().zip(dry.iter()) {
-                            *w = *d + (*w - *d) * mix;
+                        if mix != mix_target {
+                            // f64 travel (an f32 curve stalls short of the
+                            // snap threshold), once per frame for both sides.
+                            let (mut cur, to) = (mix as f64, mix_target as f64);
+                            let alpha = smooth_alpha(rate as f64);
+                            for (w, d) in bus.chunks_exact_mut(2).zip(dry.chunks_exact(2)) {
+                                cur += (to - cur) * alpha;
+                                if (to - cur).abs() < 1e-6 {
+                                    cur = to;
+                                }
+                                let m = cur as f32;
+                                w[0] = d[0] + (w[0] - d[0]) * m;
+                                w[1] = d[1] + (w[1] - d[1]) * m;
+                            }
+                            mix = cur as f32;
+                        } else {
+                            for (w, d) in bus.iter_mut().zip(dry.iter()) {
+                                *w = *d + (*w - *d) * mix;
+                            }
                         }
                     }
+                    if let Some(m) = self.fx_mix_state.get_mut(si) {
+                        *m = Some(mix);
+                    }
                     continue;
+                }
+                if self.fx_mix_plugin.get(si).copied().flatten().is_some() {
+                    // The slot was a hosted plugin: start the smoothers fresh.
+                    reset_fx_smoothers(
+                        &mut self.fx_mix_state,
+                        &mut self.fx_mix_plugin,
+                        &mut self.fx_param_state,
+                        si,
+                    );
+                    mix = mix_target;
                 }
                 if slots[k].as_ref().is_none_or(|s| s.kind() != slot.kind) {
                     // Offline renders build here; the live engine gets states
                     // built on the UI thread (`adopt_fx`) before the song arrives.
                     slots[k] = Some(crate::fx::FxState::for_slot(slot, rate));
+                    reset_fx_smoothers(
+                        &mut self.fx_mix_state,
+                        &mut self.fx_mix_plugin,
+                        &mut self.fx_param_state,
+                        si,
+                    );
+                    mix = mix_target;
                 }
                 let st = slots[k].as_mut().expect("built");
                 // Automated parameters: a copy with the envelope values in it.
                 let mut params: &[f32] = &slot.params;
-                if self.auto.iter().any(|sample| matches!(sample.target, crate::automation::Target::FxParam { track: at, slot: s, .. } if at as usize == t && s as usize == k)) {
+                let automated = self.auto.iter().any(|sample| matches!(sample.target, crate::automation::Target::FxParam { track: at, slot: s, .. } if at as usize == t && s as usize == k));
+                if automated {
                     self.auto_params.clear();
                     self.auto_params.extend(slot.params.iter().take(self.auto_params.capacity()));
                     for sample in &self.auto {
@@ -1790,18 +1937,78 @@ impl Engine {
                     }
                     params = &self.auto_params;
                 }
+                // Continuous parameters glide ~5 ms toward the target, once per
+                // block; discrete ones (Steps, fixed ranges) snap. While nothing
+                // is automated and the state matches the slot, `slot.params`
+                // passes straight through.
+                if let Some(Some((kind, vals))) = self.fx_param_state.get_mut(si) {
+                    if *kind != slot.kind || (!vals.is_empty() && vals.len() != slot.params.len())
+                    {
+                        vals.clear();
+                        *kind = slot.kind;
+                    }
+                    if automated || (!vals.is_empty() && vals.as_slice() != slot.params) {
+                        if vals.is_empty() {
+                            // First smoothed block: start at the target, no lag.
+                            vals.extend_from_slice(params);
+                        } else {
+                            let alpha_block =
+                                1.0 - (-(frames as f32) / (SMOOTH_TAU_SEC as f32 * rate)).exp();
+                            let specs = slot.kind.params();
+                            for (i, cur) in vals.iter_mut().enumerate() {
+                                let Some(&target) = params.get(i) else { break };
+                                match specs.get(i) {
+                                    Some(spec)
+                                        if spec.unit != crate::fx::Unit::Steps
+                                            && spec.max > spec.min =>
+                                    {
+                                        *cur += (target - *cur) * alpha_block;
+                                        if (target - *cur).abs()
+                                            <= 1e-5 * (spec.max - spec.min).max(1.0)
+                                        {
+                                            *cur = target;
+                                        }
+                                    }
+                                    _ => *cur = target,
+                                }
+                            }
+                            params = vals.as_slice();
+                        }
+                    }
+                }
                 let dry = &mut self.scratch[..n];
-                if mix < 1.0 {
+                let blending = mix < 1.0 || mix != mix_target;
+                if blending {
                     dry.copy_from_slice(bus);
                 }
                 match key {
                     Some(key) => st.process_keyed(params, bus, key, rate, tempo),
                     None => st.process(params, bus, rate, tempo),
                 }
-                if mix < 1.0 {
-                    for (w, d) in bus.iter_mut().zip(dry.iter()) {
-                        *w = *d + (*w - *d) * mix;
+                if blending {
+                    if mix != mix_target {
+                        // f64 travel (an f32 curve stalls short of the snap
+                        // threshold), once per frame for both sides.
+                        let (mut cur, to) = (mix as f64, mix_target as f64);
+                        let alpha = smooth_alpha(rate as f64);
+                        for (w, d) in bus.chunks_exact_mut(2).zip(dry.chunks_exact(2)) {
+                            cur += (to - cur) * alpha;
+                            if (to - cur).abs() < 1e-6 {
+                                cur = to;
+                            }
+                            let m = cur as f32;
+                            w[0] = d[0] + (w[0] - d[0]) * m;
+                            w[1] = d[1] + (w[1] - d[1]) * m;
+                        }
+                        mix = cur as f32;
+                    } else {
+                        for (w, d) in bus.iter_mut().zip(dry.iter()) {
+                            *w = *d + (*w - *d) * mix;
+                        }
                     }
+                }
+                if let Some(m) = self.fx_mix_state.get_mut(si) {
+                    *m = Some(mix);
                 }
                 if let Some(g) = self.reduction.get_mut(t * crate::sequence::FX_SLOTS + k) {
                     *g = st.reduction();
@@ -1829,18 +2036,39 @@ impl Engine {
                     f[1] = m - s;
                 }
             }
-            // Fader and pan, ramped across the block; skipped at unity.
+            // Fader and pan, smoothed per sample (~5 ms); skipped at unity.
             let target = mixer_gains(&self.auto, t, track);
             // A fresh engine starts at the fader, not at unity.
             let start = self.gain_state[t].unwrap_or(target);
+            let mut end = start;
             if start != [1.0; 2] || target != [1.0; 2] {
-                for (i, f) in bus.chunks_exact_mut(2).enumerate() {
-                    let k = (i + 1) as f32 / frames as f32;
-                    f[0] *= start[0] + (target[0] - start[0]) * k;
-                    f[1] *= start[1] + (target[1] - start[1]) * k;
+                if start == target {
+                    for f in bus.chunks_exact_mut(2) {
+                        f[0] *= start[0];
+                        f[1] *= start[1];
+                    }
+                } else {
+                    // f64 travel: an f32 curve stalls a few ulps short of the
+                    // target and never reaches the snap threshold.
+                    let mut cur = [start[0] as f64, start[1] as f64];
+                    let to = [target[0] as f64, target[1] as f64];
+                    let alpha = smooth_alpha(self.rate);
+                    for f in bus.chunks_exact_mut(2) {
+                        cur[0] += (to[0] - cur[0]) * alpha;
+                        cur[1] += (to[1] - cur[1]) * alpha;
+                        if (to[0] - cur[0]).abs() < 1e-6 {
+                            cur[0] = to[0];
+                        }
+                        if (to[1] - cur[1]).abs() < 1e-6 {
+                            cur[1] = to[1];
+                        }
+                        f[0] *= cur[0] as f32;
+                        f[1] *= cur[1] as f32;
+                    }
+                    end = [cur[0] as f32, cur[1] as f32];
                 }
             }
-            self.gain_state[t] = Some(target);
+            self.gain_state[t] = Some(end);
             self.peaks[t] = bus.iter().fold(0.0f32, |m, x| m.max(x.abs()));
             if self.scope.track.load(std::sync::atomic::Ordering::Relaxed) == t {
                 use std::sync::atomic::Ordering::Relaxed;
@@ -2239,6 +2467,7 @@ impl Engine {
                             live: note_id,
                             pos: 0,
                             fade: None,
+                            gain_state: None,
                         });
                     }
                     return;
@@ -2262,6 +2491,7 @@ impl Engine {
                         live: 0,
                         pos: self.hit_skip,
                         fade: None,
+                        gain_state: None,
                     });
                 }
             }
@@ -2485,15 +2715,18 @@ impl Engine {
             return;
         }
         let auto = &self.auto;
+        let alpha = smooth_alpha(self.rate);
         for pv in &mut self.phrases {
             let inst = song.instrument(pv.inst);
             let bus = inst
                 .map(|i| i.mixer as usize)
                 .filter(|b| *b < self.buses.len())
                 .unwrap_or(0);
-            let g = inst
+            let target = inst
                 .map(|i| channel_gains(auto, i).unwrap_or_else(|| i.gains()))
                 .unwrap_or([1.0, 1.0]);
+            // A fresh phrase starts at the channel's gains, not gliding to them.
+            let mut gain = pv.gain_state.unwrap_or(target);
             let out = &mut self.buses[bus][at * 2..(at + frames) * 2];
             let data = &pv.phrase.data;
             for frame in out.chunks_exact_mut(2) {
@@ -2503,10 +2736,21 @@ impl Engine {
                     s *= *left as f64 / *total as f64;
                     *left = left.saturating_sub(1);
                 }
-                frame[0] += (s * g[0]) as f32;
-                frame[1] += (s * g[1]) as f32;
+                if gain != target {
+                    gain[0] += (target[0] - gain[0]) * alpha;
+                    gain[1] += (target[1] - gain[1]) * alpha;
+                    if (target[0] - gain[0]).abs() < 1e-6 {
+                        gain[0] = target[0];
+                    }
+                    if (target[1] - gain[1]).abs() < 1e-6 {
+                        gain[1] = target[1];
+                    }
+                }
+                frame[0] += (s * gain[0]) as f32;
+                frame[1] += (s * gain[1]) as f32;
                 pv.pos += 1;
             }
+            pv.gain_state = Some(gain);
         }
         self.phrases
             .retain(|pv| pv.pos < pv.phrase.data.len() && pv.fade.is_none_or(|(_, left)| left > 0));
@@ -2520,6 +2764,7 @@ impl Engine {
         }
         let rate = self.rate;
         let dt = 1.0 / rate;
+        let alpha = smooth_alpha(rate);
         let buses = &mut self.buses;
         let chans = &mut self.synth_fx;
         let auto = &self.auto;
@@ -2574,11 +2819,17 @@ impl Engine {
                 .filter(|_| orig.is_some_and(|o| !o.mods.is_empty()))
                 .cloned();
             let mut until_mod = 0usize;
-            // Channel volume and pan; skipped at unity so old renders stay bit-exact.
-            let gains = inst.and_then(|i| channel_gains(auto, i)).or_else(|| {
-                inst.filter(|i| i.volume != 1.0 || i.pan != 0.0)
-                    .map(|i| i.gains())
-            });
+            // Channel volume and pan, smoothed ~5 ms toward the block's target;
+            // skipped at unity so old renders stay bit-exact.
+            let target = inst
+                .and_then(|i| channel_gains(auto, i))
+                .or_else(|| {
+                    inst.filter(|i| i.volume != 1.0 || i.pan != 0.0)
+                        .map(|i| i.gains())
+                })
+                .unwrap_or([1.0; 2]);
+            // A fresh voice starts at the channel's gains, not gliding to them.
+            let mut gain = v.gain_state.unwrap_or(target);
             for frame in out.chunks_exact_mut(2) {
                 if v.done {
                     break;
@@ -2623,13 +2874,25 @@ impl Engine {
                         }
                     }
                 };
-                let s = match gains {
-                    Some(g) => [s[0] * g[0], s[1] * g[1]],
-                    None => s,
+                let s = if gain != target {
+                    gain[0] += (target[0] - gain[0]) * alpha;
+                    gain[1] += (target[1] - gain[1]) * alpha;
+                    if (target[0] - gain[0]).abs() < 1e-6 {
+                        gain[0] = target[0];
+                    }
+                    if (target[1] - gain[1]).abs() < 1e-6 {
+                        gain[1] = target[1];
+                    }
+                    [s[0] * gain[0], s[1] * gain[1]]
+                } else if gain == [1.0; 2] {
+                    s
+                } else {
+                    [s[0] * gain[0], s[1] * gain[1]]
                 };
                 frame[0] += s[0] as f32;
                 frame[1] += s[1] as f32;
             }
+            v.gain_state = Some(gain);
         }
         self.voices.retain(|v| !v.done);
     }
@@ -2719,6 +2982,26 @@ fn bus_and_key(
             (&mut lo[t][..n], Some(&hi[0][..n]))
         }
         _ => (&mut buses[t][..n], None),
+    }
+}
+
+/// Forget one slot's smoothers (bypassed, or a different effect in it): the
+/// next block starts at the slot's own values. The parameter vectors stay
+/// allocated; only their contents clear.
+fn reset_fx_smoothers(
+    mix: &mut [Option<f32>],
+    plugin: &mut [Option<u64>],
+    params: &mut [Option<(crate::fx::FxKind, Vec<f32>)>],
+    si: usize,
+) {
+    if let Some(m) = mix.get_mut(si) {
+        *m = None;
+    }
+    if let Some(p) = plugin.get_mut(si) {
+        *p = None;
+    }
+    if let Some(Some((_, vals))) = params.get_mut(si) {
+        vals.clear();
     }
 }
 
@@ -3780,6 +4063,253 @@ mod tests {
         song.instruments.last_mut().unwrap().fl_plugin =
             Some(crate::sequence::FlPluginState::new("FLEX", b"preset"));
         assert_eq!(energy(&render(&song, 1, false, RATE)), 0.0);
+    }
+
+    /// `frames` frames of the song in 64-sample blocks (a tiny live buffer).
+    fn render64(song: &Song, song_mode: bool, frames: usize) -> Vec<[f32; 2]> {
+        let mut e = Engine::new(RATE);
+        let mut out = Vec::new();
+        let mut buf = [0.0f32; 64 * 2];
+        let mut pos = 0;
+        while out.len() < frames {
+            pos = e.process(song, 1, song_mode, pos, &mut buf, true);
+            out.extend(buf.chunks_exact(2).map(|f| [f[0], f[1]]));
+        }
+        out.truncate(frames);
+        out
+    }
+
+    /// A bar in frames at the song's tempo.
+    fn bar_frames(song: &Song) -> usize {
+        (16.0 * seconds_per_step(song.tempo) * RATE as f64) as usize
+    }
+
+    /// Two bars of a held 0.5 DC tone, ready for automation clips.
+    fn held_tone_song() -> Song {
+        let mut song = song_with(vec![[0.5; 2]; RATE as usize * 4], |_, _| {});
+        song.patterns[0].length = 2 * crate::sequence::BAR;
+        song.patterns[0].notes.push(note(0, 32, 60));
+        song.clips.push(crate::sequence::Clip::new(1, 0, 0));
+        song
+    }
+
+    /// An automation clip holding `value` over the second bar of `target`.
+    fn step_at_bar_two(song: &mut Song, id: u64, target: crate::automation::Target, value: f32) {
+        let bar = crate::sequence::BAR;
+        let mut auto = Pattern::new(id, "Step");
+        auto.length = bar;
+        auto.automation = Some(crate::automation::Envelope::flat(target, value, bar));
+        song.patterns.push(auto);
+        song.clips.push(crate::sequence::Clip::new(id, bar, 1));
+    }
+
+    #[test]
+    fn a_mixer_volume_step_ramps_smoothly_in_tiny_blocks() {
+        use crate::automation::Target;
+        let mut song = held_tone_song();
+        // Master fader steps 1.0 -> 0.2 at bar 2.
+        step_at_bar_two(&mut song, 7, Target::MixerVolume { track: 0 }, 0.2);
+        let bar = bar_frames(&song);
+        let out = render64(&song, true, 2 * bar);
+        assert!(
+            out[..bar].iter().all(|f| f[0] == 0.5 && f[1] == 0.5),
+            "bar 1 untouched at unity"
+        );
+        // No single-sample click: every step is at most one one-pole move.
+        let alpha = smooth_alpha(RATE as f64) as f32;
+        let bound = 0.5 * 0.8 * alpha * 1.001;
+        let max_delta = out[bar - 1..]
+            .windows(2)
+            .map(|w| (w[1][0] - w[0][0]).abs())
+            .fold(0.0f32, f32::max);
+        assert!(max_delta > 0.0, "the fader moved");
+        assert!(max_delta <= bound, "click: {max_delta} > {bound}");
+        // Settled to 0.5 * 0.2 well within 50 ms, exact shortly after.
+        let settled = bar + (0.05 * RATE as f64) as usize;
+        assert!(
+            out[settled..settled + 64]
+                .iter()
+                .all(|f| (f[0] - 0.1).abs() < 1e-4),
+            "not settled after 50 ms"
+        );
+        let exact = bar + (0.1 * RATE as f64) as usize;
+        assert!(
+            out[exact..exact + 64]
+                .iter()
+                .all(|f| (f[0] - 0.1).abs() < 1e-7),
+            "never snapped to the target"
+        );
+    }
+
+    #[test]
+    fn an_fx_mix_step_ramps_smoothly_in_tiny_blocks() {
+        use crate::automation::Target;
+        let mut song = held_tone_song();
+        // A silent wet path: full mix is silence, no mix is the 0.5 tone.
+        let mut bal = crate::fx::FxSlot::new(crate::fx::FxKind::Balance);
+        bal.params[0] = 0.0;
+        song.mixer[0].fx.push(bal);
+        step_at_bar_two(&mut song, 7, Target::FxMix { track: 0, slot: 0 }, 0.0);
+        let bar = bar_frames(&song);
+        let out = render64(&song, true, 2 * bar);
+        assert!(
+            out[..bar].iter().all(|f| f[0] == 0.0),
+            "full wet: the silent balance"
+        );
+        let alpha = smooth_alpha(RATE as f64) as f32;
+        let bound = 0.5 * alpha * 1.001;
+        let max_delta = out[bar - 1..]
+            .windows(2)
+            .map(|w| (w[1][0] - w[0][0]).abs())
+            .fold(0.0f32, f32::max);
+        assert!(max_delta > 0.0, "the mix moved");
+        assert!(max_delta <= bound, "discontinuity: {max_delta} > {bound}");
+        let settled = bar + (0.05 * RATE as f64) as usize;
+        assert!(
+            out[settled..settled + 64]
+                .iter()
+                .all(|f| (f[0] - 0.5).abs() < 1e-4),
+            "not dry after 50 ms"
+        );
+    }
+
+    #[test]
+    fn a_channel_volume_step_ramps_while_a_still_channel_stays_exact() {
+        use crate::automation::Target;
+        // A stationary channel at non-unity volume: 64-sample live blocks must
+        // match the 512-sample export bit for bit.
+        let mut still = held_tone_song();
+        still
+            .instruments
+            .iter_mut()
+            .find(|i| i.id == 4)
+            .unwrap()
+            .volume = 0.7;
+        let offline = render(&still, 1, false, RATE);
+        // The export adds a silent tail block past the song; compare the song.
+        let length = loop_frames(&still, 1, false, RATE) as usize;
+        let live = render64(&still, false, length);
+        assert_eq!(live, offline[..length], "a stationary channel stays bit-exact");
+        // The same channel automated: 1.0 -> 0.25 at bar 2.
+        let mut moved = still.clone();
+        moved
+            .instruments
+            .iter_mut()
+            .find(|i| i.id == 4)
+            .unwrap()
+            .volume = 1.0;
+        step_at_bar_two(&mut moved, 7, Target::ChannelVolume { inst: 4 }, 0.25);
+        let bar = bar_frames(&moved);
+        let out = render64(&moved, true, 2 * bar);
+        assert!(
+            out[..bar].iter().all(|f| f[0] == 0.5),
+            "bar 1 untouched at unity"
+        );
+        let alpha = smooth_alpha(RATE as f64) as f32;
+        let bound = 0.5 * 0.75 * alpha * 1.001;
+        let max_delta = out[bar - 1..]
+            .windows(2)
+            .map(|w| (w[1][0] - w[0][0]).abs())
+            .fold(0.0f32, f32::max);
+        assert!(max_delta > 0.0, "the volume moved");
+        assert!(max_delta <= bound, "discontinuity: {max_delta} > {bound}");
+        let settled = bar + (0.05 * RATE as f64) as usize;
+        assert!(
+            out[settled..settled + 64]
+                .iter()
+                .all(|f| (f[0] - 0.125).abs() < 1e-4),
+            "not settled after 50 ms"
+        );
+    }
+
+    #[test]
+    fn automated_fx_params_glide_continuous_and_snap_discrete() {
+        use crate::automation::Target;
+        use crate::sequence::FX_SLOTS;
+        // A 6 kHz tone: bright enough that closing the cutoff is audible.
+        let bright: Vec<[f32; 2]> = (0..RATE as usize * 4)
+            .map(|i| {
+                let s = ((i as f64 * std::f64::consts::FRAC_PI_4).sin() * 0.5) as f32;
+                [s; 2]
+            })
+            .collect();
+        let mut song = song_with(bright, |_, _| {});
+        song.instruments
+            .iter_mut()
+            .find(|i| i.id == 4)
+            .unwrap()
+            .mixer = 1;
+        song.patterns[0].length = 2 * crate::sequence::BAR;
+        song.patterns[0].notes.push(note(0, 32, 60));
+        song.clips.push(crate::sequence::Clip::new(1, 0, 0));
+        song.mixer[1]
+            .fx
+            .push(crate::fx::FxSlot::new(crate::fx::FxKind::Filter));
+        song.mixer[2]
+            .fx
+            .push(crate::fx::FxSlot::new(crate::fx::FxKind::Delay));
+        // Cutoff (continuous Hz) 10 kHz -> 200 Hz; delay time (Steps) 4 -> 1.
+        for (id, target, from, to) in [
+            (
+                7u64,
+                Target::FxParam { track: 1, slot: 0, param: 1 },
+                10000.0f32,
+                200.0f32,
+            ),
+            (8, Target::FxParam { track: 2, slot: 0, param: 0 }, 4.0, 1.0),
+        ] {
+            let mut first = Pattern::new(id, "From");
+            first.length = crate::sequence::BAR;
+            first.automation = Some(crate::automation::Envelope::flat(
+                target,
+                from,
+                crate::sequence::BAR,
+            ));
+            song.patterns.push(first);
+            song.clips.push(crate::sequence::Clip::new(id, 0, 1));
+            step_at_bar_two(&mut song, id + 2, target, to);
+        }
+        let bar = bar_frames(&song);
+        let mut e = Engine::new(RATE);
+        let mut buf = [0.0f32; 64 * 2];
+        let mut pos = 0;
+        let rms = |b: &[f32]| (b.iter().map(|x| (*x as f64).powi(2)).sum::<f64>() / b.len() as f64).sqrt();
+        let mut before = 0.0;
+        for _ in 0..bar / 64 {
+            pos = e.process(&song, 1, true, pos, &mut buf, true);
+            before = rms(&buf);
+        }
+        let (fi, di) = (FX_SLOTS, 2 * FX_SLOTS);
+        let cut = |e: &Engine| e.fx_param_state[fi].as_ref().unwrap().1[1];
+        let time = |e: &Engine| e.fx_param_state[di].as_ref().unwrap().1[0];
+        // The first automated block snaps to the envelope (no initial lag).
+        assert_eq!(cut(&e), 10000.0);
+        assert_eq!(time(&e), 4.0);
+        // One 64-frame block into bar 2: the cutoff glides, the steps snap.
+        pos = e.process(&song, 1, true, pos, &mut buf, true);
+        let first = rms(&buf);
+        let alpha_block = 1.0 - (-64.0f32 / (SMOOTH_TAU_SEC as f32 * RATE as f32)).exp();
+        let want = 10000.0 + (200.0 - 10000.0) * alpha_block;
+        assert!(
+            (cut(&e) - want).abs() < 0.5,
+            "one block of glide: {} vs {want}",
+            cut(&e)
+        );
+        assert!(cut(&e) > 5000.0, "not halfway in one block");
+        assert_eq!(time(&e), 1.0, "a Steps parameter snaps at once");
+        assert!(
+            first > before * 0.5,
+            "the sound did not jump to the closed filter: {first} vs {before}"
+        );
+        // Well inside 100 ms the cutoff has settled exactly, and the sound with it.
+        let mut late = 0.0;
+        for _ in 0..(RATE as usize / 10 / 64) {
+            pos = e.process(&song, 1, true, pos, &mut buf, true);
+            late = rms(&buf);
+        }
+        assert_eq!(cut(&e), 200.0);
+        assert_eq!(time(&e), 1.0);
+        assert!(late < before * 0.1, "the cutoff closed: {late} vs {before}");
     }
 }
 

@@ -602,6 +602,9 @@ impl App {
         ) {
             self.toggle_typing_piano();
         }
+        if check(ui, "Record automation", "", self.rec.automation) {
+            self.toggle_record_automation();
+        }
         if check(ui, "Record audio input (mic / line)", "", self.rec.input) {
             self.toggle_input();
         }
@@ -613,6 +616,65 @@ impl App {
 
     fn menu_tools(&mut self, ui: &mut Ui) {
         kit::menu_style(ui);
+        let last = self.last_tweaked_target();
+        let last_name = last.map(|t| self.auto_label(t));
+        ui.add_enabled_ui(last.is_some(), |ui| {
+            ui.menu_button(RichText::new("Last tweaked").font(t::sans(13.0)), |ui| {
+                kit::menu_style(ui);
+                if let Some(name) = &last_name {
+                    ui.label(RichText::new(name).font(t::sans(11.5)).color(t::MUTED));
+                    ui.separator();
+                }
+                let Some(target) = last else {
+                    return;
+                };
+                if item(
+                    ui,
+                    "Create automation clip",
+                    "",
+                    true,
+                    "Add a playlist automation clip for this control",
+                ) {
+                    self.create_automation(target);
+                }
+                if item(
+                    ui,
+                    "Link to controller…",
+                    "",
+                    true,
+                    "Move a knob on your MIDI controller to link this control",
+                ) {
+                    self.start_midi_learn(target);
+                }
+                ui.separator();
+                if item(ui, "Copy value", "", true, "") {
+                    self.copy_last_tweaked(ui.ctx());
+                }
+                if item(
+                    ui,
+                    "Paste value",
+                    "",
+                    self.auto_clipboard.is_some(),
+                    "Copy a control value first",
+                ) {
+                    self.paste_last_tweaked();
+                }
+                if item(ui, "Reset to default", "", true, "") {
+                    self.reset_last_tweaked();
+                }
+            });
+        })
+        .response
+        .on_disabled_hover_text("Tweak any automatable knob, fader, or plugin parameter first");
+        if check(
+            ui,
+            "Multilink to controllers",
+            "Ctrl+J",
+            self.multilink.is_some(),
+        ) {
+            self.toggle_multilink();
+        }
+        ui.separator();
         if item(
             ui,
             "Riff Machine…",
@@ -694,11 +756,11 @@ impl App {
                 );
                 ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
                 let want = filter.to_lowercase();
-                let rows: [(&str, &str); 38] = [
+                let rows: [(&str, &str); 39] = [
                     ("Space", "Play / stop"),
                     ("Ctrl+Space", "Pause in place"),
                     ("L", "Pattern / song mode"),
-                    ("R", "Record armed mixer tracks"),
+                    ("R", "Record audio, MIDI, and automation"),
                     (
                         "F5 · F6 · F7 · F9",
                         "Playlist · Channel rack · Piano roll · Mixer",
@@ -733,6 +795,7 @@ impl App {
                     ("Shift (knob)", "Fine adjust"),
                     ("Double-click knob", "Reset"),
                     ("Right-click knob", "Type, copy, paste value"),
+                    ("Ctrl+J", "Multilink to controllers"),
                     ("Ctrl+H", "Stop all sound (MIDI panic)"),
                     ("F10", "MIDI settings"),
                     ("Ctrl+M", "Metronome"),

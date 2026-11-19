@@ -31,7 +31,8 @@ This document tracks what has already been built in KeyFrameXL and what remains 
 - **VST3 & VST2 Plugin Bridge (`src/bridge/`, `src/plugins.rs`, `src/vst2.rs`)** — out-of-process plugin hosting over shared memory so plugin crashes do not take down the DAW, embedded X11 editor windows, background plugin scanning, and Wine/yabridge support for Windows plugins.
 
 ### MIDI, Interop, Recording & Export
-- **MIDI & Recording (`src/midi_in.rs`, `src/midi.rs`, `src/ui/record.rs`)** — live ALSA sequencer MIDI input, MIDI Learn (`Link to controller`), typing-keyboard-to-piano, MIDI file import/export, and in-app audio recording.
+- **MIDI & Recording (`src/midi_in.rs`, `src/midi.rs`, `src/ui/record.rs`)** — live ALSA sequencer MIDI input, MIDI Learn (`Link to controller`), **Multilink to controllers** (`Ctrl+J`), typing-keyboard-to-piano, MIDI file import/export, and in-app audio recording.
+- **Unified Parameter Automation (`src/automation.rs`, `src/ui/automation.rs`, `src/engine.rs`)** — `TOOLS → Last tweaked` actions (*Create automation clip*, *Link to controller…*, *Copy/Paste value*, *Reset to default*), live automation recording during `Record + Play` with Ramer–Douglas–Peucker point thinning and single-step undo, and click-free 5 ms per-sample/per-block parameter smoothing in the audio engine.
 - **FL Studio Interop (`src/flp.rs`, `src/flp_fx.rs`, `src/fl_link.rs`, `src/flp_freeze.rs`)** — `.flp` project importer plus experimental FL Link and channel freezing helpers.
 - **Project I/O & Audio Export (`src/project_io.rs`, `src/render.rs`, `src/ui/export.rs`)** — self-contained `.kfxl` projects (Save, Save As, Recent files, unsaved-change guard, autosave recovery) and multi-format rendering to **WAV** (16/24-bit, 32-bit float), **FLAC** (16/24-bit), and **MP3** (128/192/320 kbps).
 
@@ -47,9 +48,8 @@ This document tracks what has already been built in KeyFrameXL and what remains 
 - **Native `.dwp` binary reader** — read `.dwp` files directly without ConvertWithMoss so fields dropped by SFZ conversion (`ENV 1/2`, second filter, full modulation matrix) are preserved verbatim.
 - **DirectWave P2/P3 features** — second set of program LFOs, per-voice FX (Ringmod, Decimator, Quantizer, Phaser), built-in Drive/Delay/Chorus/Reverb sends, Time Stretch / Beat Sync / Tick Slice, and round-robin playback.
 
-### Plugins & Parameter System
+### Plugins
 - **CLAP plugin hosting** — native CLAP host (`clack-host`) alongside existing VST3/VST2 support.
-- **Unified parameter automation polish** — *Last tweaked* workflow, multi-link controller mapping (`Ctrl+J`), and live automation recording with parameter smoothing.
 
 ### MIDI & Workflow
 - **MIDI Out & Clock** — hardware MIDI output and MIDI clock master/slave synchronization.

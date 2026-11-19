@@ -25,7 +25,6 @@ pub struct TakePart {
     pub rate: u32,
 }
 
-#[derive(Default)]
 pub struct Recorder {
     /// Record button (FL: the record switch beside Play).
     pub on: bool,
@@ -37,6 +36,21 @@ pub struct Recorder {
     pub input: bool,
     /// The open input stream while recording it.
     pub input_stream: Option<cpal::Stream>,
+    /// Record live parameter tweaks as automation clips while Record + Play are active.
+    pub automation: bool,
+}
+
+impl Default for Recorder {
+    fn default() -> Self {
+        Self {
+            on: false,
+            armed: Vec::new(),
+            parts: Vec::new(),
+            input: false,
+            input_stream: None,
+            automation: true,
+        }
+    }
 }
 
 /// Open the input device for recording: frames go into the returned ring.
@@ -141,12 +155,29 @@ impl App {
         } else {
             ""
         };
+        let auto = if self.rec.automation {
+            " Tweaked controls record as automation."
+        } else {
+            ""
+        };
         let text = match (self.rec.on, audio) {
             (false, _) => "Record off.".to_string(),
             (true, 0) => format!(
-                "Record on.{midi} Arm a mixer track (the dot on its strip) or the audio input to record sound."
+                "Record on.{auto}{midi} Arm a mixer track (the dot on its strip) or the audio input to record sound."
             ),
-            (true, n) => format!("Record on: {n} armed source(s) record while playing.{midi}"),
+            (true, n) => {
+                format!("Record on: {n} armed source(s) record while playing.{auto}{midi}")
+            }
+        };
+        self.say(Tone::Quiet, text);
+    }
+
+    pub(crate) fn toggle_record_automation(&mut self) {
+        self.rec.automation = !self.rec.automation;
+        let text = if self.rec.automation {
+            "Automation recording enabled. Tweaking controls while Record + Play are on writes automation clips."
+        } else {
+            "Automation recording disabled."
         };
         self.say(Tone::Quiet, text);
     }

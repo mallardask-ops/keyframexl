@@ -680,19 +680,42 @@ impl App {
                 }
             },
         );
+        let auto_taking = !self.auto_take.lanes.is_empty();
         let tip = if taking {
             format!(
                 "Recording {} track(s). Stop or press R to finish the take.",
                 self.rec.parts.len()
             )
+        } else if auto_taking {
+            format!(
+                "Recording automation ({} control(s)). Stop or press R to finish.",
+                self.auto_take.lanes.len()
+            )
         } else if on {
-            "Record is on: armed mixer tracks record while playing  R".to_string()
+            "Record is on: armed mixer tracks, MIDI notes, and tweaked controls record while playing  R · Right-click for filters".to_string()
         } else {
-            "Record armed mixer tracks to WAV  R".to_string()
+            "Record audio, MIDI notes, and automation while playing  R · Right-click for filters".to_string()
         };
-        if kit::bar_hint(r, tip).clicked() {
+        let r = kit::bar_hint(r, tip);
+        if r.clicked() {
             self.toggle_record();
         }
+        r.context_menu(|ui| {
+            kit::menu_style(ui);
+            let mut auto_rec = self.rec.automation;
+            if ui.checkbox(&mut auto_rec, "Record automation").clicked() {
+                self.toggle_record_automation();
+                ui.close_menu();
+            }
+            let mut input_rec = self.rec.input;
+            if ui
+                .checkbox(&mut input_rec, "Record audio input (mic / line)")
+                .clicked()
+            {
+                self.toggle_input();
+                ui.close_menu();
+            }
+        });
         if taking {
             let elapsed = started.map(|t0| (now - t0).max(0.0) as u64).unwrap_or(0);
             ui.label(

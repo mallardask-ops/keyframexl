@@ -237,6 +237,14 @@ pub struct App {
     pub(crate) auto_open: Option<u64>,
     /// Last value sent to each automated plugin parameter (plugin, param).
     pub(crate) auto_sent: std::collections::HashMap<(u64, u32), f32>,
+    /// Most recently tweaked automatable control (`Tools → Last tweaked`).
+    pub(crate) last_tweaked: Option<keyframexl::automation::Target>,
+    /// Value copied via `Tools → Last tweaked → Copy value`.
+    pub(crate) auto_clipboard: Option<(keyframexl::automation::Target, f32)>,
+    /// Active Multilink to controllers session (`Ctrl+J`).
+    pub(crate) multilink: Option<automation::Multilink>,
+    /// Live automation samples captured while Record + Play are active.
+    pub(crate) auto_take: automation::AutoTake,
     /// New and moved notes land on the scale.
     pub(crate) scale_snap: bool,
     /// Armed mixer tracks, Record switch and takes in progress.
@@ -1064,6 +1072,10 @@ impl App {
             join_preset: None,
             auto_open: None,
             auto_sent: std::collections::HashMap::new(),
+            last_tweaked: None,
+            auto_clipboard: None,
+            multilink: None,
+            auto_take: Default::default(),
             scale_snap: false,
             rec: Default::default(),
             libraries: Default::default(),
@@ -2315,6 +2327,9 @@ impl App {
             self.panic();
             self.say(Tone::Quiet, "All sound stopped.");
         }
+        if ctrl && !shift && !ctx.input(|i| i.modifiers.alt) && pressed(egui::Key::J) {
+            self.toggle_multilink();
+        }
         if ctrl && !shift && pressed(egui::Key::M) {
             self.toggle_metronome();
         }
@@ -2448,13 +2463,16 @@ impl App {
         );
         let y = rect.center().y;
         let mut x = rect.left() + PAGE;
-        // Controller learn arms the status: it beats any older message.
-        let armed = self.midi_learn.map(|t| {
-            format!(
-                "Move a knob on your controller to link {}… Esc cancels.",
-                self.auto_label(t)
-            )
-        });
+        // Controller learn or Multilink arms the status: it beats any older message.
+        let armed = self
+            .midi_learn
+            .map(|t| {
+                format!(
+                    "Move a knob on your controller to link {}… Esc cancels.",
+                    self.auto_label(t)
+                )
+            })
+            .or_else(|| self.multilink_status());
         let (tone, text): (Tone, &String) = match &armed {
             Some(line) => (Tone::Wait, line),
             None => (self.status.0.clone(), &self.status.1),

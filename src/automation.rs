@@ -129,6 +129,79 @@ impl Target {
             _ => self.current(song).is_some(),
         }
     }
+
+    /// The control's default value in its own units.
+    pub fn default_value(&self, song: &Song) -> f32 {
+        match *self {
+            Target::MixerVolume { .. } | Target::ChannelVolume { .. } => 1.0,
+            Target::MixerPan { .. } | Target::ChannelPan { .. } => 0.0,
+            Target::FxMix { .. } => 1.0,
+            Target::FxParam { track, slot, param } => song
+                .mixer
+                .get(track as usize)
+                .and_then(|m| m.fx.get(slot as usize))
+                .and_then(|s| s.kind.params().get(param as usize))
+                .map(|p| p.default)
+                .unwrap_or(0.0),
+            Target::PluginParam { .. } => 0.5,
+        }
+    }
+
+    /// Apply `value` (clamped to the target's range) to `song`.
+    /// Returns `true` if a song-owned control was updated; plugin parameters return `false`.
+    pub fn set(&self, song: &mut Song, value: f32) -> bool {
+        let (lo, hi) = self.range(song);
+        let v = value.clamp(lo.min(hi), hi.max(lo));
+        match *self {
+            Target::MixerVolume { track } => {
+                if let Some(m) = song.mixer.get_mut(track as usize) {
+                    m.volume = v;
+                    return true;
+                }
+            }
+            Target::MixerPan { track } => {
+                if let Some(m) = song.mixer.get_mut(track as usize) {
+                    m.pan = v;
+                    return true;
+                }
+            }
+            Target::ChannelVolume { inst } => {
+                if let Some(i) = song.instruments.iter_mut().find(|i| i.id == inst) {
+                    i.volume = v;
+                    return true;
+                }
+            }
+            Target::ChannelPan { inst } => {
+                if let Some(i) = song.instruments.iter_mut().find(|i| i.id == inst) {
+                    i.pan = v;
+                    return true;
+                }
+            }
+            Target::FxParam { track, slot, param } => {
+                if let Some(p) = song
+                    .mixer
+                    .get_mut(track as usize)
+                    .and_then(|m| m.fx.get_mut(slot as usize))
+                    .and_then(|s| s.params.get_mut(param as usize))
+                {
+                    *p = v;
+                    return true;
+                }
+            }
+            Target::FxMix { track, slot } => {
+                if let Some(effect) = song
+                    .mixer
+                    .get_mut(track as usize)
+                    .and_then(|m| m.fx.get_mut(slot as usize))
+                {
+                    effect.mix = v;
+                    return true;
+                }
+            }
+            Target::PluginParam { .. } => {}
+        }
+        false
+    }
 }
 
 /// A point of the envelope. `tension` bends the segment to the next point:
@@ -236,6 +309,101 @@ impl Envelope {
             p.tick = p.tick.max(0);
         }
     }
+}
+
+/// Thin raw recorded `(tick, value)` samples into clean editable envelope points.
+/// Uses vertical Ramer–Douglas–Peucker in normalized `0..1` travel space so the
+/// resulting linear envelope stays within `tolerance` of the recorded curve.
+pub fn thin_points(
+    target: Target,
+    lo: f32,
+    hi: f32,
+    samples: &[(Tick, f32)],
+    tolerance: f32,
+) -> Vec<Point> {
+    if samples.is_empty() {
+        return Vec::new();
+    }
+    let (vlo, vhi) = (lo.min(hi), hi.max(lo));
+    // Collapse same-tick samples (keeping the latest value) after sorting by tick.
+    let mut sorted: Vec<(Tick, f32)> = samples
+        .iter()
+        .map(|&(t, v)| (t.max(0), v.clamp(vlo, vhi)))
+        .collect();
+    sorted.sort_by_key(|&(t, _)| t);
+    let mut dedup: Vec<(Tick, f32)> = Vec::with_capacity(sorted.len());
+    for (t, v) in sorted {
+        if let Some(last) = dedup.last_mut()
+            && last.0 == t
+        {
+            last.1 = v;
+        } else {
+            dedup.push((t, v));
+        }
+    }
+    if dedup.len() <= 2 {
+        return dedup
+            .into_iter()
+            .map(|(tick, value)| Point {
+                tick,
+                value,
+                tension: 0.0,
+            })
+            .collect();
+    }
+    let units: Vec<f32> = dedup
+        .iter()
+        .map(|&(_, v)| target.to_unit(v, lo, hi))
+        .collect();
+    let mut keep = vec![false; dedup.len()];
+    keep[0] = true;
+    keep[dedup.len() - 1] = true;
+
+    fn rdp(
+        pts: &[(Tick, f32)],
+        units: &[f32],
+        a: usize,
+        b: usize,
+        tol: f32,
+        keep: &mut [bool],
+    ) {
+        if b <= a + 1 {
+            return;
+        }
+        let t0 = pts[a].0 as f32;
+        let span = (pts[b].0 - pts[a].0).max(1) as f32;
+        let u0 = units[a];
+        let du = units[b] - u0;
+        let mut best_idx = 0usize;
+        let mut best_err = 0.0f32;
+        for i in (a + 1)..b {
+            let frac = (pts[i].0 as f32 - t0) / span;
+            let expected = u0 + du * frac;
+            let err = (units[i] - expected).abs();
+            if err > best_err {
+                best_err = err;
+                best_idx = i;
+            }
+        }
+        if best_err > tol {
+            keep[best_idx] = true;
+            rdp(pts, units, a, best_idx, tol, keep);
+            rdp(pts, units, best_idx, b, tol, keep);
+        }
+    }
+
+    rdp(&dedup, &units, 0, dedup.len() - 1, tolerance.max(0.0), &mut keep);
+    dedup
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, (tick, value))| {
+            keep[i].then_some(Point {
+                tick,
+                value,
+                tension: 0.0,
+            })
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy)]
@@ -422,5 +590,55 @@ mod tests {
         assert!((t.to_unit(1.0, lo, hi) - 0.807).abs() < 0.002);
         let pan = Target::ChannelPan { inst: 1 };
         assert_eq!(pan.from_unit(0.5, -1.0, 1.0), 0.0, "pan stays linear");
+    }
+
+    #[test]
+    fn target_set_and_default_value_round_trip() {
+        let mut song = Song::default();
+        let pan = Target::MixerPan { track: 1 };
+        assert!(pan.set(&mut song, 2.5));
+        assert_eq!(pan.current(&song), Some(1.0), "clamps to range");
+        let pan_def = pan.default_value(&song);
+        assert!(pan.set(&mut song, pan_def));
+        assert_eq!(pan.current(&song), Some(0.0));
+        let vol = Target::MixerVolume { track: 0 };
+        assert!(vol.set(&mut song, 0.4));
+        assert_eq!(vol.current(&song), Some(0.4));
+        let vol_def = vol.default_value(&song);
+        assert!(vol.set(&mut song, vol_def));
+        assert_eq!(vol.current(&song), Some(1.0));
+        assert!(!Target::ChannelVolume { inst: 999 }.set(&mut song, 0.5));
+    }
+
+    #[test]
+    fn thin_points_reduces_collinear_samples_and_keeps_corners() {
+        let t = Target::MixerPan { track: 1 };
+        // Straight ramp from -1 to +1 over 100 ticks with 101 dense points -> thins to 2 points.
+        let ramp: Vec<(Tick, f32)> = (0..=100)
+            .map(|i| (i * 4, -1.0 + 2.0 * (i as f32 / 100.0)))
+            .collect();
+        let thinned = thin_points(t, -1.0, 1.0, &ramp, 0.005);
+        assert_eq!(thinned.len(), 2);
+        assert_eq!(thinned[0].tick, 0);
+        assert_eq!(thinned[1].tick, 400);
+
+        // Triangle wave (-1 -> +1 -> -1) keeps the peak corner.
+        let mut tri = Vec::new();
+        for i in 0..=50 {
+            tri.push((i * 4, -1.0 + 2.0 * (i as f32 / 50.0)));
+        }
+        for i in 1..=50 {
+            tri.push(((50 + i) * 4, 1.0 - 2.0 * (i as f32 / 50.0)));
+        }
+        let thinned = thin_points(t, -1.0, 1.0, &tri, 0.005);
+        assert_eq!(thinned.len(), 3);
+        assert_eq!(thinned[1].tick, 200);
+        assert!((thinned[1].value - 1.0).abs() < 1e-6);
+
+        // Duplicate ticks keep the latest sample.
+        let dup = vec![(10, -0.5), (10, 0.5), (20, 0.5)];
+        let thinned = thin_points(t, -1.0, 1.0, &dup, 0.005);
+        assert_eq!(thinned.len(), 2);
+        assert_eq!(thinned[0].value, 0.5);
     }
 }

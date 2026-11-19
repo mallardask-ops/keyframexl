@@ -451,8 +451,40 @@ impl App {
                 self.plugins.editor_size.insert(id, (w, h));
             }
             Reply::Params { id, rows } => {
+                let mut moved = Vec::new();
+                if self.plugins.live.get(&id).is_some_and(|l| l.editor)
+                    && !self.plugins.param_dirty
+                    && let Some((prev, _)) = self.plugins.params.get(&id)
+                {
+                    for r in &rows {
+                        if !r.automatable {
+                            continue;
+                        }
+                        if let Some(old) = prev.iter().find(|p| p.id == r.id)
+                            && (r.value - old.value).abs() > 1e-4
+                        {
+                            // Skip values that match what our own automation clip just sent.
+                            let from_auto = self
+                                .auto_sent
+                                .get(&(id, r.id))
+                                .is_some_and(|&v| (v as f64 - r.value).abs() < 1e-3);
+                            if !from_auto {
+                                moved.push(r.id);
+                            }
+                        }
+                    }
+                }
                 let now = self.plugins.params.get(&id).map(|p| p.1).unwrap_or(0.0);
                 self.plugins.params.insert(id, (rows, now));
+                // Ignore bulk preset jumps (>4 parameters changing at once).
+                if !moved.is_empty() && moved.len() <= 4 {
+                    for param in moved {
+                        self.on_target_tweaked(keyframexl::automation::Target::PluginParam {
+                            plugin: id,
+                            param,
+                        });
+                    }
+                }
             }
             Reply::Bye => self.plugins.host = None,
         }
@@ -1380,10 +1412,18 @@ impl App {
             if let Some(h) = &self.plugins.host {
                 h.send(Req::SetParam { id, param, value });
             }
+            let mut automatable = false;
             if let Some(p) = self.plugins.params.get_mut(&id)
                 && let Some(r) = p.0.iter_mut().find(|r| r.id == param)
             {
                 r.value = value;
+                automatable = r.automatable;
+            }
+            if automatable {
+                kit::note_tweaked(
+                    ui.ctx(),
+                    keyframexl::automation::Target::PluginParam { plugin: id, param },
+                );
             }
             // Read back soon (not every frame of a drag) so the text follows.
             let now = ui.input(|i| i.time);

@@ -224,6 +224,8 @@ impl App {
                 let v = value.min(127) as u8;
                 if self.midi_learn.is_some() {
                     self.finish_midi_learn(channel, cc);
+                } else if self.multilink.is_some() {
+                    self.multilink_cc(channel, cc);
                 } else {
                     self.apply_midi_cc(channel, cc, v);
                 }
@@ -236,8 +238,14 @@ impl App {
         if let Some(target) = kit::take_learn_request(ctx) {
             self.start_midi_learn(target);
         }
-        if self.midi_learn.is_some() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.cancel_midi_learn();
+        if (self.midi_learn.is_some() || self.multilink.is_some())
+            && ctx.input(|i| i.key_pressed(egui::Key::Escape))
+        {
+            if self.midi_learn.is_some() {
+                self.cancel_midi_learn();
+            } else {
+                self.cancel_multilink();
+            }
             ctx.input_mut(|i| {
                 i.events.retain(|e| {
                     !matches!(
@@ -253,7 +261,8 @@ impl App {
         }
     }
 
-    fn start_midi_learn(&mut self, target: keyframexl::automation::Target) {
+    pub(crate) fn start_midi_learn(&mut self, target: keyframexl::automation::Target) {
+        self.multilink = None;
         self.midi_learn = Some(target);
         self.say(
             Tone::Wait,
@@ -315,71 +324,8 @@ impl App {
             self.checkpoint();
         }
         self.midi_cc_last = Some(now);
-        match binding.target {
-            keyframexl::automation::Target::MixerVolume { track } => {
-                if let Some(m) = self.song.mixer.get_mut(track as usize) {
-                    m.volume = v;
-                    self.publish();
-                }
-            }
-            keyframexl::automation::Target::MixerPan { track } => {
-                if let Some(m) = self.song.mixer.get_mut(track as usize) {
-                    m.pan = v;
-                    self.publish();
-                }
-            }
-            keyframexl::automation::Target::ChannelVolume { inst } => {
-                if let Some(i) = self.song.instruments.iter_mut().find(|i| i.id == inst) {
-                    i.volume = v;
-                    self.publish();
-                }
-            }
-            keyframexl::automation::Target::ChannelPan { inst } => {
-                if let Some(i) = self.song.instruments.iter_mut().find(|i| i.id == inst) {
-                    i.pan = v;
-                    self.publish();
-                }
-            }
-            keyframexl::automation::Target::FxParam { track, slot, param } => {
-                if let Some(p) = self
-                    .song
-                    .mixer
-                    .get_mut(track as usize)
-                    .and_then(|m| m.fx.get_mut(slot as usize))
-                    .and_then(|s| s.params.get_mut(param as usize))
-                {
-                    *p = v;
-                    self.publish();
-                }
-            }
-            keyframexl::automation::Target::FxMix { track, slot } => {
-                if let Some(effect) = self
-                    .song
-                    .mixer
-                    .get_mut(track as usize)
-                    .and_then(|m| m.fx.get_mut(slot as usize))
-                {
-                    effect.mix = v;
-                    self.publish();
-                }
-            }
-            keyframexl::automation::Target::PluginParam { plugin, param } => {
-                if let Some(h) = &self.plugins.host {
-                    h.send(crate::plugins::Req::SetParam {
-                        id: plugin,
-                        param,
-                        value: v as f64,
-                    });
-                }
-                if let Some(p) = self.plugins.params.get_mut(&plugin)
-                    && let Some(r) = p.0.iter_mut().find(|r| r.id == param)
-                {
-                    r.value = v as f64;
-                }
-                self.plugins.refresh_at = Some(now + std::time::Duration::from_millis(500));
-                self.plugins.param_dirty = true;
-                self.dirty_plugin_state();
-            }
+        if self.apply_target_value(binding.target, v) {
+            self.on_target_tweaked(binding.target);
         }
     }
 

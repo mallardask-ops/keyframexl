@@ -836,11 +836,36 @@ pub fn end_edit(ui: &Ui, r: &Response) {
 const AUTO_NEXT: &str = "kfxl-auto-next";
 const AUTO_REQUEST: &str = "kfxl-auto-request";
 const LEARN_REQUEST: &str = "kfxl-midi-learn-request";
+const AUTO_TWEAKED: &str = "kfxl-auto-tweaked";
 
 /// The next knob drawn drives `target`: its right-click menu offers
 /// "Create automation clip" (FL).
 pub fn automatable(ui: &Ui, target: keyframexl::automation::Target) {
     ui.data_mut(|d| d.insert_temp(egui::Id::new(AUTO_NEXT), target));
+}
+
+/// Record that `target` was tweaked by the user during this frame.
+pub fn note_tweaked(ctx: &egui::Context, target: keyframexl::automation::Target) {
+    let id = egui::Id::new(AUTO_TWEAKED);
+    ctx.data_mut(|d| {
+        let mut list = d
+            .get_temp::<Vec<keyframexl::automation::Target>>(id)
+            .unwrap_or_default();
+        list.push(target);
+        d.insert_temp(id, list);
+    });
+}
+
+/// Drain every automatable target tweaked during this frame.
+pub fn take_tweaked(ctx: &egui::Context) -> Vec<keyframexl::automation::Target> {
+    let id = egui::Id::new(AUTO_TWEAKED);
+    ctx.data_mut(|d| {
+        let v = d
+            .get_temp::<Vec<keyframexl::automation::Target>>(id)
+            .unwrap_or_default();
+        d.remove::<Vec<keyframexl::automation::Target>>(id);
+        v
+    })
 }
 
 /// "Create automation clip" plus "Link to controller…" for any control's own
@@ -1073,6 +1098,9 @@ fn knob_behaviour(
     }
     if changed {
         r.mark_changed();
+        if let Some(target) = auto {
+            note_tweaked(ui.ctx(), target);
+        }
     }
     ui.data_mut(|d| d.insert_temp(mem_id, mem));
     (started, changed, typing)

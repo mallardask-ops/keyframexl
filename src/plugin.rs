@@ -166,6 +166,9 @@ pub struct Instance {
     pub(crate) pdc_extra: Vec<Pdc>,
     /// Peak of its last block (the channel rack's tail light).
     pub(crate) level: f32,
+    /// Channel volume/pan gains reached at the end of the last block
+    /// (smoothing); `None` starts at the next block's target.
+    pub(crate) gain_state: Option<[f64; 2]>,
 }
 
 pub const MAX_EVENTS: usize = 1024;
@@ -208,6 +211,7 @@ impl Instance {
             pdc: Pdc::default(),
             pdc_extra: (0..MAX_EXTRA_PAIRS).map(|_| Pdc::default()).collect(),
             level: 0.0,
+            gain_state: None,
         }
     }
 
