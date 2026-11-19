@@ -1,0 +1,53 @@
+[package]
+name = "keyframexl"
+version = "0.1.0"
+edition = "2024"
+description = "Native Linux pattern sequencer prototype"
+license = "MIT"
+
+[dependencies]
+libc = "0.2"
+hound = "3.5"
+eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+cpal = "0.15"
+arc-swap = "1.7"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+rfd = "0.15"
+tempfile = "3"
+image = { version = "0.25", default-features = false, features = ["png"] }
+egui_dock = { version = "0.16", path = "vendor/egui_dock", features = ["serde"] }
+dirs = "6"
+ron = "0.10"
+claxon = "0.4"
+lewton = "0.10"
+rtrb = "0.3"
+midly = "0.5"
+flacenc = "0.5"
+vorbis_rs = "0.5"
+midir = "0.10"
+vst3-host = { version = "0.11.1", path = "vendor/vst3-host", default-features = false }
+base64 = "0.22"
+xcb = { version = "1", features = ["xtest"] }
+raw-window-handle = "0.6"
+rsworld-sys = "0.1.0"
+encoding_rs = "0.8"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+ureq = "2"
+
+# winit with one fix: X11 file drops whose uri-list ends lines with LF only
+# (yabridge, dragging a clip out of a Windows plugin) were silently lost.
+[patch.crates-io]
+winit = { path = "vendor/winit" }
+# cpal with one fix: an ALSA underrun reported as POLLERR (PipeWire) is
+# recovered, instead of an error repeated on every poll of a dead stream.
+cpal = { path = "vendor/cpal" }
+
+# Debug builds are what an IDE or launcher may run: an unoptimised audio
+# engine and DSP crackle and load the CPU many times over, so the program
+# itself gets basic optimisation and its dependencies full.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

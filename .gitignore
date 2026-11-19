@@ -1,0 +1,33 @@
+# Rust build outputs
+/target/
+**/*.rs.bk
+*.pdb
+
+# Local audio renders & exported project files in root
+/*.wav
+/*.mp3
+/*.flac
+/*.ogg
+/*.flp
+/*.kfxl
+/*.chunk
+
+# Generated captures & audition renders (keep dwp-multizone test fixture)
+/artifacts/*
+!/artifacts/dwp-multizone/
+/artifacts/dwp-multizone/*
+!/artifacts/dwp-multizone/Zones.kfxl
+!/artifacts/dwp-multizone/report.txt
+
+# Local scratch test dumps & runtime logs
+/tests/zz_tmp_*.rs
+*.log
+*.tmp
+
+# OS & editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~

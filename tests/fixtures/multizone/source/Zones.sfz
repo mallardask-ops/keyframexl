@@ -1,0 +1,27 @@
+<region>
+sample=Low soft.wav
+lokey=48 hikey=59 pitch_keycenter=48 lovel=1 hivel=63
+loop_mode=loop_continuous loop_start=384 loop_end=4223
+ampeg_attack=0.08 ampeg_decay=0.12 ampeg_sustain=60 ampeg_release=0.22
+amp_veltrack=100
+
+<region>
+sample=Low bright.wav
+lokey=48 hikey=59 pitch_keycenter=48 lovel=64 hivel=127
+loop_mode=loop_continuous loop_start=384 loop_end=4223
+ampeg_attack=0.005 ampeg_decay=0.07 ampeg_sustain=80 ampeg_release=0.4
+amp_veltrack=100
+
+<region>
+sample=High soft.wav
+lokey=60 hikey=72 pitch_keycenter=60 lovel=1 hivel=63
+loop_mode=loop_continuous loop_start=384 loop_end=4223
+ampeg_attack=0.2 ampeg_decay=0.15 ampeg_sustain=40 ampeg_release=0.25
+amp_veltrack=100
+
+<region>
+sample=High bright.wav
+lokey=60 hikey=72 pitch_keycenter=60 lovel=64 hivel=127
+loop_mode=loop_continuous loop_start=384 loop_end=4223
+ampeg_attack=0.002 ampeg_decay=0.15 ampeg_sustain=70 ampeg_release=0.6
+amp_veltrack=100

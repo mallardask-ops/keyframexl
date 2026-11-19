@@ -1,0 +1,3 @@
+The WAV waveforms, SFZ definition and generated DWP in this directory were created for KeyFrameXL's reproducible sampler tests. Their author dedicates these test assets to the public domain under CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+
+ConvertWithMoss is an external LGPL-3.0 tool and is not included here.

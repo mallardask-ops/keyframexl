@@ -1,0 +1,3 @@
+4 zones imported: stereo PCM, key/velocity ranges, root, tuning, gain/pan, loops and linear ADSR. Converter-normalized values; velocity response and ADSR curves are linear approximations. Unimplemented SFZ parameters: bend_down, bend_up. Original DWP blocks and DirectWave audio remain unverified.
+Four phrases: key 48 velocity 40; key 48 velocity 110; key 60 velocity 40; key 60 velocity 110.
+Boundaries, stereo PCM, loop frame positions, sustained audio after sample end, attack and release tested. Saved and reopened WAV files are byte-identical.
