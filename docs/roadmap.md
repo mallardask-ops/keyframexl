@@ -1,101 +1,65 @@
-# KeyFrameXL — дорожня карта функціоналу
+# KeyFrameXL — Feature Roadmap
 
-Дата: 2026-11-14. Основа: інтерфейс і вікна з `docs/ui-rules.md`, інвентар верхньої частини FL у `research_notes/fl-toolbar-inventory.md` (з посиланнями на мануал Image-Line), стек і етапи з `docs/func-plan.md`, ядро format 2 у `src/core/`.
+This document tracks what has already been built in KeyFrameXL and what remains planned.
 
-Правило порядку: спочатку модель, яка не бреше, потім UI для неї. Кожен пункт закривається тестом і нативним скріншотом.
+**Guiding principle:** Build an honest data and audio model first, then build UI on top of it. Verify features with automated tests and native framebuffer captures.
 
-## 0. Зроблено в цьому кроці: канали та власний Sampler
+---
 
-- Окремого «Import DWP» більше немає. Є **канал** (FL: Channel) і його **інструмент**. Наш вбудований інструмент — **Sampler** (аналог DirectWave): `.dwp` — лише один із форматів пресетів, які він завантажує.
-- **Add channel** — внизу Channel rack і «+» біля CHANNELS у Browser. Новий канал отримує ім'я `Sampler N` і одразу відкриває своє вікно.
-- **Вікно інструмента** (FL: channel settings / plugin window) — плаваюча вкладка `Tab::Instrument`. Ім'я редагується на місці (один крок undo). Load preset, Piano roll, карта зон клавіші × velocity з підказкою по зоні, таблиця зон, звіт конвертора. Порожній стан чесно каже, що ноти грають тестовий тон.
-- **Drag & drop**: `.dwp` на вікно → у семплер у фокусі (вікно інструмента чи його Piano roll), інакше новий канал; `.kfxl` → відкрити проєкт. Поки файл над вікном, оверлей каже, що станеться.
-- Клік по імені каналу в Rack/Browser відкриває вікно інструмента, правий клік: Piano roll, Load preset, Delete channel (з нотами, один undo). З 2026-11-15 видаляється будь-який канал, включно з барабанами.
-- Формати пресетів збираються в одному місці: `PRESET_EXTS` у `src/ui/instrument.rs` + завантажувач у `import.rs`.
+## Implemented
 
-## 0.1 Зроблено: рушій на голосах і Sampler v2 (DirectWave)
+### Core Engine, Sequencing & Workspaces
+- **Unified Voice Engine (`src/engine.rs`)** — stateful polyphonic voice pool (128 voices, oldest-voice stealing, allocation-free note-on in the audio callback) with sample-accurate event dispatch. Real-time playback and offline audio export execute the exact same render path (verified byte-identical).
+- **Channel Rack (`F6`)** — every channel supports both step-sequencer pads (grouped in 4-beat trays) and full Piano Roll notes, per-channel mute/solo (`Ctrl+1..0`), mini Pan/Volume knobs, target mixer track selector, and global Swing.
+- **Piano Roll (`F7`)** — chromatic editor with Draw (`P`), Paint (`B`), Delete (`D`), Mute (`T`), Slice (`C`), Select (`E`), Zoom (`Z`), and Slide (`S`) tools; Ghost notes, scale highlighting, independent X/Y zoom, multi-target bottom control lane (*Velocity, Pan, Release, Fine, Mod X, Mod Y*), portamento notes, note colors, and a built-in **Riff Machine** (`src/riff.rs`).
+- **Playlist (`F5`)** — multi-track arrangement for pattern and audio clips, shared clip instances with **Make unique**, **Tempo automation lane** (`src/tempo.rs`), and **Automation clips** (`src/automation.rs`).
+- **Dockable Shell (`src/ui/workspace.rs`)** — hybrid docked + floating tab layout (`egui_dock`) with three saved presets (`Arrange`, `Compose`, `Edit` via `Alt+1..3`) persisted to `~/.config/keyframexl/workspace.ron`, plus a **Browser** (`Alt+F8`) with Current Project and Files tabs, background search, and click-to-audition.
 
-- **Рушій** (`src/engine.rs`): голоси зі станом, блоковий рендер, події на точному семплі. Той самий код грає наживо і рендерить WAV (тест: live-блоки по 300 = офлайн побайтово). Реліз звучить через стик циклу без подвійного обчислення. Пул 128 голосів, крадіжка найстарішого, без алокацій у колбеку на note-on.
-- **Sampler v2** (`src/sampler.rs`, імена як у DirectWave, див. `research_notes/directwave-params.md`):
-  Program — Volume, Pan, Transpose, Play Mode Poly/Mono/Legato, Poly (голоси), Glide Time + Fixed/Auto, PB Rng;
-  Zone — SEMI ±36, FINE ±50, KTRK ±100, Gain, Panning, Velocity, AMP DAHDSR, Loop Type Disabled/Forward/One Shot/Sustained/Bounce, Reverse, Start, Mute group;
-  Filter 1 & 2 — Off/Lowpass/Highpass/Bandpass/Notch/Allpass, Freq, Emph, Serial/Parallel (TPT SVF);
-  ENV 1/2; LFO 1/2 — 8 форм DW, Rate, Attack, Phase, Sync/Free Run;
-  Modulation Matrix — 16 слотів: LFO 1/2, ENV 1/2, Velocity, Key, Random → Pitch, Gain, Pan, Filter 1/2 freq і emph, LFO 1/2 rate, amount ±100%.
-- **Редактор** у вікні інструмента: карта зон (клік — редагувати одну зону), Current zone / All zones як Edit Current/Global у DW, вкладки Program / Zone / Filter & Env / Modulation / Zones, енкодери з логарифмічною шкалою для часу й частоти, графік огинаючої. Кожен жест — один крок undo.
-- **Імпорт .dwp** читає з SFZ ConvertWithMoss: фільтр (тип, крутизна → два фільтри послідовно, cutoff, резонанс), огинаючі фільтра й пітча, pitch/amp/filter LFO через матрицю, key/vel tracking, DAHDSR, one-shot, reverse, групи, PB range. Перевірено на справжньому `.dwp` (`tests/fixtures/dwp/probe.dwp`).
-- **Не робимо поки** (P2/P3 з дослідження): другий набір програмних LFO, per-voice FX (Ringmod, Decimator, Quantizer, Phaser), посили Delay/Chorus/Reverb, Drive, Time Stretch / Beat Sync / Tick Slice, MiniSynth/Vox, Shape, round robin. ConvertWithMoss однаково губить ENV 1/2, другий фільтр і більшість матриці, тож для повної вірності потрібен свій читач `.dwp` (формат описаний у дослідженні §10).
+### Built-in Instruments
+- **Sampler v2 (`src/sampler.rs`)** — DirectWave-inspired multi-zone sampler with:
+  - *Program:* Volume, Pan, Transpose, Play Mode (`Poly` / `Mono` / `Legato`), Polyphony limit, Glide Time (`Fixed` / `Auto`), Pitch Bend range.
+  - *Zone:* Semi `±36`, Fine `±50`, Key Tracking `±100%`, Gain, Pan, Velocity range, Amp DAHDSR, Loop modes (`Disabled`, `Forward`, `One Shot`, `Sustained`, `Bounce`), Reverse, Start offset, Mute group.
+  - *Filters & Modulation:* Dual TPT SVF filters (`Off`, `LP`, `HP`, `BP`, `Notch`, `Allpass`, Serial/Parallel), `ENV 1/2`, `LFO 1/2` (8 waveforms, Rate, Attack, Phase, Sync/Free Run), and a 16-slot Modulation Matrix.
+  - *DirectWave `.dwp` Import:* Reads normalized SFZ output from ConvertWithMoss and embeds all samples inside `.kfxl` projects (see [dwp-validation.md](dwp-validation.md)).
+- **KeyFrame Tide (`src/synth.rs`)** — native polyphonic synthesizer with 18 factory presets.
+- **Forge (`src/forge/`)** — 6-layer procedural game SFX designer with recipes, project game styles, macros, deterministic mutations, channel bouncing, and batch WAV/OGG export (see [forge.md](forge.md)).
+- **Vocal (`src/vocal/`)** — UTAU singing voice channels using an embedded WORLD vocoder, per-note lyrics in the Piano Roll, and background phrase rendering/caching (see [vocal.md](vocal.md)).
 
-## 0.2 Зроблено: співочі канали (Vocal)
+### Mixer, Effects & Plugin Hosting
+- **Mixer (`F9`)** — scrollable insert strips with Master bus, arm-for-record, mute/solo, pan/stereo separation, dB faders with meters, 3-band strip EQ, loop-free sends, and a 10-slot effect rack inspector.
+- **32 Built-in DSP Effects (`src/fx/`)** — custom UI faces and A/B presets covering EQ/filters, dynamics, reverbs/delays (including convolution reverb), distortion, modulation, stereo tools, and a vocoder.
+- **VST3 & VST2 Plugin Bridge (`src/bridge/`, `src/plugins.rs`, `src/vst2.rs`)** — out-of-process plugin hosting over shared memory so plugin crashes do not take down the DAW, embedded X11 editor windows, background plugin scanning, and Wine/yabridge support for Windows plugins.
 
-Канал **Vocal** співає ноти з лірикою голосом UTAU-банку (Kasane Teto, далі будь-який). Рендер: WORLD + правила UTAU, фрази рендеряться у фоні й кешуються за вмістом, рушій грає їх на точному семплі з випередженням на preutterance. Лірика — `Pattern.lyrics`, редагується в Piano roll (подвійний клік, F2, Tools → Lyrics…). Деталі й обмеження: `docs/vocal.md`.
+### MIDI, Interop, Recording & Export
+- **MIDI & Recording (`src/midi_in.rs`, `src/midi.rs`, `src/ui/record.rs`)** — live ALSA sequencer MIDI input, MIDI Learn (`Link to controller`), typing-keyboard-to-piano, MIDI file import/export, and in-app audio recording.
+- **FL Studio Interop (`src/flp.rs`, `src/flp_fx.rs`, `src/fl_link.rs`, `src/flp_freeze.rs`)** — `.flp` project importer plus experimental FL Link and channel freezing helpers.
+- **Project I/O & Audio Export (`src/project_io.rs`, `src/render.rs`, `src/ui/export.rs`)** — self-contained `.kfxl` projects (Save, Save As, Recent files, unsaved-change guard, autosave recovery) and multi-format rendering to **WAV** (16/24-bit, 32-bit float), **FLAC** (16/24-bit), and **MP3** (128/192/320 kbps).
 
-## 1. Канали й інструменти
+---
 
-1. ✅ 2026-11-15 (етап A, `docs/plan-2026-11-15.md`). **Кожен канал має степи.** Зараз три барабани — це фіксовані ряди `drums[3][16]`, а семплер — тільки ноти. У FL будь-який канал має і step sequencer, і Piano roll (степи — це ноти фіксованої довжини). Перейти на `core::model` (format 2, тіки PPQ 480, `Part` на інструмент, id на кожну ноту) з міграцією v1 → v2 біт-в-біт. Тоді барабан = Sampler з one-shot WAV, Add channel → будь-який тип, видаляти можна все.
-2. **Типи інструментів** за спільним інтерфейсом `Instrument` (note on/off, render_block, параметри, стан):
-   - вбудовані: Sampler (DWP зараз; WAV one-shot, SFZ далі), Drum synth (поточний синтез як пресет), простий субтрактивний синт (func-plan етап 2);
-   - плагіни: CLAP (`clack-host`), VST3 (`vst3-host`), опційно yabridge. Вікно плагіна = та сама вкладка `Tab::Instrument`, тільки вміст — GUI плагіна або загальний редактор параметрів.
-3. **Channel routing**: канал → mixer track (FL «Target mixer track»). Поле в моделі одразу, UI з мікшером.
-4. **Plugin picker / browser**: список встановлених інструментів (вбудовані + скановані плагіни), drag у Rack. Сканування — у окремому процесі (падіння плагіна не валить програму).
+## Planned / Open Work
 
-## 2. Параметри та автоматизація
+### Audio Backend & Realtime Polish
+- **Native PipeWire streams** — move from the PipeWire-ALSA bridge (`cpal 0.15`) to native PipeWire (`cpal 0.18+` or `pipewire-rs`), with qualified low-latency tuning and automatic audio-device hot-reconnection.
+- **Lock-free command queue** — expand `rtrb` command streaming for all live parameter and sequence edits instead of cloning song state snapshots.
 
-Одна система для всього: параметри інструментів, плагінів, мікшера, транспорту (темп).
+### Sampler & DirectWave Fidelity
+- **Native `.dwp` binary reader** — read `.dwp` files directly without ConvertWithMoss so fields dropped by SFZ conversion (`ENV 1/2`, second filter, full modulation matrix) are preserved verbatim.
+- **DirectWave P2/P3 features** — second set of program LFOs, per-voice FX (Ringmod, Decimator, Quantizer, Phaser), built-in Drive/Delay/Chorus/Reverb sends, Time Stretch / Beat Sync / Tick Slice, and round-robin playback.
 
-- **Адреса**: `ParamAddr { owner: Channel(id) | Mixer(track) | Plugin(slot) | Transport, param: StableId }`. `StableId` не змінюється між версіями (для плагінів — їхній param id).
-- **Опис**: `ParamInfo { name, unit, min, max, default, curve (lin/log/stepped), group }`. У моделі значення зберігається нормалізованим 0..1, показується в юнітах.
-- **UI**: один компонент `kit::knob` / слайдер для будь-якого `ParamAddr` (вже є енкодер TE з кольором-адресою). Правий клік по будь-якому параметру — канон FL: *Edit events*, *Create automation clip*, *Link to controller* (MIDI learn), *Copy / Paste value*, *Reset*.
-- **Last tweaked** (FL Tools → Last tweaked): програма пам'ятає останній змінений параметр; з нього — створити кліп автоматизації чи зв'язати з контролером.
-- **Автоматизація**: кліпи автоматизації в Playlist (точки + криві, tension), прив'язані до `ParamAddr`. Запис рухів ручок під час Record (фільтр Automation).
-- **RT**: зміни йдуть через `rtrb` з точним семплом, згладжування 5–20 мс, жест = один крок undo.
+### Plugins & Parameter System
+- **CLAP plugin hosting** — native CLAP host (`clack-host`) alongside existing VST3/VST2 support.
+- **Unified parameter automation polish** — *Last tweaked* workflow, multi-link controller mapping (`Ctrl+J`), and live automation recording with parameter smoothing.
 
-## 3. MIDI
+### MIDI & Workflow
+- **MIDI Out & Clock** — hardware MIDI output and MIDI clock master/slave synchronization.
+- **Vocal engine upgrades** — dynamic mid-phrase tempo-map stretching, clip-offset vocal slicing, and per-note pitch-bend curves.
+- **Project packaging** — "Collect all & save" bundle export including external samples and plugin states.
+- **UI polish** — optional Light theme, toolbar/deck customization, optional oscilloscope/spectrum monitor in the deck, and potential Ukrainian UI localization.
 
-- **Вхід** (`midir`, ALSA seq, hotplug-опитування): гра в канал у фокусі (FL: selected channel), індикатор активності в деці, velocity-крива, sustain, pitch bend, CC.
-- **Налаштування пристроїв** (FL Options → MIDI settings): увімкнути порт, прив'язати до каналу, контролер-тип (AKAI — з func-plan).
-- **MIDI learn** = *Link to controller* із §2; карти зберігаються в `~/.config/keyframexl/midi_maps.ron`.
-- **Запис**: Record + фільтр (ноти / автоматизація), Count-in (Ctrl+P), Metronome (Ctrl+M), Blend/Overdub (Ctrl+B), Wait for input (Ctrl+I), Step editing (Ctrl+E), квантизація на запис.
-- **Typing keyboard to piano** (Ctrl+T): клавіатура комп'ютера як MIDI.
-- **Файли**: імпорт `.mid` (`midly`) → патерни/канали за треками; експорт патерна чи пісні в `.mid`; Piano roll: імпорт/експорт MIDI для одного каналу.
-- Пізніше: MIDI out, MIDI clock master/slave (func-plan етап 3).
+---
 
-## 4. Імпорт і експорт
+## Explicitly Out of Scope
 
-| Що | Зараз | Далі |
-|---|---|---|
-| Проєкт `.kfxl` | JSON v1, Open/Save, drag & drop | Save as (Ctrl+Shift+S), Save new version, Recent files, автозбереження + Revert to backup, міграція в format 2 |
-| Рендер | WAV пісні або патерна | діалог Render (Ctrl+R): WAV/FLAC, частота, біти, дизер, хвіст, діапазон, стеми по каналах/мікшеру |
-| Пресети Sampler | DWP через ConvertWithMoss | WAV one-shot, SFZ, перетягування семплів з файлового браузера |
-| MIDI | — | імпорт/експорт (див. §3) |
-| Аудіо | — | аудіокліпи в Playlist (func-plan етап 4) |
-| Упакований проєкт | DWP-семпли вже лежать у проєкті | «зібрати все в теку» з плагін-станами |
-
-## 5. Верх вікна: меню й тулбар (за інвентарем FL)
-
-Деку не перевантажувати: часті дії — на деці, решта — у **головному меню** зліва у деці (FILE, EDIT, ADD, PATTERNS, VIEW, OPTIONS, TOOLS, HELP), кожен пункт із гарячою клавішею.
-
-**P1 (разом із §1–§3):**
-- Меню: New / Open / Save / Save as / Recent / Export; Undo / Redo / History; Add → Channel (типи інструментів); Patterns → New, Clone, Rename (F2), Find next empty (F4), Delete; View → вікна й робочі простори; Options → Audio, MIDI, Project (темп, розмір, PPQ).
-- Дека: Pattern selector з +/– (FL), Record + Metronome + Count-in, глобальний Snap (замість окремого на кожен Piano roll), позиція у форматі Bar:Beat:Step з перемиканням на Min:Sec, Monitor volume + пікметр з кліпом, CPU % + поліфонія, MIDI-активність.
-- Hint bar уже є (статус-рядок); додати показ гарячої клавіші під курсором.
-
-**P2:** Render діалог (Ctrl+R), Import MIDI/аудіо, Last tweaked, Link to controller / Multilink (Ctrl+J), Master pitch, Plugin manager, автоматизація темпу, Transpose / Split by channel / Group для патернів, Quick tweak.
-
-**P3:** кастомізація деки (пресети панелей), осцилограф/спектр у деці, Chord panel, макроси, пакування проєкту.
-
-**P4 — не робимо:** хмарні сервіси, магазин, онлайн-новини, ліцензійні діалоги FL, специфіку Edison/Fruity.
-
-## 6. Порядок робіт
-
-> Оновлено 2026-11-15: актуальний порядок — етапи A–E у `docs/plan-2026-11-15.md`
-> (після дослідження міксера, інтерфейсу, ролу/плейлиста, браузера й контролів). Список нижче — історія.
-
-0. Свій читач `.dwp` (без втрат через SFZ) — коли знадобиться повна вірність.
-1. Format 2: ядро + міграція, степи для кожного каналу, видалення будь-якого каналу, `Add channel` з вибором типу.
-2. Рушій: зроблено на голосах (§0.1). Лишилось: `cpal 0.18` з нативним PipeWire, `rtrb` для команд замість клонування всієї пісні, пікметр і CPU в деку.
-3. Параметри (§2) з UI-компонентом і правим кліком; Last tweaked.
-4. Головне меню + Pattern selector + глобальний Snap + Record/Metronome/Count-in у деці.
-5. MIDI вхід, learn, запис; імпорт/експорт `.mid`.
-6. Render діалог, Save as / Recent / автозбереження.
-7. Мікшер (routing каналів), потім плагіни CLAP → VST3.
+- **Windows & macOS support** — KeyFrameXL targets Linux exclusively (ALSA/PipeWire, X11/XCB plugin embedding, UNIX IPC, Wine/yabridge).
+- **Online / account ecosystems** — no cloud sync, built-in store, news feeds, or DRM/licensing dialogs.

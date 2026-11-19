@@ -1,40 +1,104 @@
-# Кузня (Forge): звуки для гри
+# Forge — Game SFX Designer
 
-Канал типу **Forge** збирає короткий ігровий звук (стрибок, монетка, удар, лазер, вибух) із шарів і віддає його файлами для гри. Нота на каналі грає цей звук: C5 як зроблено, вище або нижче — швидше чи повільніше.
+**Forge** is a dedicated procedural sound-effect channel built for game audio (jumps, coins, hits, lasers, explosions, UI clicks, ambient hums, and more). Sounds are assembled from up to six layers, shaped with drawn curves and effects, and exported as ready-to-use game assets with automatic variations.
 
-## Як користуватись
+Playing a note on a Forge channel triggers the rendered sound: **C5** plays at its authored pitch and speed, while higher or lower notes pitch-shift and scale playback speed accordingly.
 
-1. **Add channel → Forge (game sounds).** Канал стартує з рецепта Jump.
-2. **Start from** — 11 рецептів (Jump, Coin, Shot, Laser, Hit, Explosion, Step, UI click, Magic, Portal, Hum) і твої збережені звуки (**My sounds**). **▶ PLAY** або клік по хвилі — послухати.
-3. **GAME STYLE** — стиль усієї гри, зберігається в проєкті: кожен рецепт у Start from і кожен новий канал Forge одразу стартують у ньому (Any — без стилю). **MAKE IT** — повернути в стиль саме цей звук: Retro (чіп-хвилі, чіп-шум, менше біт), Cartoon (круглі хвилі, пружні свіпи, без бруду), Heavy (нижче, більше, драйв, саб-шар), Sci-fi (вібрато, фейзер, ринг-модуляція, кімната). Можна натискати кілька підряд.
-4. **CHARACTER** — чотири великі ручки: SIZE (малий і високий ↔ величезний, низький і довгий), ENERGY (лінивий ↔ дикий: гучність і глибина свіпів), DIRT (чисто ↔ драйв, далі менше біт), SPACE (сухо ↔ печера). Плюс PITCH усього звуку і OUTPUT.
-5. **IDEAS → Mutate** — вісім «родичів» звуку. Клік — послухати, подвійний клік або **Use NN** — взяти. Ctrl+Z повертає попередній.
-6. **LAYERS** (до 6): перемикач = mute, **S** = solo, клік по імені — редагувати нижче. **+ Add layer**: Oscillator, Noise, Sample… (WAV/FLAC/OGG, стає частиною проєкту), Synth note (нота пресета KeyFrame Tide), **Note from a channel** — нота будь-якого каналу проєкту: VST-плагін, Sampler, Tide, Vocal, разом із його вставкою мікшера (так само, як експорт пісні). У такого шару є вибір каналу, NOTE, HOLD (скільки тримати клавішу) і **Bounce** — зняти знову, наприклад після зміни пресета плагіна.
-7. Шар: джерело (хвиля / колір шуму / семпл / пресет і нота синта), START, LENGTH, GAIN, PAN і три **лінії**:
-   - **Pitch** — висота в півтонах (прилипає до півтонів, з Alt — вільно);
-   - **Volume** — гучність;
-   - **Filter** — тип фільтра, лінія зрізу, RESO.
-   Тягни точки; подвійний клік додає або прибирає точку (дві лишаються завжди); тягни лінію між точками — вона згинається.
-8. **Layer effects** і **master effects** — будь-які з 14 вбудованих (Bitcrusher, Drive, Wavefolder, Squeeze, Ring Modulator, Phaser, Chorus, Tremolo, Filter, Delay, Reverb, Room Reverb, Compressor, Transient Shaper) з усіма ручками.
-9. **Save to My sounds** — `~/Music/KeyFrameXL/Presets/Forge/<name>.kfxforge`; звук з'являється у Start from.
-10. **EXPORT FOR GAME**: FILES (сам звук + варіації, кожна трохи інша, щоб повтори не звучали як робот), WAV 16-bit або OGG, 48 / 44.1 кГц, Normalize (пік −1 dB). Тиша на початку й у кінці обрізається. Файли: `jump_01.wav`, `jump_02.wav`…
+---
 
-## Як це влаштовано
+## Quick Walkthrough
 
-- `src/forge/` (бібліотека): `mod.rs` — модель (`ForgePatch`, `Layer`, `Source`, `Macros`) і `ForgeSound` (патч + відрендерений звук; у проєкт пишеться лише патч, звук рендериться знову при відкритті); `curve.rs` — лінії (вигин як у кліпах автоматизації, `automation::shape`); `layer.rs` — джерела (polyBLEP-осцилятори, шуми, семпл, нота Tide через той самий `Engine`), TPT SVF; `render.rs` — шари → ефекти шару → мікс → master → DIRT/SPACE → ліміт −1 dB, обрізка хвоста; `recipes.rs` — рецепти і стилі; `mutate.rs` — варіації й мутації (детерміновані за seed); `export.rs` — файли, ресемплінг (Lanczos), OGG.
-- Ефекти — ті самі `FxState`, що в мікшері; після кінця звуку ефект зупиняється, коли його хвіст стих (для ехо чекає до ~2 с).
-- Рушій грає `ForgeSound::rendered` як one-shot (`Source::Forge` у `engine.rs`): висота ноти, fine, слайди, velocity.
-- Вікно — `src/ui/forge.rs`. Правка міняє патч одразу (`ForgeSound::edit`, звук позначено застарілим), а рендер іде у фоновому потоці (`App::poll_forge`, по одному на канал: під час жесту рендери йдуть один за одним, не накопичуються); рушій до того грає попередню версію. Кожна версія патча має свій номер, тож запізнілий рендер старої правки не встановлюється. Undo повертає патч, і його звук рендериться знову. Експорт пісні спершу дорендерює застарілі звуки (`forge::refresh_all`). Mutate і зняття ноти з каналу теж у фоні. Кожен жест — один крок undo.
-- Рендер на release: від <1 мс (UI click) до ~60 мс (4-секундний Hum).
+1. **Create a Forge channel:** Open **Add channel → Forge (game sounds)**. New channels start with the *Jump* recipe.
+2. **Pick a starting point (`Start from`):** Choose from 11 built-in recipes (*Jump, Coin, Shot, Laser, Hit, Explosion, Step, UI click, Magic, Portal, Hum*) or load one of your own saved sounds from **My sounds**. Click **▶ PLAY** or click directly on the waveform to audition.
+3. **Set a style:**
+   - **GAME STYLE** — a project-wide style setting saved with the project. Every recipe in *Start from* and every newly created Forge channel automatically starts in this style (`Any` leaves recipes neutral).
+   - **MAKE IT** — transforms the current sound on demand (and can be clicked multiple times to push further):
+     - *Retro* — chiptune waveforms, stepped noise, bit reduction
+     - *Cartoon* — rounder waveforms, bouncy pitch sweeps, clean output
+     - *Heavy* — lower pitch, bigger body, saturation/drive, added sub layer
+     - *Sci-fi* — vibrato, phaser, ring modulation, room resonance
+4. **Shape with `CHARACTER` macros:**
+   - **SIZE** — small and high-pitched ↔ massive, low, and long
+   - **ENERGY** — restrained ↔ aggressive (loudness and sweep depth)
+   - **DIRT** — clean ↔ saturation, then bitcrushing
+   - **SPACE** — dry ↔ cavernous reverb
+   - Plus overall **PITCH** and **OUTPUT** controls.
+5. **Explore variations (`IDEAS → Mutate`):** Generates 8 deterministic relatives of the current patch. Single-click a card to audition; double-click or click **Use NN** to adopt it (`Ctrl+Z` reverts to the previous patch).
+6. **Build with `LAYERS` (up to 6):**
+   - Toggle the layer switch to mute, click **S** to solo, or click a layer's name to edit it below.
+   - **+ Add layer** supports five source types:
+     - **Oscillator** — polyBLEP waveforms
+     - **Noise** — selectable noise colors
+     - **Sample…** — WAV/FLAC/OGG file embedded directly into the project
+     - **Synth note** — renders a note from any KeyFrame Tide preset
+     - **Note from a channel** — captures a note from any channel in the current project (VST plugin, Sampler, Tide, or Vocal) through its mixer insert chain, identical to song export. Choose the target channel, **NOTE**, and **HOLD** duration, then click **Bounce** whenever you want to re-capture (for example, after changing a plugin preset).
+7. **Edit layer parameters & curves:**
+   - Configure the source, **START**, **LENGTH**, **GAIN**, and **PAN**.
+   - Draw three time envelopes:
+     - **Pitch** — pitch contour in semitones (snaps to semitones; hold `Alt` for free editing)
+     - **Volume** — amplitude contour
+     - **Filter** — filter mode, cutoff frequency curve, and **RESO**
+   - Drag control points to move them, double-click to add or remove points (at least two always remain), and drag the segment between points to bend its curve.
+8. **Add effects (`Layer effects` & `Master effects`):** Insert any of 14 built-in effects with full parameter controls (*Bitcrusher, Drive, Wavefolder, Squeeze, Ring Modulator, Phaser, Chorus, Tremolo, Filter, Delay, Reverb, Room Reverb, Compressor, Transient Shaper*).
+9. **Save presets (`Save to My sounds`):** Saves the patch to `~/Music/KeyFrameXL/Presets/Forge/<name>.kfxforge`, making it immediately available under **Start from**.
+10. **Export for games (`EXPORT FOR GAME`):**
+    - Choose **FILES** count to export the authored sound plus subtle randomized variations so repeated in-game triggers never sound robotic (`jump_01.wav`, `jump_02.wav`, …).
+    - Select **WAV (16-bit)** or **OGG**, **48 kHz** or **44.1 kHz**, and optional **Normalize** (peak −1 dB). Leading and trailing silence is trimmed automatically.
 
-## Перевірка
+---
 
-- `cargo test --lib forge` — рецепти звучать без кліпу і NaN, детермінізм, ручки роблять, що кажуть, mute/solo, семпл і синт-шар, зіпсований патч приводиться до ладу, проєкт туди-назад, рушій грає рендер біт-у-біт (октава вгору — удвічі коротше), експорт 5 різних WAV/OGG, ресемплінг, «мої звуки».
-- `cargo test --bin keyframexl forge` — редактор ліній (тягнути точку, прилипання до півтонів, подвійний клік, вигин), вікно каналу, фоновий рендер (лише остання правка, undo), стиль гри, зняття ноти Tide-каналу в шар і повторне.
-- Живий VST: `KFXL_CAPTURE_FORGE=0 KFXL_CAPTURE_PLUGIN=".../Grand Piano.vst3" KFXL_CAPTURE_FORGE_BOUNCE=out.wav KFXL_CAPTURE_AFTER_MS=45000 … --capture-instrument shot.png` знімає C5 плагіна в шар через 25 с (`KFXL_CAPTURE_FORGE_BOUNCE_AFTER`) і пише його в `out.wav`. 2026-11-19: Grand Piano дав 1.6 с ноти C (261.6 Гц + гармоніки).
-- Скріншот: `KFXL_CAPTURE_FORGE=N cargo run --release -- --capture-instrument out.png` (N — номер рецепта 0..10).
+## Architecture
 
-## Відомі обмеження
+| Module | Responsibility |
+| --- | --- |
+| `src/forge/mod.rs` | Core model (`ForgePatch`, `Layer`, `Source`, `Macros`) and `ForgeSound` (patch + rendered audio buffer). Only the patch is saved in `.kfxl` projects; audio is re-rendered on load. |
+| `src/forge/curve.rs` | Curve evaluation and tension shaping (reusing `automation::shape` from automation clips). |
+| `src/forge/layer.rs` | Layer sources (polyBLEP oscillators, noise generators, samples, Tide synth notes via `Engine`) and TPT SVF filter. |
+| `src/forge/render.rs` | Signal path: per-layer source → layer FX → mix → master FX → `DIRT`/`SPACE` macros → −1 dB limiter → tail trimming. |
+| `src/forge/recipes.rs` | Built-in recipes and style transforms. |
+| `src/forge/mutate.rs` | Seeded, deterministic patch mutations and export variations. |
+| `src/forge/export.rs` | Batch file export, Lanczos resampling, and OGG encoding. |
+| `src/ui/forge.rs` | Channel editor window, interactive curve editor, and background render scheduling. |
 
-- Плагін під Wine ще кілька секунд після завантаження читає свої семпли й мовчить; якщо зняти ноту одразу, Кузня скаже «played silence» — зачекай і натисни Bounce ще раз. Експорт пісні має ту саму особливість.
-- Шар із нотою каналу — знімок: зміна каналу потім не чіпає шар, доки не натиснеш Bounce.
+### Engine & Threading Notes
+- **Shared DSP:** Layer and master effects reuse the exact `FxState` implementations from the mixer. After a layer ends, effects continue running until their tail decays to silence (up to ~2 seconds for delays/reverbs).
+- **Playback:** The voice engine plays `ForgeSound::rendered` as a one-shot (`Source::Forge` in `src/engine.rs`), supporting note pitch, fine pitch, slides, and velocity.
+- **Non-blocking rendering:** Editing updates the patch immediately (`ForgeSound::edit`) and marks the buffer stale while a background thread renders (`App::poll_forge`, one in-flight job per channel so rapid drags do not queue up). Each revision is numbered so late renders from older edits are discarded. Every drag or edit gesture records a single undo step, and song export flushes any stale Forge channels first (`forge::refresh_all`).
+- **Performance (release builds):** Typical render times range from `< 1 ms` (UI click) to `~60 ms` (4-second Hum).
+
+---
+
+## Verification & Testing
+
+- **Library tests:**
+  ```sh
+  cargo test --lib forge
+  ```
+  Covers clip-free / NaN-free recipes, determinism, macro behavior, mute/solo, sample and Tide synth layers, malformed patch sanitization, project round-trips, bit-exact engine playback (including octave-up half-length scaling), 5-variation WAV/OGG batch export, resampling, and *My sounds* persistence.
+- **UI & integration tests:**
+  ```sh
+  cargo test --bin keyframexl forge
+  ```
+  Covers the curve editor (dragging, semitone snap, double-click add/remove, tension bending), channel window, background render coalescing and undo, project game style, and bouncing a Tide channel into a layer.
+- **Live VST bounce capture:**
+  ```sh
+  KFXL_CAPTURE_FORGE=0 \
+  KFXL_CAPTURE_PLUGIN=".../Grand Piano.vst3" \
+  KFXL_CAPTURE_FORGE_BOUNCE=out.wav \
+  KFXL_CAPTURE_FORGE_BOUNCE_AFTER=25000 \
+  KFXL_CAPTURE_AFTER_MS=45000 \
+  cargo run --release -- --capture-instrument shot.png
+  ```
+  Bounces C5 from an external VST3 plugin into a Forge layer after 25 s and writes the result to `out.wav`. (Verified 2026-11-19 with Grand Piano: produced a 1.6 s C4/C5 fundamental + harmonics render.)
+- **Recipe screenshots:**
+  ```sh
+  KFXL_CAPTURE_FORGE=N cargo run --release -- --capture-instrument out.png
+  ```
+  (`N` is the recipe index, `0..10`.)
+
+---
+
+## Known Limitations
+
+- **Wine plugin sample loading:** Some Windows VST plugins running under Wine take several seconds after opening to finish loading samples into memory. If you bounce immediately, Forge may report `"played silence"` — wait a moment and click **Bounce** again. (Full song export shares this behavior.)
+- **Channel bounce is a snapshot:** A *Note from a channel* layer stores the bounced audio; later edits to the source channel do not update the Forge layer until you click **Bounce** again.

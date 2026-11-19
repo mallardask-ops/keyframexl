@@ -1,49 +1,73 @@
-# Співочі канали (UTAU-голоси: Kasane Teto та будь-який інший)
+# Vocal — UTAU Singing Channels
 
-Канал типу **Vocal** співає ноти з текстом (лірикою) голосом із UTAU-банку. Перший голос — Kasane Teto; будь-який UTAU-банк працює так само (Add channel → Vocal → Folder… або Install zip…).
+A **Vocal** channel sings piano-roll notes with lyrics using any **UTAU** voicebank, powered by an embedded **WORLD** vocoder. Kasane Teto is supported with one-click official download, and any standard UTAU voicebank can be loaded from a `.zip` archive or unpacked folder.
 
-## Як користуватись
+---
 
-1. **Add channel → Vocal (singing voice).** Відкриється вікно каналу.
-2. У блоці **voicebank**: `Download Kasane Teto` (офіційний zip з kasaneteto.jp, ~12 МБ, ставиться у `~/.local/share/keyframexl/voicebanks/Kasane Teto`), `Install zip…` (будь-який завантажений UTAU-zip), `Folder…` (розпакована тека з `oto.ini`).
-3. Малюй ноти у Piano roll. **Подвійний клік по ноті** (або F2 на виділеній) — вписати склад; Enter / Tab зберігає і переходить на наступну ноту, Esc скасовує.
-4. **Tools → Lyrics…** у Piano roll: вставити цілий текст, кожен склад піде на наступну ноту (на виділені, або на всі ноти каналу в патерні).
-5. Крутки голосу у вікні каналу: VIBRATO / RATE / DELAY / FADE IN, GLIDE (перехід висоти між нотами), GENDER (форманти без зміни висоти), BREATH. Подія в lane під роллю: Velocity = гучність складу, **Mod X = глибина вібрато** ноти (0.5 = як на каналі), **Mod Y = gender** ноти (0.5 = нуль), Fine pitch = підстройка.
-6. Клавіші ролі й MIDI-клавіатура співають вибраний склад за замовчуванням (`default lyric`, спочатку «あ») на висоті клавіші.
+## Quick Start
 
-## Що писати у лірику
+1. **Create a Vocal channel:** Open **Add channel → Vocal (singing voice)**. The channel window opens automatically.
+2. **Load a voicebank:** In the **Voicebank** section, choose one of:
+   - **Download Kasane Teto** — downloads the official archive from `kasaneteto.jp` (~12 MB) into `~/.local/share/keyframexl/voicebanks/Kasane Teto`.
+   - **Install zip…** — imports any downloaded UTAU `.zip` voicebank.
+   - **Folder…** — points to an unpacked voicebank directory containing `oto.ini`.
+3. **Write notes & lyrics in the Piano Roll:**
+   - **Double-click a note** (or select it and press `F2`) to type its syllable.
+   - Press `Enter` or `Tab` to commit and advance to the next note; press `Esc` to cancel.
+   - Use **Tools → Lyrics…** in the Piano Roll to paste a full line or verse — syllables are distributed sequentially across the selected notes (or all notes of that channel in the pattern).
+4. **Shape the voice:**
+   - **Channel knobs:** `VIBRATO`, `RATE`, `DELAY`, `FADE IN`, `GLIDE` (pitch transition between touching notes), `GENDER` (formant shift without changing pitch), and `BREATH`.
+   - **Per-note Piano Roll lanes:**
+     - `Velocity` — syllable loudness (also influences consonant speed)
+     - `Mod X` — per-note vibrato depth (`0.5` = channel default)
+     - `Mod Y` — per-note gender/formant offset (`0.5` = neutral)
+     - `Fine pitch` — micro-tuning offset
+5. **Live auditioning:** Clicking piano-roll keys or playing a MIDI keyboard sings the channel's `default lyric` (initially `あ`) at the played pitch.
 
-| Запис | Що співається |
-|---|---|
-| `か`, `カ`, `きゃ` | склад з банку (катакана приводиться до хіраґани) |
-| `ka`, `shi`, `tsu`, `kya` | ромадзі → кана; `konnichiha` → 5 складів на 5 нот при масовому вставленні |
-| `привіт` | кирилиця → наближена кана (японська не має l, v, збігів приголосних) |
-| `+` або `ー` | утримати голосний попередньої ноти, висота змінюється плавно |
-| `-` | пауза (нота нічого не співає, розриває фразу) |
-| склад з кількох кана в одній ноті | нота ділиться порівну |
-| рідкий запис банку (`ka`, `a ka`) | пробується першим, тож латинські й VCV-банки теж працюють |
+---
 
-## Як це влаштовано
+## Lyric Input Syntax
 
-- `src/vocal/oto.rs` — oto.ini (Shift-JIS/UTF-8), `prefix.map`, `character.txt`.
-- `src/vocal/lyric.rs` — текст → склади, катакана/ромадзі/кирилиця.
-- `src/vocal/analysis.rs` — WORLD-аналіз (Dio + StoneMask, CheapTrick, D4C) кожного wav; кеш на диску `~/.cache/keyframexl/vocal`.
-- `src/vocal/render.rs` — правила UTAU (offset / consonant / cutoff / preutterance / overlap, швидкість приголосного з velocity), контур висоти (переходи, вібрато), протяжка голосного (початок → пінг-понг стабільної частини → хвіст), стик складів кросфейдом обвідних у частотній області, один синтез WORLD на всю фразу.
-- `src/vocal/plan.rs` — ноти каналу → фрази (розрив фрази на паузі > 30 мс); ключ кешу = вміст фрази, тож правка однієї фрази рендерить лише її, а перенесення фрази цілком нічого не рендерить.
-- `src/vocal/host.rs` — фоновий рендер (до 4 потоків), кеш (~200 МБ для undo і повторів), публікація `VocalMap` без блокувань; `render_all` для експорту.
-- `src/engine.rs` — фраза стартує на першій ноті, на preutterance раніше; живі клавіші беруть заздалегідь відрендерені прев'ю C2–C6.
+| Input | Behavior |
+| --- | --- |
+| `か`, `カ`, `きゃ` | Sings the matching voicebank entry (Katakana is automatically normalized to Hiragana). |
+| `ka`, `shi`, `tsu`, `kya` | Romaji is converted to Kana. Multi-syllable words like `konnichiha` split into 5 syllables across 5 notes during bulk paste. |
+| `привіт` | Cyrillic is approximated to the closest Japanese Kana (note: Japanese lacks `l`, `v`, and consonant clusters). |
+| `+` or `ー` | Sustains the previous note's vowel while smoothly gliding to the new pitch. |
+| `-` | Rest / phrase break (the note produces silence and splits the phrase). |
+| Multiple kana in one note | Splits the note's duration evenly across the syllables. |
+| Raw voicebank aliases (`ka`, `a ka`) | Looked up verbatim first, so Latin-aliased and VCV voicebanks work out of the box. |
 
-Текст ліріки лежить у `Pattern.lyrics` (за id нот): копіювання нот, дублікат, Make unique, undo — усе зберігає ліріку. Експорт WAV чекає на рендер усіх фраз.
+---
 
-## Обмеження (чесно)
+## Architecture
 
-- Темп береться з пісні й свінгу; зміна темпу в tempo map під час фрази не розтягує фразу.
-- Кліп у Playlist, що зрізає початок фрази (offset), не співає цю фразу.
-- Пітч-слайди (Glide) і per-note PBS/PBW-криві UTAU поки ігноруються; перехід висоти — косинусний за GLIDE.
-- Флаги UTAU (g, B, H…) і зовнішні ресемплери не підтримуються: рушій свій (WORLD вбудований).
-- Прев'ю клавіш — 2,5 с на ноту і один склад.
-- Голос нечутливий до тексту поза банком: склад без запису мовчить і виводиться в червоному списку вікна каналу.
+| Module | Responsibility |
+| --- | --- |
+| `src/vocal/oto.rs` | Parses `oto.ini` (Shift-JIS and UTF-8), `prefix.map`, and `character.txt`. |
+| `src/vocal/lyric.rs` | Syllable tokenizer and Katakana / Romaji / Cyrillic transliteration. |
+| `src/vocal/analysis.rs` | WORLD vocoder analysis (`Dio` + `StoneMask`, `CheapTrick`, `D4C`) for each `.wav` sample, cached on disk under `~/.cache/keyframexl/vocal`. |
+| `src/vocal/render.rs` | Applies UTAU timing rules (`offset`, `consonant`, `cutoff`, `preutterance`, `overlap`, velocity-scaled consonant speed), builds pitch/vibrato contours, extends vowels via attack → ping-pong sustain → tail, crossfades adjacent syllables in the spectral envelope domain, and runs one WORLD synthesis pass per phrase. |
+| `src/vocal/plan.rs` | Groups notes into phrases (splitting on gaps `> 30 ms`). Phrases are content-hashed so editing one phrase re-renders only that phrase, and moving a phrase in time requires no re-render. |
+| `src/vocal/host.rs` | Background render worker pool (up to 4 threads), ~200 MB in-memory phrase cache (for fast undo/repeats), lock-free `VocalMap` publication to the audio thread, and synchronous `render_all` for export. |
+| `src/engine.rs` | Triggers phrases at the first note's sample position shifted early by `preutterance`. Live keyboard playback uses pre-rendered C2–C6 preview buffers. |
 
-## Ліцензії
+Lyrics are stored in `Pattern.lyrics` keyed by note ID, so copying notes, duplicating patterns, **Make unique**, and Undo/Redo all preserve lyrics cleanly. Audio export waits for all pending phrase renders before writing output.
 
-Kasane Teto — некомерційна безкоштовна ліцензія автора (https://kasaneteto.jp/guideline/voice.html). Банк не входить до репозиторію: кнопка скачує його з офіційного сайту на запит користувача. Тести ходять на синтетичному банку, реальний голос — лише через `KFXL_VOICEBANK`.
+---
+
+## Known Limitations
+
+- **Static phrase tempo:** Phrase timing uses the song tempo and swing, but mid-phrase tempo changes in the tempo automation lane do not dynamically time-stretch an active phrase.
+- **Clip offset trimming:** A Playlist clip whose start offset cuts off the beginning of a vocal phrase will skip singing that phrase.
+- **Pitch slides & UTAU pitch curves:** Piano-roll slide notes and per-note UTAU `PBS`/`PBW` pitch-bend curves are not yet supported; pitch transitions use a cosine curve controlled by `GLIDE`.
+- **UTAU flags & external resamplers:** UTAU flags (`g`, `B`, `H`, …) and external resampler binaries are not supported — synthesis always uses the built-in WORLD engine.
+- **Live key preview:** Audition buffers are capped at 2.5 seconds per note and use the single default syllable.
+- **Missing syllables:** If a syllable has no matching entry in the loaded voicebank, that note stays silent and the missing lyric is listed in red in the Vocal channel window.
+
+---
+
+## Voicebank Licensing & Tests
+
+- **Kasane Teto** is distributed under the creator's free non-commercial license ([guidelines](https://kasaneteto.jp/guideline/voice.html)). No voicebank files are bundled in this repository; the in-app button downloads the official archive only when requested by the user.
+- Automated tests (`tests/vocal_synthetic.rs`) run against a generated synthetic voicebank. Real-voicebank tests (`tests/vocal_teto.rs`) are opt-in via the `KFXL_VOICEBANK` environment variable.
