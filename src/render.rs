@@ -254,6 +254,16 @@ pub fn render_range(
         }
         None => song,
     };
+    // Stretched zones: made now where stale, as playback would have them.
+    let fresh;
+    let song = if crate::sampler::stale_stretches(song).is_empty() {
+        song
+    } else {
+        let mut s = song.clone();
+        crate::sampler::refresh_stretch(&mut s);
+        fresh = s;
+        &fresh
+    };
     let mut engine = Engine::new(rate);
     engine.clip_output = false;
     if song

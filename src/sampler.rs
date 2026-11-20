@@ -640,12 +640,205 @@ pub struct Zone {
     pub fade_in: usize,
     #[serde(default, skip_serializing_if = "is_zero_usize")]
     pub fade_out: usize,
+    /// Time stretch with the pitch kept: by a ratio, or to a length in beats
+    /// at the song's tempo.
+    #[serde(default, skip_serializing_if = "Stretch::is_off")]
+    pub stretch: Stretch,
+    /// The stretched audio `stretch` asks for, made off the audio thread
+    /// (`refresh_stretch`); never saved, made again from the sample.
+    #[serde(skip)]
+    pub stretched: Option<Arc<Stretched>>,
 }
 
 fn is_zero_usize(v: &usize) -> bool {
     *v == 0
 }
+
+/// How a zone's sample is stretched (Ableton: warp; DirectWave: Time / Sync).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StretchMode {
+    #[default]
+    Off,
+    /// The length times `amount`.
+    Time,
+    /// `beats` long at the song's tempo.
+    Beat,
+}
+
+impl StretchMode {
+    pub const ALL: [Self; 3] = [Self::Off, Self::Time, Self::Beat];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Time => "Time",
+            Self::Beat => "Beat sync",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Stretch {
+    pub mode: StretchMode,
+    /// Time: new length / old, 0.25..=4.
+    pub amount: f64,
+    /// Beat sync: the zone's length (offset..end) in beats, 0.25..=64.
+    pub beats: f64,
+}
+
+impl Default for Stretch {
+    fn default() -> Self {
+        Self {
+            mode: StretchMode::Off,
+            amount: 1.0,
+            beats: 4.0,
+        }
+    }
+}
+
+impl Stretch {
+    pub fn is_off(&self) -> bool {
+        self.mode == StretchMode::Off
+    }
+    pub fn valid(&self) -> bool {
+        self.amount.is_finite()
+            && (0.25..=4.0).contains(&self.amount)
+            && self.beats.is_finite()
+            && (0.25..=64.0).contains(&self.beats)
+    }
+}
+
+/// A zone's stretched audio and its markers moved with it.
+#[derive(Clone, Debug)]
+pub struct Stretched {
+    /// What it was made from (`Zone::stretch_key`).
+    pub key: u64,
+    pub frames: Arc<Vec<[f32; 2]>>,
+    pub loop_start: usize,
+    pub loop_end: usize,
+    pub fade_in: usize,
+    pub fade_out: usize,
+}
+
+/// The audio a zone plays and its markers: the sample, or its stretch.
+pub struct ZoneView<'a> {
+    pub frames: &'a [[f32; 2]],
+    pub offset: usize,
+    pub end: usize,
+    pub loop_start: usize,
+    pub loop_end: usize,
+    pub fade_in: usize,
+    pub fade_out: usize,
+}
+
+impl ZoneView<'_> {
+    /// The fade gain at sample position `pos` (1 without fades).
+    pub fn fade_gain(&self, pos: f64) -> f64 {
+        let mut g = 1.0;
+        if self.fade_in > 0 {
+            g *= ((pos - self.offset as f64) / self.fade_in as f64).clamp(0.0, 1.0);
+        }
+        if self.fade_out > 0 {
+            g *= ((self.end as f64 - pos) / self.fade_out as f64).clamp(0.0, 1.0);
+        }
+        g
+    }
+}
 impl Zone {
+    /// What plays: the stretched audio when there is some for this zone's
+    /// stretch, else the sample.
+    pub fn view(&self) -> ZoneView<'_> {
+        match &self.stretched {
+            Some(s) if !self.stretch.is_off() => ZoneView {
+                frames: &s.frames,
+                offset: 0,
+                end: s.frames.len(),
+                loop_start: s.loop_start,
+                loop_end: s.loop_end,
+                fade_in: s.fade_in,
+                fade_out: s.fade_out,
+            },
+            _ => ZoneView {
+                frames: &self.frames,
+                offset: self.offset,
+                end: self.end,
+                loop_start: self.loop_start,
+                loop_end: self.loop_end,
+                fade_in: self.fade_in,
+                fade_out: self.fade_out,
+            },
+        }
+    }
+
+    /// The stretched length of `offset..end` at `tempo`; `None` when the
+    /// zone plays its sample as it is.
+    pub fn stretch_target(&self, tempo: f64) -> Option<usize> {
+        let len = self.end.saturating_sub(self.offset);
+        if len < 2 || !self.stretch.valid() {
+            return None;
+        }
+        let target = match self.stretch.mode {
+            StretchMode::Off => return None,
+            StretchMode::Time => len as f64 * self.stretch.amount,
+            StretchMode::Beat => {
+                self.stretch.beats * 60.0 / tempo.clamp(10.0, 999.0) * self.sample_rate as f64
+            }
+        };
+        let target = target.round() as usize;
+        (target != len && target >= 2).then_some(target)
+    }
+
+    /// Identifies the stretch this zone needs at `tempo` (sample, markers,
+    /// target length).
+    pub fn stretch_key(&self, tempo: f64) -> Option<u64> {
+        use std::hash::{Hash, Hasher};
+        let target = self.stretch_target(tempo)?;
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        (Arc::as_ptr(&self.frames) as usize).hash(&mut h);
+        self.frames.len().hash(&mut h);
+        (self.offset, self.end, self.loop_start, self.loop_end).hash(&mut h);
+        (self.fade_in, self.fade_out, self.sample_rate, target).hash(&mut h);
+        Some(h.finish())
+    }
+
+    /// Make the stretched audio for `tempo` (slow: off the audio thread).
+    pub fn render_stretch(&self, tempo: f64) -> Option<Stretched> {
+        let target = self.stretch_target(tempo)?;
+        let key = self.stretch_key(tempo)?;
+        let src = &self.frames[self.offset.min(self.frames.len())..self.end.min(self.frames.len())];
+        // The seed comes from the content, so every run makes the same bytes.
+        let seed = (src.len() as u64) << 32 ^ target as u64 ^ (self.sample_rate as u64) << 48;
+        let mut frames = crate::stretch::stretch(src, self.sample_rate, target, seed);
+        // A few ms of fade at the cut ends keep the edges from clicking.
+        let edge = (self.sample_rate as usize / 500).min(frames.len() / 4);
+        let n = frames.len();
+        for i in 0..edge {
+            let g = i as f32 / edge as f32;
+            for c in 0..2 {
+                frames[i][c] *= g;
+                frames[n - 1 - i][c] *= g;
+            }
+        }
+        let k = target as f64 / src.len().max(1) as f64;
+        let at = |p: usize| (((p.saturating_sub(self.offset)) as f64 * k).round() as usize).min(n);
+        Some(Stretched {
+            key,
+            frames: Arc::new(frames),
+            loop_start: at(self.loop_start),
+            loop_end: at(self.loop_end),
+            fade_in: (self.fade_in as f64 * k).round() as usize,
+            fade_out: (self.fade_out as f64 * k).round() as usize,
+        })
+    }
+
+    /// Whether the stretched audio is missing or made for something else.
+    pub fn stretch_stale(&self, tempo: f64) -> bool {
+        match self.stretch_key(tempo) {
+            Some(k) => self.stretched.as_ref().is_none_or(|s| s.key != k),
+            None => false,
+        }
+    }
+
     /// The fade gain at sample position `pos` (1 without fades).
     pub fn fade_gain(&self, pos: f64) -> f64 {
         let mut g = 1.0;
@@ -815,6 +1008,8 @@ impl TryFrom<PresetDocument> for SamplePreset {
             let samples = d.samples.ok_or("Missing sample zones")?;
             let end = samples.len();
             vec![Zone {
+                stretch: Default::default(),
+                stretched: None,
                 fade_in: 0,
                 fade_out: 0,
                 name: d.name.clone(),
@@ -864,6 +1059,8 @@ impl SamplePreset {
             name: name.into(),
             program: Program::default(),
             zones: vec![Zone {
+                stretch: Default::default(),
+                stretched: None,
                 fade_in: 0,
                 fade_out: 0,
                 name: "z".into(),
@@ -925,6 +1122,57 @@ impl SamplePreset {
         self
     }
 }
+/// Every sampler zone whose stretch is stale, as (instrument id, zone index).
+pub fn stale_stretches(song: &crate::sequence::Song) -> Vec<(u64, usize)> {
+    let mut out = Vec::new();
+    for i in &song.instruments {
+        if let crate::sequence::InstrumentKind::Sampler { preset: Some(p) } = &i.kind {
+            for (k, z) in p.zones.iter().enumerate() {
+                if z.stretch_stale(song.tempo) {
+                    out.push((i.id, k));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Put stretched audio on its zone, if the zone still asks for that one.
+pub fn install_stretch(
+    song: &mut crate::sequence::Song,
+    inst: u64,
+    zone: usize,
+    s: Stretched,
+) -> bool {
+    let tempo = song.tempo;
+    let Some(i) = song.instruments.iter_mut().find(|i| i.id == inst) else {
+        return false;
+    };
+    let crate::sequence::InstrumentKind::Sampler { preset: Some(p) } = &mut i.kind else {
+        return false;
+    };
+    if p.zones.get(zone).and_then(|z| z.stretch_key(tempo)) != Some(s.key) {
+        return false;
+    }
+    Arc::make_mut(p).zones[zone].stretched = Some(Arc::new(s));
+    true
+}
+
+/// Make every stale stretch now (opening a project, an export).
+pub fn refresh_stretch(song: &mut crate::sequence::Song) {
+    for (inst, zone) in stale_stretches(song) {
+        let made = song.instrument(inst).and_then(|i| match &i.kind {
+            crate::sequence::InstrumentKind::Sampler { preset: Some(p) } => {
+                p.zones.get(zone).and_then(|z| z.render_stretch(song.tempo))
+            }
+            _ => None,
+        });
+        if let Some(s) = made {
+            install_stretch(song, inst, zone, s);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1113,6 +1361,8 @@ mod tests {
     #[test]
     fn forward_sustain_and_ping_pong_loops_use_frame_boundaries() {
         let mut z = Zone {
+            stretch: Default::default(),
+            stretched: None,
             fade_in: 0,
             fade_out: 0,
             name: "ramp".into(),

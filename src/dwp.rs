@@ -635,6 +635,8 @@ where
     }
 
     Ok(Zone {
+        stretch: Default::default(),
+        stretched: None,
         fade_in: 0,
         fade_out: 0,
         name: raw.name.clone(),

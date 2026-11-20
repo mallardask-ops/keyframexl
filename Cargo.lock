@@ -1941,6 +1941,7 @@ version = "0.1.2"
 dependencies = [
  "arc-swap",
  "base64",
+ "cc",
  "claxon",
  "cpal",
  "dirs",

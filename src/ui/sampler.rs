@@ -1424,6 +1424,79 @@ impl App {
             draw_amp(self, ui);
         }
 
+        // Time stretch: the pitch stays, the length follows a ratio or the tempo.
+        smp_bay(ui, |ui| {
+            use keyframexl::sampler::StretchMode;
+            smp_section_head(ui, "time stretch", t::SMP_FILTER2);
+            ui.horizontal_wrapped(|ui| {
+                let modes: Vec<&str> = StretchMode::ALL.iter().map(|m| m.label()).collect();
+                let cur = StretchMode::ALL
+                    .iter()
+                    .position(|m| *m == z.stretch.mode)
+                    .unwrap_or(0);
+                if let Some(i) = smp_pills(
+                    ui,
+                    &format!("stretch-mode-{id}"),
+                    &modes,
+                    cur,
+                    t::SMP_FILTER2,
+                ) {
+                    self.edit_zones(id, true, |z| z.stretch.mode = StretchMode::ALL[i]);
+                }
+                match z.stretch.mode {
+                    StretchMode::Off => {}
+                    StretchMode::Time => {
+                        let spec = P {
+                            label: "Length",
+                            min: 0.25,
+                            max: 4.0,
+                            default: 1.0,
+                            fmt: &|v| format!("{:.0}%", v * 100.0),
+                            hint: "New length against the sample's (pitch kept)",
+                            log: true,
+                        };
+                        if let Some(nv) = self.pknob(ui, &spec, t::SMP_FILTER2, z.stretch.amount) {
+                            self.edit_zones(id, false, |z| z.stretch.amount = nv.clamp(0.25, 4.0));
+                        }
+                    }
+                    StretchMode::Beat => {
+                        let spec = P {
+                            label: "Beats",
+                            min: 0.25,
+                            max: 64.0,
+                            default: 4.0,
+                            fmt: &|v| format!("{v:.2}"),
+                            hint: "The sample's length in beats: it plays that long at the song's tempo",
+                            log: true,
+                        };
+                        if let Some(nv) = self.pknob(ui, &spec, t::SMP_FILTER2, z.stretch.beats) {
+                            // Quarter-beat steps.
+                            self.edit_zones(id, false, |z| {
+                                z.stretch.beats = ((nv * 4.0).round() / 4.0).clamp(0.25, 64.0)
+                            });
+                        }
+                    }
+                }
+                let len = z.end.saturating_sub(z.offset) as f64 / z.sample_rate.max(1) as f64;
+                let state = match z.stretch_target(self.song.tempo) {
+                    None if z.stretch.mode != StretchMode::Off => format!("{len:.2} s, as recorded"),
+                    None => String::new(),
+                    Some(n) => {
+                        let to = n as f64 / z.sample_rate.max(1) as f64;
+                        let ready = if z.stretch_stale(self.song.tempo) {
+                            "rendering…"
+                        } else {
+                            "ready"
+                        };
+                        format!("{len:.2} s → {to:.2} s · {ready}")
+                    }
+                };
+                if !state.is_empty() {
+                    ui.label(egui::RichText::new(state).font(t::mono(11.0)).color(t::faint()));
+                }
+            });
+        });
+
         // Interactive bendable DAHDSR Amp Envelope.
         smp_bay(ui, |ui| {
             let env = z.adsr.clone();

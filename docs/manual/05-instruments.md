@@ -23,6 +23,12 @@ with *File → Import → Sampler preset (.dwp)*.
 - **Per-voice effects**: bitcrusher, ring modulator, quantiser, decimator,
   phaser.
 
+- **Time stretch** (Zone page): *Time* changes the length, 25 to 400 %,
+  and keeps the pitch; *Beat sync* makes the zone a number of beats long
+  at the song's tempo, so a loop follows tempo changes. The stretched
+  sound is made in the background; the line under the knob says when it
+  is ready.
+
 Hold the zone's audition button to hear it at its root key.
 
 ## KeyFrame Tide

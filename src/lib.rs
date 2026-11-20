@@ -220,6 +220,7 @@ pub mod sampler;
 pub mod scale;
 pub mod sequence;
 pub mod step_ops;
+pub mod stretch;
 pub mod synth;
 mod synth_presets;
 pub mod tempo;

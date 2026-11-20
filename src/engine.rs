@@ -603,32 +603,34 @@ impl Voice {
             r
         };
 
-        // Read the sample (linear interpolation, loop-aware) and advance.
+        // Read the sample (linear interpolation, loop-aware) and advance:
+        // the zone's own, or its stretch.
+        let zv = z.view();
         let looping = !p.reverse
             && !p.one_shot
             && z.loop_mode != LoopMode::None
-            && z.loop_end > z.loop_start + 1
+            && zv.loop_end > zv.loop_start + 1
             && (z.loop_mode != LoopMode::Sustain || self.t < gate);
-        if self.pos < z.offset as f64 || self.pos >= z.end as f64 {
+        if self.pos < zv.offset as f64 || self.pos >= zv.end as f64 {
             self.done = true;
             return [0.0; 2];
         }
         let i = self.pos.floor() as usize;
         let frac = (self.pos - i as f64) as f32;
-        let next = if looping && self.dir > 0.0 && i + 1 >= z.loop_end {
+        let next = if looping && self.dir > 0.0 && i + 1 >= zv.loop_end {
             if z.loop_mode == LoopMode::PingPong {
-                z.loop_end - 1
+                zv.loop_end - 1
             } else {
-                z.loop_start
+                zv.loop_start
             }
         } else if self.dir < 0.0 {
-            i.saturating_sub(1).max(z.offset)
+            i.saturating_sub(1).max(zv.offset)
         } else {
-            (i + 1).min(z.end - 1)
+            (i + 1).min(zv.end - 1)
         };
-        let (a, b) = (z.frames[i], z.frames[next]);
-        let fade = if z.fade_in > 0 || z.fade_out > 0 {
-            z.fade_gain(self.pos)
+        let (a, b) = (zv.frames[i], zv.frames[next]);
+        let fade = if zv.fade_in > 0 || zv.fade_out > 0 {
+            zv.fade_gain(self.pos)
         } else {
             1.0
         };
@@ -638,7 +640,7 @@ impl Voice {
         ];
         self.pos += ratio * self.dir;
         if looping {
-            let (ls, le) = (z.loop_start as f64, z.loop_end as f64);
+            let (ls, le) = (zv.loop_start as f64, zv.loop_end as f64);
             if z.loop_mode == LoopMode::PingPong {
                 if self.dir > 0.0 && self.pos >= le - 1.0 {
                     self.pos = 2.0 * (le - 1.0) - self.pos;
@@ -3307,11 +3309,12 @@ impl Engine {
         if z.params.one_shot {
             v.gate = f64::INFINITY;
         }
+        let zv = z.view();
         if z.params.reverse {
-            v.pos = (z.end - 1) as f64;
+            v.pos = (zv.end - 1) as f64;
             v.dir = -1.0;
         } else {
-            v.pos = z.offset as f64;
+            v.pos = zv.offset as f64;
         }
         if v.cut_group != 0 {
             for o in self
@@ -3568,6 +3571,16 @@ fn note_slide(p: &Pattern, n: &Note, sps: f64, swing: f64) -> Option<(f64, f64, 
 /// Offline render: one pass of the pattern (or the playlist), then the tail
 /// until every voice has finished.
 pub fn render(song: &Song, pattern: u64, song_mode: bool, rate: u32) -> Vec<[f32; 2]> {
+    // Stretched zones play what an export would: made now if stale.
+    let fresh;
+    let song = if crate::sampler::stale_stretches(song).is_empty() {
+        song
+    } else {
+        let mut s = song.clone();
+        crate::sampler::refresh_stretch(&mut s);
+        fresh = s;
+        &fresh
+    };
     let mut engine = Engine::new(rate);
     if song
         .instruments
@@ -3692,6 +3705,8 @@ mod tests {
     fn song_with(frames: Vec<[f32; 2]>, setup: impl FnOnce(&mut Zone, &mut Program)) -> Song {
         let end = frames.len();
         let mut zone = Zone {
+            stretch: Default::default(),
+            stretched: None,
             fade_in: 0,
             fade_out: 0,
             name: "test".into(),
@@ -3774,6 +3789,76 @@ mod tests {
         }
         e.channel_activity(&song, &mut act);
         assert_eq!(act[bass], 0, "the release is over");
+    }
+
+    /// How long a one-shot plays (frames above a small level) and its pitch.
+    fn sounding(f: &[[f32; 2]]) -> (usize, f32) {
+        let last = f.iter().rposition(|s| s[0].abs() > 0.05).unwrap_or(0);
+        let body = &f[last / 5..last * 4 / 5];
+        let crossings = body
+            .windows(2)
+            .filter(|w| (w[0][0] < 0.0) != (w[1][0] < 0.0))
+            .count();
+        (
+            last,
+            crossings as f32 / 2.0 / (body.len() as f32 / RATE as f32),
+        )
+    }
+
+    #[test]
+    fn a_stretched_zone_plays_longer_at_its_pitch_and_follows_the_tempo() {
+        let tone: Vec<[f32; 2]> = (0..RATE as usize)
+            .map(|i| {
+                let v = (i as f32 * 330.0 * std::f32::consts::TAU / RATE as f32).sin() * 0.5;
+                [v, v]
+            })
+            .collect();
+        let shot = |setup: &dyn Fn(&mut Zone), tempo: f64| {
+            let mut song = song_with(tone.clone(), |z, _| {
+                z.params.one_shot = true;
+                setup(z);
+            });
+            song.tempo = tempo;
+            std::sync::Arc::make_mut(&mut song.patterns[0]).notes = vec![note(0, 1, 60)];
+            sounding(&render(&song, 1, false, RATE))
+        };
+        let (plain, hz) = shot(&|_| {}, 120.0);
+        assert!((plain as i64 - RATE as i64).abs() < 500, "{plain}");
+        assert!((hz - 330.0).abs() < 3.0);
+        // Time ×2: twice as long, same pitch (made on the fly for an export).
+        let (long, hz) = shot(
+            &|z| {
+                z.stretch.mode = crate::sampler::StretchMode::Time;
+                z.stretch.amount = 2.0;
+            },
+            120.0,
+        );
+        assert!((long as i64 - 2 * RATE as i64).abs() < 1500, "{long}");
+        assert!((hz - 330.0).abs() < 3.0, "{hz}");
+        // Beat sync: 4 beats, at 120 BPM 2 s, at 160 BPM 1.5 s.
+        let beats = |z: &mut Zone| {
+            z.stretch.mode = crate::sampler::StretchMode::Beat;
+            z.stretch.beats = 4.0;
+        };
+        let (at120, _) = shot(&beats, 120.0);
+        let (at160, hz) = shot(&beats, 160.0);
+        assert!((at120 as i64 - 2 * RATE as i64).abs() < 1500, "{at120}");
+        assert!((at160 as i64 - 3 * RATE as i64 / 2).abs() < 1500, "{at160}");
+        assert!((hz - 330.0).abs() < 3.0, "{hz}");
+        // Off stays the sample, byte for byte.
+        let mut song = song_with(tone.clone(), |z, _| z.params.one_shot = true);
+        std::sync::Arc::make_mut(&mut song.patterns[0]).notes = vec![note(0, 1, 60)];
+        let a = render(&song, 1, false, RATE);
+        if let InstrumentKind::Sampler { preset: Some(p) } = &mut song
+            .instruments
+            .iter_mut()
+            .find(|i| i.id == 4)
+            .unwrap()
+            .kind
+        {
+            Arc::make_mut(p).zones[0].stretch.amount = 3.0;
+        }
+        assert_eq!(a, render(&song, 1, false, RATE));
     }
 
     #[test]

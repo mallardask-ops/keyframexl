@@ -304,6 +304,13 @@ pub struct App {
     /// Pattern rename in progress (F2): (pattern, text).
     renaming: Option<(u64, String)>,
     show_shortcuts: bool,
+    /// Stretched zone audio made in the background: (instrument, zone, result).
+    stretch_jobs: (
+        std::sync::mpsc::Sender<(u64, usize, keyframexl::sampler::Stretched)>,
+        std::sync::mpsc::Receiver<(u64, usize, keyframexl::sampler::Stretched)>,
+    ),
+    /// Stretch keys being made now.
+    stretch_busy: std::collections::HashSet<u64>,
     /// HELP → Manual window.
     show_manual: bool,
     /// A New/Open/Quit waiting on "Save changes?".
@@ -1238,6 +1245,8 @@ impl App {
             saved_edits: 0,
             renaming: None,
             show_shortcuts: false,
+            stretch_jobs: std::sync::mpsc::channel(),
+            stretch_busy: Default::default(),
             show_manual: false,
             pending: None,
             quit_ok: false,
@@ -3248,6 +3257,46 @@ impl App {
     }
 }
 
+impl App {
+    /// Stretched sampler zones: start what is stale on a worker, install
+    /// what is made (if the zone still asks for it).
+    fn poll_stretch(&mut self, ctx: &egui::Context) {
+        let mut changed = false;
+        while let Ok((inst, zone, made)) = self.stretch_jobs.1.try_recv() {
+            self.stretch_busy.remove(&made.key);
+            changed |= keyframexl::sampler::install_stretch(&mut self.song, inst, zone, made);
+        }
+        if changed {
+            self.publish();
+        }
+        let tempo = self.song.tempo;
+        for (inst, zi) in keyframexl::sampler::stale_stretches(&self.song) {
+            let Some(zone) = self.song.instrument(inst).and_then(|i| match &i.kind {
+                keyframexl::sequence::InstrumentKind::Sampler { preset: Some(p) } => {
+                    p.zones.get(zi).cloned()
+                }
+                _ => None,
+            }) else {
+                continue;
+            };
+            let Some(key) = zone.stretch_key(tempo) else {
+                continue;
+            };
+            if !self.stretch_busy.insert(key) {
+                continue;
+            }
+            let tx = self.stretch_jobs.0.clone();
+            let ctx = ctx.clone();
+            std::thread::spawn(move || {
+                if let Some(made) = zone.render_stretch(tempo) {
+                    let _ = tx.send((inst, zi, made));
+                    ctx.request_repaint();
+                }
+            });
+        }
+    }
+}
+
 impl eframe::App for App {
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
         if let Some(s) = &mut self.script {
@@ -3275,6 +3324,7 @@ impl eframe::App for App {
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let frame_start = std::time::Instant::now();
+        self.poll_stretch(ctx);
         // The theme switches before anything draws (the style is read per frame).
         let want = t::resolve(self.settings.general.theme);
         if want != t::theme() {

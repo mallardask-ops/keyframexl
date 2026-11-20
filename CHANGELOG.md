@@ -39,6 +39,11 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
   FL 2026 on stock Wine. One link channel at a time. See
   [docs/fl-link.md](docs/fl-link.md).
 
+- **Sampler time stretch.** A zone can stretch its sample with the pitch
+  kept: by a ratio (*Time*, 25–400 %) or to a number of beats at the
+  song's tempo (*Beat sync*), using Signalsmith Stretch (MIT, vendored).
+  Renders are deterministic, so playback and export match.
+
 ### Interface
 - **Light theme** (*Settings → General → Theme*, *View → Theme*): Dark,
   Light, or System (follows the desktop through xdg-desktop-portal). All

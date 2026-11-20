@@ -570,6 +570,8 @@ fn read_sfz(path: &Path, text: &str) -> Result<SamplePreset, String> {
             .then(|| midi("key", 60))
             .transpose()?;
         let mut zone = Zone {
+            stretch: Default::default(),
+            stretched: None,
             fade_in: 0,
             fade_out: 0,
             name: file.clone(),
