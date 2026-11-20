@@ -10,7 +10,15 @@
 
 KeyFrameXL is built with `eframe`/`egui` + `egui_dock`, inspired by classic pattern-centric DAW workflows and tactile hardware sequencers.
 
-![KeyFrameXL workspace](docs/screenshots/workspace.png)
+![Playlist and channel rack: the 32-bar demo song in Song mode, with section markers and automation](docs/screenshots/workspace.png)
+
+| | |
+| --- | --- |
+| ![Mixer: eleven inserts with effects, sends and a sidechain](docs/screenshots/mixer.png) | ![Piano roll of the vocal channel: notes with lyrics](docs/screenshots/roll.png) |
+| ![KeyFrame Tide synth on the Wide Pad preset](docs/screenshots/tide.png) | ![Forge game-sound designer on the Charge recipe](docs/screenshots/forge.png) |
+| ![Sampler with two looping zones](docs/screenshots/sampler.png) | ![Welcome screen, Genres tab](docs/screenshots/genres.png) |
+
+All screenshots show the built-in demo song (`keyframexl write-demo demo.kfxl`; `keyframexl render-demo-song demo.wav` renders it) and are retaken with `scripts/ux/shots.sh`.
 
 ## Features
 

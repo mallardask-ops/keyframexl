@@ -399,6 +399,14 @@ impl App {
         } else {
             Song::default()
         };
+        // KFXL_CAPTURE_DEMO=1: the showcase song (its voice written to a temp folder),
+        // kept as it is by every capture mode.
+        let demo = capture && std::env::var_os("KFXL_CAPTURE_DEMO").is_some();
+        if demo {
+            let voice = std::env::temp_dir().join("keyframexl-capture-voice");
+            let _ = keyframexl::demo::write_voice(&voice);
+            song = keyframexl::demo::build(Some(&voice));
+        }
         // Captures can show a real project: KFXL_CAPTURE_PROJECT=path.kfxl
         if capture
             && let Ok(path) = std::env::var("KFXL_CAPTURE_PROJECT")
@@ -406,7 +414,7 @@ impl App {
         {
             song = opened;
         }
-        if kind == Some("--capture-playlist") {
+        if kind == Some("--capture-playlist") && !demo {
             song.clips.push(keyframexl::sequence::Clip::new(1, 0, 0));
             song.clips.push(keyframexl::sequence::Clip::new(
                 1,
@@ -684,7 +692,44 @@ impl App {
                 app.toggle_arm(0);
                 app.rec.on = true;
             }
-            if kind == Some("--capture-roll") {
+            // KFXL_CAPTURE_SONG=1: Song mode; KFXL_CAPTURE_POS=bar puts the playhead there.
+            if std::env::var_os("KFXL_CAPTURE_SONG").is_some() {
+                app.set_song_mode(true);
+            }
+            if let Some(bar) = std::env::var("KFXL_CAPTURE_POS")
+                .ok()
+                .and_then(|v| v.parse::<i64>().ok())
+            {
+                app.seek_tick(bar * keyframexl::sequence::BAR);
+            }
+            // KFXL_CAPTURE_INSTRUMENT=name: the channel the Roll and Instrument captures show.
+            let named = std::env::var("KFXL_CAPTURE_INSTRUMENT").ok().and_then(|n| {
+                app.song
+                    .instruments
+                    .iter()
+                    .find(|i| i.name == n)
+                    .map(|i| i.id)
+            });
+            if let Some(id) = named {
+                app.roll_inst = id;
+                app.instrument = id;
+                for slot in &mut app.ws.slots {
+                    for (_, tab) in slot.iter_all_tabs_mut() {
+                        if let Tab::Roll { instrument } = tab {
+                            *instrument = id;
+                        }
+                    }
+                }
+                if let Some(p) = app
+                    .song
+                    .patterns
+                    .iter()
+                    .find(|p| p.notes.iter().any(|n| n.instrument == id))
+                {
+                    app.selected = p.id;
+                }
+            }
+            if kind == Some("--capture-roll") && !demo {
                 // Show colour groups and a muted note.
                 let bass = app.default_roll();
                 let notes: Vec<usize> = app
@@ -718,7 +763,7 @@ impl App {
                 app.tool = Tool::Paint;
             }
             if kind == Some("--capture-instrument") {
-                let id = app.default_roll();
+                let id = named.unwrap_or_else(|| app.default_roll());
                 if std::env::var_os("KFXL_CAPTURE_SYNTH").is_some()
                     && let Some(inst) = app.song.instruments.iter_mut().find(|i| i.id == id)
                 {
@@ -791,7 +836,11 @@ impl App {
                 app.files.roots = vec![std::path::PathBuf::from(&dir)];
                 app.files.open.insert(std::path::PathBuf::from(&dir));
             }
-            if kind == Some("--capture-mixer") {
+            if kind == Some("--capture-mixer") && demo {
+                app.mix_sel = 1;
+                app.win(Cmd::Show(Tab::Mixer));
+            }
+            if kind == Some("--capture-mixer") && !demo {
                 // A small mix to look at: drums through insert 1 with an EQ, a reverb send.
                 app.song.instruments[0].mixer = 1;
                 app.song.instruments[1].mixer = 1;

@@ -1,0 +1,698 @@
+//! The showcase song (docs/research/0.2.0/C4-C5.md §3): 32 bars at 100 BPM
+//! that use every part of the program — built-in drums, six Tide synths, a
+//! sampler, Forge transitions, a singing channel, eleven mixer inserts with
+//! sends and a sidechain, four automation clips and section markers. It is
+//! code, so it is the same everywhere (screenshots, release preview, tests).
+//!
+//! The vocal sings a small synthetic voicebank the program writes itself
+//! ("KFXL Demo Voice", CC0): no third-party voice is needed or bundled.
+
+use crate::automation::{Envelope, Playback, Point, Target};
+use crate::forge::{ForgeSound, recipes::Recipe};
+use crate::fx::{FxKind, FxSlot};
+use crate::kits::Kit;
+use crate::sequence::{
+    BAR, Clip, InstrumentKind, Marker, Note, Pattern, STEP, SamplePreset, Send, Song, Tick, Track,
+};
+use crate::synth::SynthPatch;
+use std::path::{Path, PathBuf};
+
+pub const TEMPO: f64 = 100.0;
+pub const BARS: i64 = 32;
+pub const VOICE_NAME: &str = "KFXL Demo Voice";
+
+/// Where the demo voice lives: next to installed voicebanks.
+pub fn voice_dir() -> PathBuf {
+    crate::vocal::install::bank_root().join(VOICE_NAME)
+}
+
+/// Write the demo voice into `dir` (once; it is small and deterministic):
+/// the five vowels and "ka", synthesised, with their `oto.ini`.
+pub fn write_voice(dir: &Path) -> std::io::Result<()> {
+    if dir.join("oto.ini").is_file() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(dir)?;
+    // Formant-ish harmonic weights per vowel (a rough F1/F2 emphasis).
+    let vowels: [(&str, f64, f64); 5] = [
+        ("a", 750.0, 1200.0),
+        ("i", 300.0, 2300.0),
+        ("u", 320.0, 900.0),
+        ("e", 480.0, 1900.0),
+        ("o", 500.0, 900.0),
+    ];
+    let f0 = 180.0;
+    let rate = 44_100u32;
+    let write = |name: &str, f1: f64, f2: f64, click: f64| -> std::io::Result<()> {
+        let mut w = hound::WavWriter::create(
+            dir.join(name),
+            hound::WavSpec {
+                channels: 1,
+                sample_rate: rate,
+                bits_per_sample: 16,
+                sample_format: hound::SampleFormat::Int,
+            },
+        )
+        .map_err(std::io::Error::other)?;
+        let mut seed = 12345u32;
+        for i in 0..(rate as usize * 6 / 10) {
+            let t = i as f64 / rate as f64;
+            let mut v = 0.0;
+            for h in 1..=30 {
+                let hz = f0 * h as f64;
+                let peak = |f: f64, bw: f64| 1.0 / (1.0 + ((hz - f) / bw).powi(2));
+                let amp = (peak(f1, 120.0) + 0.6 * peak(f2, 180.0) + 0.05) / (h as f64).sqrt();
+                v += (std::f64::consts::TAU * hz * t).sin() * amp;
+            }
+            v *= 0.12 * (1.0 - (t - 0.3).abs().min(0.3) / 0.35);
+            if t < click {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                v = ((seed >> 16) as f64 / 32768.0 - 1.0) * 0.15;
+            }
+            w.write_sample((v.clamp(-1.0, 1.0) * 32767.0) as i16)
+                .map_err(std::io::Error::other)?;
+        }
+        w.finalize().map_err(std::io::Error::other)
+    };
+    let mut oto = String::new();
+    for (v, f1, f2) in vowels {
+        write(&format!("_{v}.wav"), f1, f2, 0.0)?;
+        oto.push_str(&format!("_{v}.wav={v},20,60,-400,30,20\n"));
+    }
+    write("_ka.wav", 750.0, 1200.0, 0.05)?;
+    oto.push_str("_ka.wav=ka,20,90,-400,60,20\n");
+    std::fs::write(dir.join("oto.ini"), oto)?;
+    std::fs::write(
+        dir.join("readme.txt"),
+        "KFXL Demo Voice: synthesised by KeyFrameXL for its demo song. CC0, no rights reserved.\n",
+    )
+}
+
+/// The demo song. `voice`: a voicebank folder for the vocal channel (the
+/// demo voice); `None` leaves the channel muted with its notes and lyrics.
+pub fn build(voice: Option<&Path>) -> Song {
+    let mut d = Demo::new();
+    d.build(voice);
+    d.song
+}
+
+struct Demo {
+    song: Song,
+    next_pattern: u64,
+}
+
+// Mixer inserts.
+const DRUMS: usize = 1;
+const BASS: usize = 2;
+const PAD: usize = 3;
+const ARP: usize = 4;
+const LEAD: usize = 5;
+const KEYS: usize = 6;
+const TEXTURE: usize = 7;
+const VOCAL: usize = 8;
+const SFX: usize = 9;
+const REVERB: usize = 10;
+const DELAY: usize = 11;
+
+/// Am – F – C – G, one chord a bar.
+const CHORDS: [[u8; 3]; 4] = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]];
+const ROOTS: [u8; 4] = [45, 41, 48, 43];
+
+fn fx(kind: FxKind, set: &[(usize, f32)]) -> FxSlot {
+    let mut s = FxSlot::new(kind);
+    for &(i, v) in set {
+        s.params[i] = v;
+    }
+    s
+}
+
+impl Demo {
+    fn new() -> Self {
+        let mut song = Song::default();
+        song.instruments.clear();
+        song.patterns.clear();
+        song.tempo = TEMPO;
+        song.info.title = "KeyFrameXL Demo".into();
+        song.info.author = "KeyFrameXL".into();
+        song.info.genre = "Electronic".into();
+        song.info.comments = "The showcase song, generated by keyframexl write-demo. CC0.".into();
+        Demo {
+            song,
+            next_pattern: 1,
+        }
+    }
+
+    fn pattern(&mut self, name: &str, bars: i64) -> u64 {
+        let id = self.next_pattern;
+        self.next_pattern += 1;
+        let mut p = Pattern::new(id, name);
+        p.length = bars * BAR;
+        self.song.patterns.push(p.into());
+        id
+    }
+
+    fn note(&mut self, pattern: u64, ch: u64, at: Tick, len: Tick, pitch: u8, vel: u8) -> u64 {
+        self.song
+            .add_note(pattern, Note::new(ch, at, len.max(STEP / 4), pitch, vel))
+    }
+
+    fn clip(&mut self, pattern: u64, bar: i64, track: u32) {
+        self.song.clips.push(Clip::new(pattern, bar * BAR, track));
+    }
+
+    fn tide(&mut self, name: &str, preset: &str, insert: usize) -> u64 {
+        let i = SynthPatch::PRESETS
+            .iter()
+            .position(|p| *p == preset)
+            .unwrap_or_else(|| panic!("no Tide preset {preset}"));
+        let ch = self.song.add_channel(
+            name,
+            InstrumentKind::Synth {
+                patch: SynthPatch::factory(i),
+            },
+        );
+        self.route(ch, insert);
+        ch
+    }
+
+    fn forge(&mut self, name: &str, patch: crate::forge::ForgePatch, insert: usize) -> u64 {
+        let ch = self.song.add_channel(
+            name,
+            InstrumentKind::Forge {
+                sound: ForgeSound::new(patch),
+            },
+        );
+        self.route(ch, insert);
+        ch
+    }
+
+    fn route(&mut self, ch: u64, insert: usize) {
+        if let Some(i) = self.song.instruments.iter_mut().find(|i| i.id == ch) {
+            i.mixer = insert as u16;
+        }
+    }
+
+    fn insert(&mut self, at: usize, name: &str, fx: Vec<FxSlot>, sends: &[(usize, f32)]) {
+        let t = &mut self.song.mixer[at];
+        t.name = name.into();
+        t.fx = fx;
+        t.sends = sends
+            .iter()
+            .map(|&(to, level)| Send {
+                to: to as u16,
+                level,
+            })
+            .collect();
+    }
+
+    fn automation(&mut self, name: &str, target: Target, points: &[(i64, f32)], track: u32) {
+        let id = self.pattern(name, BARS);
+        let env = Envelope {
+            target,
+            playback: Playback::Clip,
+            points: points
+                .iter()
+                .map(|&(tick, value)| Point {
+                    tick,
+                    value,
+                    tension: 0.0,
+                })
+                .collect(),
+        };
+        if let Some(p) = self.song.pattern_mut(id) {
+            p.automation = Some(env);
+        }
+        self.clip(id, 0, track);
+    }
+
+    fn build(&mut self, voice: Option<&Path>) {
+        self.mixer();
+        let core = |id: &str| Kit::Core.piece(id).expect("kit piece").patch;
+        let kick = self.forge("Kick", core("kick_909"), DRUMS);
+        let snare = self.forge("Snare", core("snare"), DRUMS);
+        let hat = self.forge("Hat", core("hat_closed"), DRUMS);
+        let clap = self.forge("Clap", core("clap"), DRUMS);
+        let bass = self.tide("Bass", "Pluck Bass", BASS);
+        let sub = self.tide("Sub", "Pure Sub", BASS);
+        let pad = self.tide("Pad", "Wide Pad", PAD);
+        let arp = self.tide("Arp", "Arp Pluck", ARP);
+        let lead = self.tide("Lead", "Space Lead", LEAD);
+        let keys = self.tide("Keys", "Glass Keys", KEYS);
+        let bell = self.tide("Bell", "Glass Bell", KEYS);
+        let texture = self.song.add_sampler("Texture");
+        self.route(texture, TEXTURE);
+        let _ = self.song.set_sampler_preset(texture, texture_preset());
+        let vocal = self.song.add_channel(
+            "Vocal",
+            InstrumentKind::Vocal {
+                voice: crate::vocal::Voice::new(
+                    &voice
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                    VOICE_NAME,
+                ),
+            },
+        );
+        if let Some(v) = self.song.instruments.iter_mut().find(|i| i.id == vocal) {
+            v.muted = voice.is_none();
+        }
+        self.route(vocal, VOCAL);
+        let riser = self.forge("Riser", Recipe::Lib(17).patch(), SFX); // Charge
+        let impact = self.forge("Impact", Recipe::Explosion.patch(), SFX);
+
+        // ---- Patterns
+        let drums = self.pattern("Drums", 2);
+        for bar in 0..2 {
+            let b = bar * BAR;
+            for step in [0, 8, 10] {
+                self.note(
+                    drums,
+                    kick,
+                    b + step * STEP,
+                    STEP,
+                    60,
+                    if step == 0 { 120 } else { 95 },
+                );
+            }
+            for step in [4, 12] {
+                self.note(drums, snare, b + step * STEP, STEP, 60, 110);
+                self.note(drums, clap, b + step * STEP, STEP, 60, 70);
+            }
+            for step in 0..16 {
+                let vel = if step % 4 == 2 { 105 } else { 70 };
+                self.note(drums, hat, b + step * STEP, STEP, 60, vel);
+            }
+        }
+        let fill = self.pattern("Fill", 1);
+        for step in 0..16 {
+            self.note(fill, snare, step * STEP, STEP, 60, 50 + step as u8 * 4);
+        }
+        self.note(fill, kick, 0, STEP, 60, 120);
+
+        let low = self.pattern("Bass", 4);
+        let harmony = self.pattern("Chords", 4);
+        let arps = self.pattern("Arp", 4);
+        let stabs = self.pattern("Keys", 4);
+        for (bar, (chord, root)) in CHORDS.iter().zip(ROOTS).enumerate() {
+            let b = bar as i64 * BAR;
+            for step in [0, 3, 6, 8, 11, 14] {
+                let p = if step == 6 || step == 14 {
+                    root + 12
+                } else {
+                    root
+                };
+                self.note(low, bass, b + step * STEP, 2 * STEP, p - 12, 100);
+            }
+            self.note(low, sub, b, 16 * STEP, root - 12, 90);
+            for &p in chord {
+                self.note(harmony, pad, b, 16 * STEP, p, 75);
+                self.note(stabs, keys, b + 2 * STEP, 2 * STEP, p + 12, 70);
+                self.note(stabs, keys, b + 10 * STEP, 2 * STEP, p + 12, 60);
+            }
+            for step in 0..16 {
+                let tone = chord[step as usize % 3] + if step % 8 >= 4 { 24 } else { 12 };
+                self.note(arps, arp, b + step * STEP, STEP, tone, 75);
+            }
+        }
+        let theme = self.pattern("Lead", 4);
+        let melody: [(i64, i64, u8); 10] = [
+            (0, 6, 76),
+            (6, 2, 74),
+            (8, 8, 72),
+            (16, 6, 72),
+            (22, 2, 74),
+            (24, 8, 76),
+            (32, 4, 79),
+            (36, 4, 76),
+            (40, 8, 74),
+            (52, 12, 71),
+        ];
+        for (at, len, p) in melody {
+            self.note(theme, lead, at * STEP, len * STEP, p, 95);
+        }
+        let song_line = self.pattern("Vocal", 4);
+        let words: [(i64, i64, u8, &str); 12] = [
+            (0, 4, 69, "a"),
+            (4, 4, 72, "o"),
+            (8, 8, 76, "i"),
+            (16, 4, 72, "ka"),
+            (20, 4, 71, "e"),
+            (24, 8, 69, "a"),
+            (32, 4, 72, "u"),
+            (36, 4, 74, "o"),
+            (40, 8, 76, "a"),
+            (48, 4, 74, "ka"),
+            (52, 4, 72, "e"),
+            (56, 8, 69, "a"),
+        ];
+        for (at, len, p, l) in words {
+            let id = self.note(song_line, vocal, at * STEP, len * STEP, p, 100);
+            if let Some(pat) = self.song.pattern_mut(song_line) {
+                pat.lyrics.insert(id, l.into());
+            }
+        }
+        let chimes = self.pattern("Bell", 4);
+        for (at, p) in [(0, 81), (24, 76), (40, 79), (56, 72)] {
+            self.note(chimes, bell, at * STEP, 8 * STEP, p, 60);
+        }
+        let air = self.pattern("Texture", 4);
+        self.note(air, texture, 0, 4 * BAR, 60, 80);
+        let rise = self.pattern("Riser", 1);
+        self.note(rise, riser, 0, STEP, crate::forge::ROOT_KEY, 100);
+        let boom = self.pattern("Impact", 1);
+        self.note(boom, impact, 0, STEP, crate::forge::ROOT_KEY, 110);
+
+        // ---- Arrangement (track per part)
+        let tracks = [
+            "Drums", "Bass", "Chords", "Arp", "Keys", "Lead", "Vocal", "Bell", "Texture", "FX",
+        ];
+        self.song.tracks = tracks
+            .iter()
+            .map(|n| Track {
+                name: (*n).into(),
+                ..Default::default()
+            })
+            .collect();
+        let sections = |from: i64, to: i64, step: i64| (from..to).step_by(step as usize);
+        for bar in sections(4, 12, 2)
+            .chain(sections(12, 20, 2))
+            .chain(sections(24, 30, 2))
+        {
+            self.clip(drums, bar, 0);
+        }
+        self.clip(fill, 19, 0);
+        for bar in sections(4, 20, 4).chain(sections(24, 28, 4)) {
+            self.clip(low, bar, 1);
+        }
+        for bar in sections(0, 32, 4) {
+            self.clip(harmony, bar, 2);
+        }
+        for bar in sections(4, 20, 4).chain(sections(24, 28, 4)) {
+            self.clip(arps, bar, 3);
+            self.clip(stabs, bar, 4);
+        }
+        for bar in [12, 16, 24] {
+            self.clip(theme, bar, 5);
+        }
+        for bar in [12, 16, 24] {
+            self.clip(song_line, bar, 6);
+        }
+        for bar in [0, 20, 28] {
+            self.clip(chimes, bar, 7);
+        }
+        for bar in [0, 20, 28] {
+            self.clip(air, bar, 8);
+        }
+        self.clip(rise, 19, 9);
+        self.clip(boom, 30, 9);
+        // The last 4 bars of the final section, then the outro bell.
+        self.clip(theme, 28, 5);
+
+        // ---- Automation (own tracks below the parts)
+        let bar = |b: i64| b * BAR;
+        self.automation(
+            "Pad filter",
+            Target::FxParam {
+                track: PAD as u16,
+                slot: 2,
+                param: 1,
+            },
+            &[
+                (0, 300.0),
+                (bar(8), 3500.0),
+                (bar(20), 800.0),
+                (bar(24), 2500.0),
+                (bar(32), 1200.0),
+            ],
+            10,
+        );
+        self.automation(
+            "Master fade",
+            Target::MixerVolume { track: 0 },
+            // In only: past its clip a fader goes back to where it stands.
+            &[(0, 0.0), (bar(2), 0.85), (bar(32), 0.85)],
+            11,
+        );
+        self.automation(
+            "Vocal delay",
+            Target::FxMix {
+                track: VOCAL as u16,
+                slot: 2,
+            },
+            &[
+                (0, 0.1),
+                (bar(12), 0.35),
+                (bar(20), 0.1),
+                (bar(24), 0.35),
+                (bar(32), 0.35),
+            ],
+            12,
+        );
+        let mut pan = Vec::new();
+        for k in 0..=8 {
+            pan.push((bar(4 * k), if k % 2 == 0 { -0.25 } else { 0.25 }));
+        }
+        self.automation("Lead pan", Target::ChannelPan { inst: lead }, &pan, 13);
+
+        // ---- Sections
+        self.song.markers = [
+            (0, "Intro"),
+            (4, "Verse"),
+            (12, "Chorus"),
+            (20, "Break"),
+            (24, "Final"),
+            (30, "Outro"),
+        ]
+        .iter()
+        .map(|&(b, name)| Marker {
+            tick: b * BAR,
+            name: name.into(),
+        })
+        .collect();
+        self.song.loop_range = Some((12 * BAR, 20 * BAR));
+    }
+
+    fn mixer(&mut self) {
+        let comp = |thr: f32, ratio: f32| fx(FxKind::Compressor, &[(0, thr), (1, ratio)]);
+        self.insert(
+            DRUMS,
+            "Drums",
+            vec![
+                FxSlot::new(FxKind::ParamEq),
+                comp(-16.0, 3.0),
+                FxSlot::new(FxKind::SoftClipper),
+            ],
+            &[(REVERB, 0.1)],
+        );
+        let mut duck = comp(-28.0, 6.0);
+        duck.sidechain = Some(DRUMS as u16);
+        self.insert(BASS, "Bass", vec![FxSlot::new(FxKind::ParamEq), duck], &[]);
+        self.insert(
+            PAD,
+            "Pad",
+            vec![
+                FxSlot::new(FxKind::Chorus),
+                FxSlot::new(FxKind::Stereo),
+                fx(FxKind::Filter, &[(0, 0.0), (1, 1200.0), (2, 15.0)]),
+            ],
+            &[(REVERB, 0.35), (DELAY, 0.1)],
+        );
+        self.insert(
+            ARP,
+            "Arp",
+            vec![
+                fx(FxKind::Delay, &[(0, 3.0), (1, 30.0), (4, 20.0)]),
+                FxSlot::new(FxKind::AutoPan),
+            ],
+            &[(REVERB, 0.15), (DELAY, 0.25)],
+        );
+        self.insert(
+            LEAD,
+            "Lead",
+            vec![
+                FxSlot::new(FxKind::StereoDelay),
+                fx(FxKind::Reverb, &[(4, 20.0)]),
+            ],
+            &[(REVERB, 0.2), (DELAY, 0.2)],
+        );
+        self.insert(
+            KEYS,
+            "Keys",
+            vec![FxSlot::new(FxKind::TiltEq), FxSlot::new(FxKind::Chorus)],
+            &[(REVERB, 0.15)],
+        );
+        let mut crush = FxSlot::new(FxKind::Bitcrusher);
+        crush.mix = 0.25;
+        self.insert(
+            TEXTURE,
+            "Texture",
+            vec![fx(FxKind::Filter, &[(0, 0.0), (1, 6000.0)]), crush.clone()],
+            &[(REVERB, 0.4), (DELAY, 0.15)],
+        );
+        self.insert(
+            VOCAL,
+            "Vocal",
+            vec![
+                FxSlot::new(FxKind::ParamEq),
+                comp(-18.0, 3.0),
+                fx(FxKind::Delay, &[(0, 3.0), (1, 35.0)]),
+                fx(FxKind::Reverb, &[(4, 25.0)]),
+            ],
+            &[(REVERB, 0.25), (DELAY, 0.15)],
+        );
+        let mut grit = FxSlot::new(FxKind::Bitcrusher);
+        grit.mix = 0.15;
+        self.insert(
+            SFX,
+            "SFX",
+            vec![grit, FxSlot::new(FxKind::Limiter)],
+            &[(REVERB, 0.3)],
+        );
+        self.insert(REVERB, "Reverb", vec![FxSlot::new(FxKind::RoomReverb)], &[]);
+        self.insert(
+            DELAY,
+            "Delay",
+            vec![fx(
+                FxKind::Delay,
+                &[(0, 3.0), (1, 40.0), (4, 100.0), (5, 0.0)],
+            )],
+            &[],
+        );
+        self.song.mixer[0].fx = vec![
+            FxSlot::new(FxKind::ParamEq),
+            FxSlot::new(FxKind::Multiband),
+            FxSlot::new(FxKind::Limiter),
+        ];
+    }
+}
+
+/// Tape hiss and a breathy tone: two looping zones of generated noise.
+fn texture_preset() -> SamplePreset {
+    let rate = 44_100u32;
+    let len = rate as usize * 2;
+    let mut seed = 0x5eed_u32;
+    let mut lp = [0.0f32; 2];
+    let frames: Vec<[f32; 2]> = (0..len)
+        .map(|i| {
+            let mut f = [0.0f32; 2];
+            for (c, s) in f.iter_mut().enumerate() {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                let white = (seed >> 8) as f32 / (1u32 << 24) as f32 * 2.0 - 1.0;
+                lp[c] += 0.05 * (white - lp[c]);
+                *s = lp[c] * 0.6;
+            }
+            // Fade the loop ends into each other.
+            let edge = (i.min(len - i) as f32 / 2205.0).min(1.0);
+            [f[0] * edge, f[1] * edge]
+        })
+        .collect();
+    let mut preset = SamplePreset::from_sample("Tape air", rate, frames);
+    if let Some(z) = preset.zones.first_mut() {
+        z.loop_mode = crate::sampler::LoopMode::Continuous;
+        z.loop_start = 2205;
+        z.loop_end = len - 2205;
+        z.high = 64;
+        let mut high = z.clone();
+        high.low = 65;
+        high.high = 127;
+        high.tune_cents = 1200.0;
+        preset.zones.push(high);
+    }
+    preset
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_demo_uses_every_part_and_holds_together() {
+        let dir = tempfile::tempdir().unwrap();
+        write_voice(dir.path()).unwrap();
+        let song = build(Some(dir.path()));
+        song.validate().unwrap();
+        let kinds = |f: &dyn Fn(&InstrumentKind) -> bool| {
+            song.instruments.iter().filter(|i| f(&i.kind)).count()
+        };
+        assert!(kinds(&|k| matches!(k, InstrumentKind::Synth { .. })) >= 6);
+        assert!(kinds(&|k| matches!(k, InstrumentKind::Forge { .. })) >= 4);
+        assert_eq!(kinds(&|k| matches!(k, InstrumentKind::Vocal { .. })), 1);
+        assert!(
+            song.instruments
+                .iter()
+                .any(|i| i.sampler_preset().is_some_and(|p| p.zones.len() >= 2))
+        );
+        let autos: Vec<_> = song
+            .patterns
+            .iter()
+            .filter_map(|p| p.automation.as_ref())
+            .collect();
+        assert_eq!(autos.len(), 4);
+        assert!(song.mixer[1..=11].iter().all(|m| !m.fx.is_empty()));
+        assert!(
+            song.mixer
+                .iter()
+                .any(|m| m.fx.iter().any(|s| s.sidechain.is_some()))
+        );
+        assert_eq!(song.markers.len(), 6);
+        assert!(song.clips.len() >= 20);
+        let secs = crate::render::main_frames(&song, 0, true) as f64 / 48_000.0;
+        assert!((72.0..90.0).contains(&secs), "{secs} s");
+        let lyric = song.patterns.iter().find(|p| !p.lyrics.is_empty()).unwrap();
+        assert!(
+            lyric
+                .lyrics
+                .values()
+                .all(|l| ["a", "i", "u", "e", "o", "ka"].contains(&l.as_str()))
+        );
+        // Saves and opens as itself.
+        let bytes = crate::project_io::to_bytes(&song).unwrap();
+        assert!(bytes.len() < 8 << 20, "{} bytes", bytes.len());
+        let back = crate::project_io::parse(&bytes).unwrap();
+        assert_eq!(back.clips.len(), song.clips.len());
+    }
+
+    #[test]
+    fn the_chorus_sounds_without_clipping() {
+        let mut song = build(None);
+        // Bars 12..14 only (the full render is the ignored test below).
+        song.loop_range = Some((12 * BAR, 14 * BAR));
+        let audio = crate::engine::render(&song, 1, true, 22_050);
+        let peak = audio
+            .iter()
+            .map(|f| f[0].abs().max(f[1].abs()))
+            .fold(0.0, f32::max);
+        assert!(peak > 0.05 && peak <= 1.0, "peak {peak}");
+    }
+
+    /// `cargo test --release --lib -- --ignored --nocapture demo_full_render`
+    #[test]
+    #[ignore]
+    fn demo_full_render() {
+        let dir = tempfile::tempdir().unwrap();
+        write_voice(dir.path()).unwrap();
+        let song = build(Some(dir.path()));
+        let audio = crate::engine::render(&song, 1, true, 48_000);
+        let peak = audio
+            .iter()
+            .map(|f| f[0].abs().max(f[1].abs()))
+            .fold(0.0, f32::max);
+        eprintln!("{:.1} s, peak {peak:.3}", audio.len() as f64 / 48_000.0);
+        assert!(peak > 0.1 && peak <= 1.0);
+    }
+
+    #[test]
+    fn the_vocal_sings_the_demo_voice() {
+        let dir = tempfile::tempdir().unwrap();
+        write_voice(dir.path()).unwrap();
+        let (map, missing) = crate::vocal::host::render_all(&build(Some(dir.path())), 48_000);
+        assert!(missing.is_empty(), "{missing:?}");
+        assert!(!map.song.starts.is_empty(), "phrases rendered");
+        assert!(
+            map.song
+                .starts
+                .values()
+                .all(|p| p.data.iter().any(|v| v.abs() > 0.01))
+        );
+    }
+}

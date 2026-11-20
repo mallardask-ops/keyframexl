@@ -518,7 +518,15 @@ impl App {
         }
         // Zoom: horizontal pixels per bar, Ctrl+wheel over the grid.
         let zoom_id = ui.id().with("bar-w");
-        let mut bar_w: f32 = ui.data(|d| d.get_temp::<f32>(zoom_id)).unwrap_or(MIN_BAR_W);
+        // Captures may start zoomed: KFXL_CAPTURE_BAR_W=px.
+        static START_W: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+        let start_w = *START_W.get_or_init(|| {
+            std::env::var("KFXL_CAPTURE_BAR_W")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(MIN_BAR_W)
+        });
+        let mut bar_w: f32 = ui.data(|d| d.get_temp::<f32>(zoom_id)).unwrap_or(start_w);
         // Track height (FL: Alt+wheel over the tracks, or drag a header's lower edge).
         let lane_id = egui::Id::new("kfxl-pl-lane-h");
         let mut lane_h: f32 = ui

@@ -733,6 +733,9 @@ impl App {
         if item(ui, tr.help_welcome, "", true, "") {
             self.welcome_open = true;
         }
+        if item(ui, "Demo song", "", true, "") {
+            self.open_demo_song();
+        }
         ui.separator();
         if item(ui, "Keyboard shortcuts", "F1", true, "") {
             self.show_shortcuts = true;
@@ -757,6 +760,24 @@ impl App {
             ui.ctx()
                 .data_mut(|d| d.insert_temp(egui::Id::new("about-open"), true));
         }
+    }
+
+    /// The showcase song as a new, unsaved project (its voice joins the voicebanks).
+    pub(crate) fn open_demo_song(&mut self) {
+        let voice = keyframexl::demo::voice_dir();
+        let voice = match keyframexl::demo::write_voice(&voice) {
+            Ok(()) => Some(voice),
+            Err(e) => {
+                self.say(
+                    Tone::Bad,
+                    format!("Demo voice not written ({e}): the vocal stays muted"),
+                );
+                None
+            }
+        };
+        let song = keyframexl::demo::build(voice.as_deref());
+        self.load_welcome_song(song, "Demo song: 32 bars, press Space", false, None);
+        self.set_song_mode(true);
     }
 
     /// FL F12: close every window of this workspace.

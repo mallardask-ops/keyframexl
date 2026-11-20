@@ -216,6 +216,30 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .save(&args[2])?;
             println!("Wrote {}", args[2]);
         }
+        // The showcase song as a project (and its demo voice beside the voicebanks).
+        Some("write-demo") if args.len() == 3 => {
+            let voice = keyframexl::demo::voice_dir();
+            keyframexl::demo::write_voice(&voice)?;
+            let song = keyframexl::demo::build(Some(&voice));
+            keyframexl::project_io::save(&song, std::path::Path::new(&args[2]))?;
+            println!("Wrote {} (voice: {})", args[2], voice.display());
+        }
+        // The showcase song rendered to a 48 kHz WAV.
+        Some("render-demo-song") if args.len() == 3 => {
+            let dir = std::env::temp_dir().join(format!("kfxl-demo-voice-{}", std::process::id()));
+            keyframexl::demo::write_voice(&dir)?;
+            let song = keyframexl::demo::build(Some(&dir));
+            let audio = keyframexl::engine::render(&song, 1, true, 48_000);
+            keyframexl::render::write_wav_at(
+                std::path::Path::new(&args[2]),
+                &audio,
+                keyframexl::render::Format::Wav16,
+                true,
+                48_000,
+            )?;
+            let _ = std::fs::remove_dir_all(&dir);
+            println!("Wrote {} ({:.1} s)", args[2], audio.len() as f64 / 48_000.0);
+        }
         Some("render-demo") if args.len() == 3 => {
             keyframexl::write_wav(&args[2], &keyframexl::demo())?;
             println!("Wrote {}", args[2]);
