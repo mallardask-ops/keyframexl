@@ -32,6 +32,13 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 - New README screenshots, all taken from the demo song
   (`scripts/ux/shots.sh`).
 
+- **FL Studio live link window**: a state (not running, starting,
+  connected, check, error), the measured delay, gaps and queue, whether FL
+  has the MIDI input open, a *Reconnect* button, and a check of what FLEX
+  needs in FL's Wine prefix (vkd3d-proton, Verdana) with a warning for
+  FL 2026 on stock Wine. One link channel at a time. See
+  [docs/fl-link.md](docs/fl-link.md).
+
 ### Fixes
 - **Forge export levels.** Export no longer normalises every file to −1 dB
   by default; each recipe is made at its category's level, so a UI click

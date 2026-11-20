@@ -18,7 +18,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -130,11 +130,34 @@ pub fn fl_prefix() -> PathBuf {
     }
 }
 
-/// What `open_fl` is doing, for the channel window.
-pub static PROGRESS: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+/// What the last action of the channel window (open FL, reconnect) is doing.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum Progress {
+    #[default]
+    Idle,
+    Busy(String),
+    Failed(String),
+}
 
-fn say(s: impl Into<String>) {
-    *PROGRESS.lock().unwrap_or_else(|e| e.into_inner()) = s.into();
+static PROGRESS: std::sync::Mutex<Progress> = std::sync::Mutex::new(Progress::Idle);
+
+fn set_progress(p: Progress) {
+    *PROGRESS.lock().unwrap_or_else(|e| e.into_inner()) = p;
+}
+
+pub fn progress() -> Progress {
+    PROGRESS.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// Run `job` off the UI thread, showing `what` while it works and its error after.
+pub fn run(what: &str, job: impl FnOnce() -> Result<(), String> + Send + 'static) {
+    set_progress(Progress::Busy(what.into()));
+    std::thread::spawn(move || {
+        set_progress(match job() {
+            Ok(()) => Progress::Idle,
+            Err(e) => Progress::Failed(e),
+        });
+    });
 }
 
 pub(crate) fn wine_cmd(bin: &Path, prefix: &Path) -> Command {
@@ -244,7 +267,9 @@ fn copy_registry(src: &Path, bin: &Path, dst: &Path) -> Result<(), String> {
         if add.is_empty() {
             continue;
         }
-        say("Copying FL Studio's settings and registration…");
+        set_progress(Progress::Busy(
+            "Copying FL Studio's settings and registration…".into(),
+        ));
         let mut to = std::fs::OpenOptions::new()
             .append(true)
             .open(dst.join(file))
@@ -269,7 +294,7 @@ pub(crate) fn prepare_fl_prefix(bin: &Path, dst: &Path) -> Result<(), String> {
         // A prefix made by an older version may lack keys added since.
         return copy_registry(&src, bin, dst);
     }
-    say("Creating FL Studio's prefix…");
+    set_progress(Progress::Busy("Creating FL Studio's prefix…".into()));
     std::fs::create_dir_all(dst).map_err(|e| e.to_string())?;
     let ok = wine_cmd(bin, dst)
         .args(["wineboot", "-i"])
@@ -284,7 +309,7 @@ pub(crate) fn prepare_fl_prefix(bin: &Path, dst: &Path) -> Result<(), String> {
     if !ok.success() {
         return Err("wineboot failed for FL Studio's prefix".into());
     }
-    say("Copying FL Studio into its prefix…");
+    set_progress(Progress::Busy("Copying FL Studio into its prefix…".into()));
     let user = std::env::var("USER").unwrap_or_default();
     for dir in [
         "Program Files/Image-Line",
@@ -486,7 +511,7 @@ pub fn open_fl(project: Option<&Path>) -> Result<(), String> {
     prepare_fl_prefix(&bin, &pfx)?;
     let exe = find_fl_in(&pfx).ok_or("FL Studio was not found in the Wine prefix")?;
     ensure_sink()?;
-    say("Starting FL Studio…");
+    set_progress(Progress::Busy("Starting FL Studio…".into()));
     let key = format!(
         "HKCU\\Software\\Image-Line\\{}\\Devices\\MIDI input\\{DEVICE}",
         registry_key(&exe)
@@ -518,35 +543,282 @@ pub fn open_fl(project: Option<&Path>) -> Result<(), String> {
     }
     c.spawn()
         .map_err(|e| format!("Cannot start FL Studio: {e}"))?;
-    say("");
     Ok(())
 }
 
-/// What the channel window shows, refreshed at most once a second (it runs
-/// `pactl` and reads /proc).
-#[derive(Clone, Default)]
+/// Whether FL Studio has opened our port: the port has a subscriber that is
+/// not PipeWire's own bridge nor us (`/proc/asound/seq/clients`).
+pub fn fl_listens() -> bool {
+    std::fs::read_to_string("/proc/asound/seq/clients").is_ok_and(|s| listens_in(&s))
+}
+
+fn listens_in(clients: &str) -> bool {
+    // Client number → name, and the subscribers of our port.
+    let mut names = std::collections::HashMap::new();
+    let mut ours = false;
+    let mut in_port = false;
+    let mut subscribers = Vec::new();
+    for line in clients.lines() {
+        if let Some(rest) = line.strip_prefix("Client ") {
+            let (n, name) = rest.split_once(" : ").unwrap_or_default();
+            let name = name.split('"').nth(1).unwrap_or_default();
+            names.insert(n.trim().to_string(), name.to_string());
+            ours = name == CLIENT;
+            in_port = false;
+        } else if let Some(rest) = line.trim_start().strip_prefix("Port ") {
+            in_port = ours && rest.contains(&format!("\"{PORT}\""));
+        } else if in_port && let Some(to) = line.trim_start().strip_prefix("Connecting To:") {
+            subscribers.extend(
+                to.split(',')
+                    .filter_map(|c| Some(c.trim().split(':').next()?.to_string())),
+            );
+        }
+    }
+    subscribers.iter().any(|c| {
+        let name = names.get(c).map(String::as_str).unwrap_or_default();
+        !name.starts_with("PipeWire") && name != CLIENT
+    })
+}
+
+/// What FLEX needs in FL's prefix, as reported to work (vkd3d-proton's
+/// Direct3D 12 and the Verdana font), and the versions involved.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Preflight {
+    /// FL Studio's version year (2025, 2021), 0 when FL is not installed.
+    pub fl: u32,
+    pub vkd3d: bool,
+    pub verdana: bool,
+    /// `wine --version` of the Wine FL runs on.
+    pub wine: Option<String>,
+}
+
+impl Preflight {
+    pub fn of(prefix: &Path) -> Self {
+        let win = prefix.join("drive_c/windows");
+        // Wine's own d3d12.dll is a builtin stub; vkd3d-proton's is not.
+        let vkd3d = ["system32", "syswow64"].iter().any(|d| {
+            std::fs::read(win.join(d).join("d3d12.dll")).is_ok_and(|b| {
+                !b.windows(16).any(|w| w == b"Wine builtin DLL")
+                    && !b.windows(20).any(|w| w == b"Wine placeholder DLL")
+            })
+        });
+        let verdana = std::fs::read_dir(win.join("Fonts"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|f| {
+                f.file_name()
+                    .to_string_lossy()
+                    .to_lowercase()
+                    .starts_with("verdana")
+            });
+        let wine = system_wine().and_then(|bin| {
+            let out = Command::new(bin.join("wine"))
+                .arg("--version")
+                .output()
+                .ok()?;
+            Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        });
+        Self {
+            fl: find_fl_in(prefix).map(|e| fl_version(&e)).unwrap_or(0),
+            vkd3d,
+            verdana,
+            wine,
+        }
+    }
+
+    /// FL 2026.1.4 and later fail Wine's certificate check without Wine
+    /// MR 11824 (in DAW-GE-Proton11-6c, not in stock Wine yet).
+    pub fn needs_cert_patch(&self) -> bool {
+        self.fl >= 2026
+    }
+}
+
+/// What the channel window shows. A monitor thread refreshes it once a
+/// second (it runs `pactl` and reads /proc), so the UI never waits.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Status {
     pub fl: bool,
     pub port: bool,
+    /// FL has our port open as a MIDI input.
+    pub listens: bool,
     pub sink: bool,
+    pub stats: Option<Stats>,
+    pub preflight: Preflight,
 }
 
+static STATUS: std::sync::Mutex<Option<Status>> = std::sync::Mutex::new(None);
+
 pub fn status() -> Status {
-    static CACHE: std::sync::Mutex<Option<(std::time::Instant, Status)>> =
-        std::sync::Mutex::new(None);
-    let mut c = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((at, s)) = c.as_ref()
-        && at.elapsed() < Duration::from_secs(1)
-    {
-        return s.clone();
+    static MONITOR: std::sync::Once = std::sync::Once::new();
+    MONITOR.call_once(|| {
+        let _ = std::thread::Builder::new()
+            .name("fl-link-status".into())
+            .spawn(|| {
+                let mut preflight = Preflight::default();
+                let mut tick = 0u64;
+                loop {
+                    if tick.is_multiple_of(10) {
+                        preflight = Preflight::of(&fl_prefix());
+                    }
+                    let s = Status {
+                        fl: fl_running(),
+                        port: port_present(),
+                        listens: fl_listens(),
+                        sink: sink_index().is_some(),
+                        stats: read_stats(),
+                        preflight: preflight.clone(),
+                    };
+                    *STATUS.lock().unwrap_or_else(|e| e.into_inner()) = Some(s);
+                    std::thread::sleep(Duration::from_secs(1));
+                    tick += 1;
+                }
+            });
+    });
+    STATUS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .unwrap_or_default()
+}
+
+/// The channel's state, from what the monitor saw and the last action.
+#[derive(Clone, Debug, PartialEq)]
+pub enum LinkState {
+    /// FL Studio is not running.
+    Off,
+    Starting(String),
+    Connected,
+    /// Works, but something needs a look.
+    Degraded(String),
+    Error(String),
+}
+
+pub fn state(st: &Status, p: &Progress) -> LinkState {
+    if let Progress::Failed(e) = p {
+        return LinkState::Error(e.clone());
     }
-    let s = Status {
-        fl: fl_running(),
-        port: port_present(),
-        sink: sink_index().is_some(),
-    };
-    *c = Some((std::time::Instant::now(), s.clone()));
-    s
+    if let Some(e) = st.stats.as_ref().and_then(|s| s.error.clone()) {
+        return LinkState::Error(e);
+    }
+    if let Progress::Busy(what) = p {
+        return LinkState::Starting(what.clone());
+    }
+    if !st.fl {
+        return LinkState::Off;
+    }
+    if !st.port {
+        return LinkState::Error("The MIDI port is missing: reload this channel.".into());
+    }
+    if !st.sink {
+        return LinkState::Error("The link's sound sink is missing: press Reconnect.".into());
+    }
+    if !st.listens {
+        return LinkState::Degraded(
+            "FL Studio has not opened the \"KeyFrameXL - FL link\" input: restart FL Studio."
+                .into(),
+        );
+    }
+    match &st.stats {
+        None => LinkState::Degraded("The link channel is not running.".into()),
+        Some(s) if s.recent_underruns > 0 => LinkState::Degraded(format!(
+            "The sound has gaps ({} in the last seconds): close other programs or raise the buffer.",
+            s.recent_underruns
+        )),
+        Some(_) => LinkState::Connected,
+    }
+}
+
+/// Bring the link back after PipeWire restarted or FL moved its output:
+/// the port relay, the sink, FL's streams on it. Blocks (`pactl`).
+pub fn reconnect() -> Result<(), String> {
+    ensure_relay()?;
+    ensure_sink()?;
+    capture_fl_streams();
+    if !port_present() {
+        return Err("The MIDI port is missing: reload this channel.".into());
+    }
+    if fl_running() && !fl_listens() {
+        return Err(
+            "FL Studio has not opened the \"KeyFrameXL - FL link\" input: restart FL Studio."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+/// What a running link measured. The link may run in a plugin process of
+/// its own, so it writes these to a small file the channel window reads.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Stats {
+    /// Note → sound in frames, 0 = not measured yet.
+    pub round_trip: u32,
+    pub rate: u32,
+    pub underruns: u32,
+    /// Underruns over the last ~5 s.
+    pub recent_underruns: u32,
+    /// Frames of FL's sound queued past the block being played.
+    pub queue: u32,
+    /// Seconds since FL's sound was last heard (None: not yet).
+    pub silent_secs: Option<f32>,
+    /// The capture could not run (no `parec`).
+    pub error: Option<String>,
+}
+
+impl Stats {
+    pub fn round_trip_ms(&self) -> Option<f32> {
+        (self.round_trip > 0 && self.rate > 0)
+            .then(|| self.round_trip as f32 * 1000.0 / self.rate as f32)
+    }
+
+    fn to_text(&self) -> String {
+        format!(
+            "round_trip {}\nrate {}\nunderruns {}\nrecent {}\nqueue {}\nsilent {}\nerror {}\n",
+            self.round_trip,
+            self.rate,
+            self.underruns,
+            self.recent_underruns,
+            self.queue,
+            self.silent_secs.map(|s| s.to_string()).unwrap_or_default(),
+            self.error.clone().unwrap_or_default()
+        )
+    }
+
+    fn from_text(t: &str) -> Self {
+        let mut s = Self::default();
+        for line in t.lines() {
+            let (k, v) = line.split_once(' ').unwrap_or((line, ""));
+            match k {
+                "round_trip" => s.round_trip = v.parse().unwrap_or(0),
+                "rate" => s.rate = v.parse().unwrap_or(0),
+                "underruns" => s.underruns = v.parse().unwrap_or(0),
+                "recent" => s.recent_underruns = v.parse().unwrap_or(0),
+                "queue" => s.queue = v.parse().unwrap_or(0),
+                "silent" => s.silent_secs = v.parse().ok(),
+                "error" if !v.is_empty() => s.error = Some(v.to_string()),
+                _ => {}
+            }
+        }
+        s
+    }
+}
+
+fn stats_path() -> PathBuf {
+    dirs::runtime_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("keyframexl-fl-link.stats")
+}
+
+/// The running link's numbers; None when no link wrote them in the last 3 s.
+fn read_stats() -> Option<Stats> {
+    let path = stats_path();
+    let fresh = std::fs::metadata(&path)
+        .ok()?
+        .modified()
+        .ok()?
+        .elapsed()
+        .is_ok_and(|d| d < Duration::from_secs(3));
+    fresh.then(|| Stats::from_text(&std::fs::read_to_string(path).unwrap_or_default()))
 }
 
 /// Status the link threads publish (the instance's own process).
@@ -556,6 +828,42 @@ struct Shared {
     /// Round trip note → sound in frames, 0 = not measured yet.
     round_trip: AtomicU32,
     underruns: AtomicU32,
+    queue: AtomicU32,
+    /// Frames played, and the frame FL's sound was last heard at (+1; 0 = never).
+    clock: AtomicU64,
+    last_loud: AtomicU64,
+    error: std::sync::Mutex<Option<String>>,
+}
+
+/// Write the link's numbers for the channel window twice a second.
+fn publish_stats(rate: u32, s: &Shared) {
+    let mut history = std::collections::VecDeque::new();
+    while !s.stop.load(Ordering::Relaxed) {
+        let underruns = s.underruns.load(Ordering::Relaxed);
+        history.push_back(underruns);
+        if history.len() > 10 {
+            history.pop_front();
+        }
+        let clock = s.clock.load(Ordering::Relaxed);
+        let loud = s.last_loud.load(Ordering::Relaxed);
+        let stats = Stats {
+            round_trip: s.round_trip.load(Ordering::Relaxed),
+            rate,
+            underruns,
+            recent_underruns: underruns - history.front().copied().unwrap_or(underruns),
+            queue: s.queue.load(Ordering::Relaxed),
+            silent_secs: (loud > 0)
+                .then(|| clock.saturating_sub(loud - 1) as f32 / rate.max(1) as f32),
+            error: s.error.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+        };
+        let path = stats_path();
+        let tmp = path.with_extension("tmp");
+        if std::fs::write(&tmp, stats.to_text()).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    let _ = std::fs::remove_file(stats_path());
 }
 
 /// The engine side of a link channel.
@@ -614,6 +922,11 @@ impl FlLink {
             .map_err(|e| e.to_string())?;
         let s = shared.clone();
         std::thread::Builder::new()
+            .name("fl-link-stats".into())
+            .spawn(move || publish_stats(rate, &s))
+            .map_err(|e| e.to_string())?;
+        let s = shared.clone();
+        std::thread::Builder::new()
             .name("fl-link-audio".into())
             .spawn(move || capture(rate, &s, &mut audio_tx))
             .map_err(|e| e.to_string())?;
@@ -659,9 +972,18 @@ fn capture(rate: u32, s: &Shared, out: &mut rtrb::Producer<f32>) {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn();
-        let Ok(mut child) = child else {
-            std::thread::sleep(Duration::from_secs(1));
-            continue;
+        let mut child = match child {
+            Ok(c) => {
+                *s.error.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                c
+            }
+            Err(e) => {
+                *s.error.lock().unwrap_or_else(|e| e.into_inner()) = Some(format!(
+                    "Cannot run parec ({e}): install pulseaudio-utils (or your distribution's parec)."
+                ));
+                std::thread::sleep(Duration::from_secs(1));
+                continue;
+            }
         };
         let mut pipe = child.stdout.take().expect("piped");
         let mut buf = vec![0u8; 4096];
@@ -691,6 +1013,8 @@ fn stop_child(c: &mut Child) {
 impl Drop for FlLink {
     fn drop(&mut self) {
         self.shared.stop.store(true, Ordering::Relaxed);
+        // The stats thread may not get to it before the process ends.
+        let _ = std::fs::remove_file(stats_path());
         if let Some(m) = self.module {
             let _ = Command::new("pactl")
                 .args(["unload-module", &m.to_string()])
@@ -747,6 +1071,9 @@ impl Processor for FlLink {
             Err(_) => io[..take].fill(0.0),
         }
         io[take..].fill(0.0);
+        self.shared
+            .queue
+            .store((self.audio.slots() / 2) as u32, Ordering::Relaxed);
         if take > 0 {
             self.flowing = true;
         }
@@ -776,6 +1103,11 @@ impl Processor for FlLink {
             (Some(_), None) => {}
             (None, _) => {}
         }
+        if let Some(i) = loud {
+            self.shared
+                .last_loud
+                .store(self.clock + i as u64 + 1, Ordering::Relaxed);
+        }
         self.quiet = if loud.is_some() {
             0
         } else {
@@ -789,6 +1121,7 @@ impl Processor for FlLink {
             self.pending = None;
         }
         self.clock += frames as u64;
+        self.shared.clock.store(self.clock, Ordering::Relaxed);
     }
 
     fn latency(&self, _frames: usize) -> usize {
@@ -923,5 +1256,133 @@ mod tests {
     fn link_path_is_recognised() {
         assert!(is_link(Path::new(PATH)));
         assert!(!is_link(Path::new("/home/u/.vst3/x.vst3")));
+    }
+
+    #[test]
+    fn fl_listening_means_a_subscriber_other_than_pipewire() {
+        let clients = "Client 128 : \"KeyFrameXL\" [User Legacy]
+  Port   0 : \"FL link\" (R-e-) [Out]
+    Connecting To: 144:0
+  Port   1 : \"FL link in\" (-We-) [In]
+Client 144 : \"PipeWire-System\" [User Legacy]
+  Port   0 : \"input\" (rwe-) [In/Out]
+";
+        assert!(!listens_in(clients));
+        let fl = clients.replace("144:0\n", "144:0, 150:0\n")
+            + "Client 150 : \"FL64\" [User Legacy]\n  Port   0 : \"in\" (-We-) [In]\n";
+        assert!(listens_in(&fl));
+        assert!(!listens_in(""));
+    }
+
+    #[test]
+    fn link_state_follows_status_and_progress() {
+        let good = Status {
+            fl: true,
+            port: true,
+            listens: true,
+            sink: true,
+            stats: Some(Stats {
+                round_trip: 2688,
+                rate: 48_000,
+                ..Stats::default()
+            }),
+            preflight: Preflight::default(),
+        };
+        let idle = Progress::Idle;
+        assert_eq!(state(&good, &idle), LinkState::Connected);
+        assert_eq!(
+            state(
+                &Status {
+                    fl: false,
+                    ..good.clone()
+                },
+                &idle
+            ),
+            LinkState::Off
+        );
+        assert!(matches!(
+            state(&Status::default(), &Progress::Busy("Starting".into())),
+            LinkState::Starting(_)
+        ));
+        assert!(matches!(
+            state(&good, &Progress::Failed("no wine".into())),
+            LinkState::Error(e) if e == "no wine"
+        ));
+        assert!(matches!(
+            state(
+                &Status {
+                    listens: false,
+                    ..good.clone()
+                },
+                &idle
+            ),
+            LinkState::Degraded(_)
+        ));
+        assert!(matches!(
+            state(
+                &Status {
+                    sink: false,
+                    ..good.clone()
+                },
+                &idle
+            ),
+            LinkState::Error(_)
+        ));
+        let gappy = Status {
+            stats: Some(Stats {
+                recent_underruns: 3,
+                ..Stats::default()
+            }),
+            ..good.clone()
+        };
+        assert!(matches!(state(&gappy, &idle), LinkState::Degraded(m) if m.contains('3')));
+        let broken = Status {
+            stats: Some(Stats {
+                error: Some("Cannot run parec".into()),
+                ..Stats::default()
+            }),
+            ..good
+        };
+        assert!(matches!(state(&broken, &idle), LinkState::Error(_)));
+    }
+
+    #[test]
+    fn stats_survive_the_file_and_give_milliseconds() {
+        let s = Stats {
+            round_trip: 2688,
+            rate: 48_000,
+            underruns: 4,
+            recent_underruns: 1,
+            queue: 128,
+            silent_secs: Some(0.25),
+            error: Some("Cannot run parec (x)".into()),
+        };
+        assert_eq!(Stats::from_text(&s.to_text()), s);
+        assert_eq!(s.round_trip_ms(), Some(56.0));
+        assert_eq!(Stats::default().round_trip_ms(), None);
+        let none = Stats::default();
+        assert_eq!(Stats::from_text(&none.to_text()), none);
+    }
+
+    #[test]
+    fn preflight_finds_vkd3d_and_verdana() {
+        let dir = tempfile::tempdir().unwrap();
+        let win = dir.path().join("drive_c/windows");
+        std::fs::create_dir_all(win.join("system32")).unwrap();
+        std::fs::create_dir_all(win.join("Fonts")).unwrap();
+        std::fs::write(win.join("system32/d3d12.dll"), b"MZ...Wine builtin DLL...").unwrap();
+        let p = Preflight::of(dir.path());
+        assert!(!p.vkd3d && !p.verdana && p.fl == 0);
+        std::fs::write(win.join("system32/d3d12.dll"), b"MZ vkd3d-proton").unwrap();
+        std::fs::write(win.join("Fonts/Verdana.ttf"), b"font").unwrap();
+        let fl = dir
+            .path()
+            .join("drive_c/Program Files/Image-Line/FL Studio 2026");
+        std::fs::create_dir_all(&fl).unwrap();
+        std::fs::write(fl.join("FL64.exe"), b"MZ").unwrap();
+        let p = Preflight::of(dir.path());
+        assert!(p.vkd3d && p.verdana);
+        assert_eq!(p.fl, 2026);
+        assert!(p.needs_cert_patch());
     }
 }

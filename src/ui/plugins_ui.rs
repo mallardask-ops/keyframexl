@@ -1517,6 +1517,23 @@ impl App {
 
     /// FL: Add → instrument plugin. A new channel on Master, selected, editor opens.
     pub(crate) fn add_plugin_channel(&mut self, s: &Scanned) {
+        // FL plays only its selected channel: a second link would play the
+        // same sound twice.
+        if crate::fl_link::is_link(&s.path)
+            && let Some(other) = self.song.instruments.iter().find(|i| {
+                matches!(&i.kind, InstrumentKind::Plugin { plugin }
+                    if crate::fl_link::is_link(std::path::Path::new(&plugin.path)))
+            })
+        {
+            self.say(
+                Tone::Bad,
+                format!(
+                    "\"{}\" already links to FL Studio. One link channel at a time: FL plays only its selected channel.",
+                    other.name
+                ),
+            );
+            return;
+        }
         self.checkpoint();
         let pid = self.song.next_plugin_id();
         let name = self.song.free_name(&s.name);
@@ -2123,68 +2140,180 @@ impl App {
 }
 
 /// The FL Studio live link channel: FL runs on its own (FLEX works only
-/// there); this shows whether the pieces are up and starts FL.
+/// there); this shows the link's state, its measured delay and what FLEX
+/// needs, and starts or reconnects it.
 fn fl_link_panel(ui: &mut egui::Ui) {
-    let st = crate::fl_link::status();
-    let progress = crate::fl_link::PROGRESS
-        .lock()
-        .map(|p| p.clone())
-        .unwrap_or_default();
+    use crate::fl_link::{self as fl, LinkState};
+    let st = fl::status();
+    let progress = fl::progress();
+    let state = fl::state(&st, &progress);
     ui.ctx()
-        .request_repaint_after(std::time::Duration::from_secs(1));
+        .request_repaint_after(std::time::Duration::from_millis(500));
     ui.add_space(6.0);
-    ui.label(
-        RichText::new("FL Studio (live link)")
-            .font(t::medium(15.0))
-            .color(t::TEXT),
-    );
-    ui.label(RichText::new("This channel plays FL Studio's selected channel: its notes go to FL, FL's sound comes back here. Use it for FLEX and other Image-Line instruments that do not work inside FL Studio VSTi.").font(t::sans(13.0)).color(t::MUTED));
-    ui.add_space(8.0);
-    for (ok, what, on, off) in [
-        (st.fl, "FL Studio", "running", "not running"),
-        (
-            st.port,
-            "Notes",
-            "port \"KeyFrameXL - FL link\" ready",
-            "port missing (reload this channel)",
-        ),
-        (
-            st.sink,
-            "Sound",
-            "FL plays into this channel",
-            "no link sink",
-        ),
-    ] {
-        ui.horizontal(|ui| {
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("FL Studio (live link)")
+                .font(t::medium(15.0))
+                .color(t::TEXT),
+        );
+        let (word, color) = match &state {
+            LinkState::Off => ("Not running", None),
+            LinkState::Starting(_) => ("Starting", Some(t::WAIT)),
+            LinkState::Connected => ("Connected", Some(t::OK)),
+            LinkState::Degraded(_) => ("Check", Some(t::WAIT)),
+            LinkState::Error(_) => ("Error", Some(t::BAD)),
+        };
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(RichText::new(word).font(t::sans(13.0)).color(t::TEXT));
             let (r, _) = ui.allocate_exact_size(egui::vec2(14.0, 18.0), egui::Sense::hover());
-            kit::led(ui.painter(), r.center(), 3.5, ok.then_some(t::OK));
-            ui.label(RichText::new(what).font(t::sans(13.0)).color(t::TEXT));
-            ui.label(
-                RichText::new(if ok { on } else { off })
-                    .font(t::sans(13.0))
-                    .color(if ok { t::MUTED } else { t::FAINT }),
-            );
+            kit::led(ui.painter(), r.center(), 4.0, color);
         });
+    });
+    ui.label(RichText::new("This channel plays FL Studio's selected channel: its notes go to FL, FL's sound comes back here. Use it for FLEX and other Image-Line instruments that do not work inside FL Studio VSTi.").font(t::sans(13.0)).color(t::MUTED));
+    match &state {
+        LinkState::Starting(m) | LinkState::Degraded(m) => {
+            ui.label(RichText::new(m).font(t::sans(13.0)).color(t::WAIT));
+        }
+        LinkState::Error(m) => {
+            ui.label(RichText::new(m).font(t::sans(13.0)).color(t::BAD));
+        }
+        _ => {}
     }
     ui.add_space(8.0);
-    let busy = !progress.is_empty() && !progress.starts_with("Could not");
-    if kit::button(ui, "Open FL Studio", kit::Kind::Primary, !st.fl && !busy).clicked() {
-        *crate::fl_link::PROGRESS
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = "Starting FL Studio…".into();
-        std::thread::spawn(|| {
-            if let Err(e) = crate::fl_link::open_fl(None) {
-                *crate::fl_link::PROGRESS
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner()) = format!("Could not start FL Studio: {e}");
+    let stats = st.stats.clone().unwrap_or_default();
+    let delay = match stats.round_trip_ms() {
+        Some(ms) => format!("{ms:.0} ms ({} frames), compensated", stats.round_trip),
+        None => "not measured yet: play a note".into(),
+    };
+    let flow = match stats.silent_secs {
+        _ if st.stats.is_none() => "the link channel is not running".to_string(),
+        None => "no sound from FL yet".to_string(),
+        Some(s) if s < 1.0 => "FL's sound is coming in".to_string(),
+        Some(s) => format!("last sound {s:.0} s ago"),
+    };
+    let rows: [(Option<bool>, &str, String); 7] = [
+        (
+            Some(st.fl),
+            "FL Studio",
+            if st.fl { "running" } else { "not running" }.into(),
+        ),
+        (
+            Some(st.port),
+            "Notes",
+            if st.port {
+                "port \"KeyFrameXL - FL link\" ready"
+            } else {
+                "port missing (reload this channel)"
+            }
+            .into(),
+        ),
+        (
+            st.fl.then_some(st.listens),
+            "FL listens",
+            if !st.fl {
+                "—"
+            } else if st.listens {
+                "FL has the input open"
+            } else {
+                "not yet: restart FL Studio"
+            }
+            .into(),
+        ),
+        (
+            Some(st.sink),
+            "Sound",
+            if st.sink {
+                "FL plays into this channel"
+            } else {
+                "no link sink (Reconnect makes it)"
+            }
+            .into(),
+        ),
+        (
+            st.stats
+                .as_ref()
+                .map(|s| s.silent_secs.is_some_and(|x| x < 5.0)),
+            "Flow",
+            flow,
+        ),
+        (st.stats.as_ref().map(|s| s.round_trip > 0), "Delay", delay),
+        (
+            st.stats.as_ref().map(|s| s.recent_underruns == 0),
+            "Gaps",
+            format!(
+                "{} in all, {} lately · {} frames queued",
+                stats.underruns, stats.recent_underruns, stats.queue
+            ),
+        ),
+    ];
+    egui::Grid::new("fl-link-rows")
+        .num_columns(3)
+        .spacing(egui::vec2(8.0, 4.0))
+        .show(ui, |ui| {
+            for (ok, what, text) in rows {
+                let (r, _) = ui.allocate_exact_size(egui::vec2(14.0, 18.0), egui::Sense::hover());
+                kit::led(
+                    ui.painter(),
+                    r.center(),
+                    3.5,
+                    ok.map(|ok| if ok { t::OK } else { t::WAIT }),
+                );
+                ui.label(RichText::new(what).font(t::sans(13.0)).color(t::TEXT));
+                ui.label(RichText::new(text).font(t::sans(13.0)).color(t::MUTED));
+                ui.end_row();
             }
         });
-    }
-    if !progress.is_empty() {
-        ui.label(RichText::new(progress).font(t::sans(12.0)).color(t::MUTED));
-    }
+    ui.add_space(8.0);
+    let busy = matches!(progress, fl::Progress::Busy(_));
+    ui.horizontal(|ui| {
+        if kit::button(ui, "Open FL Studio", kit::Kind::Primary, !st.fl && !busy).clicked() {
+            fl::run("Starting FL Studio…", || fl::open_fl(None));
+        }
+        if kit::button(ui, "Reconnect", kit::Kind::Ghost, !busy)
+            .on_hover_text("Make the port and the sound sink again and move FL's sound onto it")
+            .clicked()
+        {
+            fl::run("Reconnecting…", fl::reconnect);
+        }
+    });
     ui.add_space(10.0);
-    ui.label(RichText::new("In FL: add FLEX to the Channel rack and keep its channel selected. FL hears this channel's notes on its MIDI input \"KeyFrameXL - FL link\" (switched on for you). The input stays while KeyFrameXL runs; restart FL only if it was opened before the first FL link channel of this session.").font(t::sans(12.0)).color(t::FAINT));
+    // FLEX: what is known to make it start under Wine, checked in FL's prefix.
+    let pf = &st.preflight;
+    ui.label(RichText::new("FLEX").font(t::medium(13.0)).color(t::TEXT));
+    let ready = pf.vkd3d && pf.verdana;
+    ui.label(
+        RichText::new(if ready {
+            "FL's Wine prefix has vkd3d-proton and Verdana, which FLEX is reported to need."
+        } else {
+            "FLEX is reported to start under Wine only when FL's prefix has vkd3d-proton (its d3d12.dll in system32) and the Verdana font; without them it crashes while loading. Nothing is installed for you."
+        })
+        .font(t::sans(12.0))
+        .color(if ready { t::MUTED } else { t::WAIT }),
+    );
+    ui.label(
+        RichText::new(format!(
+            "vkd3d-proton: {} · Verdana: {} · {} · {}",
+            if pf.vkd3d { "yes" } else { "no" },
+            if pf.verdana { "yes" } else { "no" },
+            match pf.fl {
+                0 => "FL Studio not found".to_string(),
+                v => format!("FL Studio {v}"),
+            },
+            pf.wine.as_deref().unwrap_or("system Wine not found"),
+        ))
+        .font(t::mono(11.0))
+        .color(t::FAINT),
+    );
+    if pf.needs_cert_patch() {
+        ui.label(RichText::new("FL Studio 2026.1.4 and later do not start on stock Wine (\"The validity of the program could not be verified\"): use a Wine with merge request 11824, such as DAW-GE-Proton11-6c, or FL 2026.1.3.").font(t::sans(12.0)).color(t::WAIT));
+    }
+    ui.label(
+        RichText::new("FLEX does not run inside FL Studio VSTi; this link is the way to use it.")
+            .font(t::sans(12.0))
+            .color(t::FAINT),
+    );
+    ui.add_space(8.0);
+    ui.label(RichText::new("In FL: add the instrument to the Channel rack and keep its channel selected. FL hears this channel's notes on its MIDI input \"KeyFrameXL - FL link\" (switched on for you). The input stays while KeyFrameXL runs; restart FL only if it was opened before the first FL link channel of this session. One link channel at a time: FL plays only its selected channel.").font(t::sans(12.0)).color(t::FAINT));
     ui.label(
         RichText::new("Not in WAV export yet: FL cannot render faster than real time.")
             .font(t::sans(12.0))

@@ -1013,6 +1013,14 @@ impl App {
                 );
             }
             app.rack_sel = vec![id];
+            // The plugin is the channel the Instrument capture shows.
+            app.instrument = id;
+            app.roll_inst = id;
+            for cmd in &mut app.win_cmds {
+                if let Cmd::Show(Tab::Instrument { id: shown }) = cmd {
+                    *shown = id;
+                }
+            }
             if std::env::var_os("KFXL_CAPTURE_PLUGIN_EDITOR").is_some() {
                 app.plugins_frame();
                 if let Some(l) = app.plugins.live.get_mut(&pid) {

@@ -67,4 +67,14 @@ and FL's sound comes back into the channel. *Open FL Studio* starts it
 under Wine; in FL, add the instrument to the channel rack and keep its
 channel selected.
 
+The window shows the link's state, the measured delay (compensated by the
+engine), gaps in the sound, and whether FL has opened the input. *Reconnect*
+brings the link back after PipeWire restarts. One link channel at a time:
+FL plays only its selected channel.
+
+FLEX is reported to start under Wine only when FL's prefix has
+vkd3d-proton and the Verdana font; the window checks both. FL Studio
+2026.1.4 and later need a Wine with merge request 11824 (such as
+DAW-GE-Proton11-6c) to start at all.
+
 The link plays in real time only: it is not in WAV export yet.
