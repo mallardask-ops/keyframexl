@@ -189,6 +189,9 @@ pub struct App {
     /// Tab with keyboard/pointer focus at the start of this frame.
     pub(crate) focus: Option<Tab>,
     persist: bool,
+    startup_maximized: bool,
+    startup_maximize_nudge_done: bool,
+    startup_maximize_frames: u8,
     layout_text: String,
     layout_saved_at: f64,
     pub(crate) selected: u64,
@@ -922,6 +925,13 @@ impl App {
             app.files = files::Files::new(true);
             app.layout_text = app.ws.to_text();
             app.persist = true;
+            app.startup_maximized = app.settings.general.window_maximized;
+            cc.egui_ctx.data_mut(|d| {
+                d.insert_temp(
+                    egui::Id::new("decorations-applied"),
+                    app.settings.general.system_title_bar,
+                );
+            });
             app.recent = project::load_recent();
             app.midi_in = Some(crate::midi_in::MidiIn::new(app.settings.midi.clone()));
             app.midi_out = Some(crate::midi_out::MidiOut::new());
@@ -1178,6 +1188,9 @@ impl App {
             win_cmds: Vec::new(),
             focus: None,
             persist: false,
+            startup_maximized: false,
+            startup_maximize_nudge_done: false,
+            startup_maximize_frames: 0,
             layout_text: String::new(),
             layout_saved_at: 0.0,
             selected,
@@ -3295,6 +3308,102 @@ impl App {
             });
         }
     }
+
+    /// Update `settings.general` from the current viewport state. Returns
+    /// `(geom_dirty, close_requested, now)`.
+    pub(crate) fn record_window_geometry(
+        &mut self,
+        ctx: &egui::Context,
+        z: f32,
+    ) -> (bool, bool, f64) {
+        let (inner_size, maximized, fullscreen, minimized, close_requested, now) = ctx.input(|i| {
+            let vp = i.viewport();
+            // Wayland does not expose `inner_position`, so `vp.inner_rect` is `None`
+            // there; `i.screen_rect()` still holds the logical inner size.
+            let inner_size = vp
+                .inner_rect
+                .map(|r| r.size())
+                .unwrap_or_else(|| i.screen_rect().size());
+            (
+                inner_size,
+                vp.maximized.unwrap_or(false),
+                vp.fullscreen.unwrap_or(false),
+                vp.minimized.unwrap_or(false),
+                vp.close_requested(),
+                i.time,
+            )
+        });
+        let mut geom_dirty = false;
+        if self.startup_maximized {
+            if maximized {
+                self.startup_maximized = false;
+            } else {
+                // `eframe` maps the root window after frame 1; resend once
+                // visible in case the WM/compositor dropped pre-map maximize.
+                if self.startup_maximize_frames >= 1 && !self.startup_maximize_nudge_done {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+                    self.startup_maximize_nudge_done = true;
+                    ctx.request_repaint();
+                }
+                self.startup_maximize_frames = self.startup_maximize_frames.saturating_add(1);
+                if now > 1.5 && self.startup_maximize_frames > 15 {
+                    self.startup_maximized = false;
+                }
+            }
+        }
+        if !minimized
+            && !self.startup_maximized
+            && maximized != self.settings.general.window_maximized
+        {
+            self.settings.general.window_maximized = maximized;
+            geom_dirty = true;
+        }
+        if !minimized
+            && !maximized
+            && !fullscreen
+            && inner_size.x.is_finite()
+            && inner_size.y.is_finite()
+            && inner_size.x > 200.0
+            && inner_size.y > 200.0
+        {
+            let logical = [(inner_size.x * z).round(), (inner_size.y * z).round()];
+            if let Some(sanitized) = crate::settings::GeneralSettings::sanitize_window_size(logical)
+            {
+                let changed = self.settings.general.window_size.is_none_or(|old| {
+                    (old[0] - sanitized[0]).abs() >= 2.0 || (old[1] - sanitized[1]).abs() >= 2.0
+                });
+                if changed {
+                    self.settings.general.window_size = Some(sanitized);
+                    geom_dirty = true;
+                }
+            }
+        }
+        (geom_dirty, close_requested, now)
+    }
+
+    /// Record logical inner size (when neither maximized nor fullscreen) and
+    /// maximized state into settings, saving after a short settle delay or
+    /// immediately on close.
+    pub(crate) fn update_window_geometry(&mut self, ctx: &egui::Context, z: f32) {
+        if !self.persist {
+            return;
+        }
+        let (geom_dirty, close_requested, now) = self.record_window_geometry(ctx, z);
+        let save_id = egui::Id::new("kfxl-window-geom-save");
+        if close_requested {
+            if geom_dirty || ctx.data(|d| d.get_temp::<f64>(save_id)).is_some() {
+                ctx.data_mut(|d| d.remove::<f64>(save_id));
+                self.save_settings();
+            }
+        } else if geom_dirty {
+            ctx.data_mut(|d| d.insert_temp(save_id, now));
+        } else if let Some(since) = ctx.data(|d| d.get_temp::<f64>(save_id))
+            && now - since > 0.8
+        {
+            ctx.data_mut(|d| d.remove::<f64>(save_id));
+            self.save_settings();
+        }
+    }
 }
 
 impl eframe::App for App {
@@ -3499,44 +3608,7 @@ impl eframe::App for App {
         }
         if self.persist {
             self.ws.zoom = z;
-            // Remember the OS logical window size (inner_rect is in egui points,
-            // which divide by zoom_factor, so multiply back by z for ViewportBuilder).
-            let (inner_rect, maximized, now) = ctx.input(|i| {
-                (
-                    i.viewport().inner_rect,
-                    i.viewport().maximized.unwrap_or(false),
-                    i.time,
-                )
-            });
-            let mut geom_dirty = false;
-            if maximized != self.settings.general.window_maximized {
-                self.settings.general.window_maximized = maximized;
-                geom_dirty = true;
-            }
-            if !maximized
-                && let Some(r) = inner_rect
-                && r.is_finite()
-                && r.width() > 200.0
-                && r.height() > 200.0
-            {
-                let logical = [(r.width() * z).round(), (r.height() * z).round()];
-                let changed = self.settings.general.window_size.is_none_or(|old| {
-                    (old[0] - logical[0]).abs() >= 2.0 || (old[1] - logical[1]).abs() >= 2.0
-                });
-                if changed {
-                    self.settings.general.window_size = Some(logical);
-                    geom_dirty = true;
-                }
-            }
-            let save_id = egui::Id::new("kfxl-window-geom-save");
-            if geom_dirty {
-                ctx.data_mut(|d| d.insert_temp(save_id, now));
-            } else if let Some(since) = ctx.data(|d| d.get_temp::<f64>(save_id))
-                && now - since > 0.8
-            {
-                ctx.data_mut(|d| d.remove::<f64>(save_id));
-                self.save_settings();
-            }
+            self.update_window_geometry(ctx, z);
         }
         self.prune_tabs();
         self.autosave_layout(ctx.input(|i| i.time));

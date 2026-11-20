@@ -360,6 +360,32 @@ pub const UI_SCALES: [f32; 12] = [
 pub const UI_SCALE_MIN: f32 = 0.5;
 pub const UI_SCALE_MAX: f32 = 2.0;
 
+pub const DEFAULT_WINDOW_SIZE: [f32; 2] = [1366.0, 768.0];
+pub const MIN_WINDOW_SIZE: [f32; 2] = [1180.0, 680.0];
+pub const MAX_WINDOW_SIZE: [f32; 2] = [7680.0, 4320.0];
+
+impl GeneralSettings {
+    /// Reject non-finite or absurdly small sizes and clamp valid ones to the
+    /// supported logical window bounds.
+    pub fn sanitize_window_size(size: [f32; 2]) -> Option<[f32; 2]> {
+        let [w, h] = size;
+        if !w.is_finite() || !h.is_finite() || w < 600.0 || h < 400.0 {
+            return None;
+        }
+        Some([
+            w.clamp(MIN_WINDOW_SIZE[0], MAX_WINDOW_SIZE[0]),
+            h.clamp(MIN_WINDOW_SIZE[1], MAX_WINDOW_SIZE[1]),
+        ])
+    }
+
+    /// Logical window size to restore on startup, falling back to the default.
+    pub fn restored_window_size(&self) -> [f32; 2] {
+        self.window_size
+            .and_then(Self::sanitize_window_size)
+            .unwrap_or(DEFAULT_WINDOW_SIZE)
+    }
+}
+
 /// The next offered size above (`up`) or below the current one.
 pub fn step_ui_scale(current: f32, up: bool) -> f32 {
     let next = if up {
@@ -542,5 +568,44 @@ mod tests {
         assert_eq!(old.general.last_update_check, 0);
         assert_eq!(old.general.skipped_version, None);
         assert_eq!(old.midi.clock, MidiClockMode::Off);
+    }
+
+    #[test]
+    fn window_geometry_round_trip_and_sanitization() {
+        let mut s = Settings::default();
+        assert_eq!(s.general.window_size, None);
+        assert!(!s.general.window_maximized);
+        assert_eq!(s.general.restored_window_size(), DEFAULT_WINDOW_SIZE);
+
+        s.general.window_size = Some([1920.0, 1080.0]);
+        s.general.window_maximized = true;
+        let text = ron::ser::to_string(&s).unwrap();
+        let back: Settings = ron::from_str(&text).unwrap();
+        assert_eq!(back.general.window_size, Some([1920.0, 1080.0]));
+        assert!(back.general.window_maximized);
+        assert_eq!(back.general.restored_window_size(), [1920.0, 1080.0]);
+
+        let old: Settings = ron::from_str("(general: (autosave_minutes: 2))").unwrap();
+        assert_eq!(old.general.window_size, None);
+        assert!(!old.general.window_maximized);
+
+        assert_eq!(GeneralSettings::sanitize_window_size([0.0, 0.0]), None);
+        assert_eq!(GeneralSettings::sanitize_window_size([300.0, 200.0]), None);
+        assert_eq!(
+            GeneralSettings::sanitize_window_size([f32::NAN, 800.0]),
+            None
+        );
+        assert_eq!(
+            GeneralSettings::sanitize_window_size([f32::INFINITY, 800.0]),
+            None
+        );
+        assert_eq!(
+            GeneralSettings::sanitize_window_size([800.0, 500.0]),
+            Some(MIN_WINDOW_SIZE)
+        );
+        assert_eq!(
+            GeneralSettings::sanitize_window_size([9999.0, 9999.0]),
+            Some(MAX_WINDOW_SIZE)
+        );
     }
 }
