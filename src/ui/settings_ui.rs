@@ -619,12 +619,12 @@ impl App {
                         ui.label(
                             RichText::new(page.label())
                                 .font(t::medium(20.0))
-                                .color(t::TEXT),
+                                .color(t::text()),
                         );
                         ui.label(
                             RichText::new(page.blurb())
                                 .font(t::sans(13.0))
-                                .color(t::MUTED),
+                                .color(t::muted()),
                         );
                     });
                 let body_h = (ui.available_height() - 52.0).max(120.0);
@@ -667,7 +667,7 @@ impl App {
                 ui.painter().hline(
                     bar.x_range(),
                     bar.top(),
-                    egui::Stroke::new(1.0_f32, t::EDGE),
+                    egui::Stroke::new(1.0_f32, t::edge()),
                 );
                 let mut foot = ui.new_child(
                     egui::UiBuilder::new()
@@ -680,7 +680,7 @@ impl App {
                 foot.label(
                     RichText::new("Changes apply and save at once.")
                         .font(t::sans(12.0))
-                        .color(t::FAINT),
+                        .color(t::faint()),
                 );
             });
         });
@@ -861,14 +861,14 @@ impl App {
                             let load = a.load.load(Ordering::Relaxed) as f64 / 10.0;
                             let overruns = a.overruns.load(Ordering::Relaxed);
                             ui.horizontal(|ui| {
-                                badge(ui, r.backend.label(), t::TEXT);
+                                badge(ui, r.backend.label(), t::text());
                                 ui.label(
                                     RichText::new(format!(
                                         "{} · {} Hz · {buf}",
                                         r.device, r.rate
                                     ))
                                     .font(t::sans(13.0))
-                                    .color(t::TEXT),
+                                    .color(t::text()),
                                 );
                             });
                             ui.label(
@@ -877,7 +877,7 @@ impl App {
                                     r.latency_ms()
                                 ))
                                 .font(t::mono(13.0))
-                                .color(if overruns > 0 { t::WAIT } else { t::MUTED }),
+                                .color(if overruns > 0 { t::wait() } else { t::muted() }),
                             );
                             if r.rate != s.audio.rate {
                                 ui.label(
@@ -886,7 +886,7 @@ impl App {
                                         s.audio.rate, r.rate
                                     ))
                                     .font(t::sans(12.0))
-                                    .color(t::WAIT),
+                                    .color(t::wait()),
                                 );
                             }
                             if r.fallback {
@@ -897,7 +897,7 @@ impl App {
                                         r.device
                                     ))
                                     .font(t::sans(12.0))
-                                    .color(t::WAIT),
+                                    .color(t::wait()),
                                 );
                             }
                             if a.failed.load(Ordering::Relaxed) {
@@ -908,7 +908,7 @@ impl App {
                                         why.unwrap_or_else(|| "unknown".into())
                                     ))
                                     .font(t::sans(12.0))
-                                    .color(t::BAD),
+                                    .color(t::bad()),
                                 );
                             }
                         }
@@ -916,7 +916,7 @@ impl App {
                             ui.label(
                                 RichText::new("No audio output.")
                                     .font(t::sans(13.0))
-                                    .color(t::BAD),
+                                    .color(t::bad()),
                             );
                             if let Some(rec) = rec.as_ref().filter(|r| r.armed && r.recovering()) {
                                 let now = ui.input(|i| i.time);
@@ -927,13 +927,13 @@ impl App {
                                         rec.attempts + 1
                                     ))
                                     .font(t::sans(12.0))
-                                    .color(t::WAIT),
+                                    .color(t::wait()),
                                 );
                                 if let Some(e) = &rec.last_error {
                                     ui.label(
                                         RichText::new(format!("Last error: {e}"))
                                             .font(t::sans(12.0))
-                                            .color(t::BAD),
+                                            .color(t::bad()),
                                     );
                                 }
                             }
@@ -997,7 +997,7 @@ impl App {
                 ui.label(
                     RichText::new("MIDI input is off in this run.")
                         .font(t::sans(13.0))
-                        .color(t::FAINT),
+                        .color(t::faint()),
                 );
             } else if ports.is_empty() {
                 ui.label(
@@ -1005,7 +1005,7 @@ impl App {
                         "No MIDI inputs found. Plug in a keyboard; it connects by itself.",
                     )
                     .font(t::sans(13.0))
-                    .color(t::FAINT),
+                    .color(t::faint()),
                 );
             }
             for p in &ports {
@@ -1014,11 +1014,11 @@ impl App {
                     if kit_switch(ui, &mut on) {
                         s.midi.set_on(&p.name, on);
                     }
-                    ui.label(RichText::new(&p.name).font(t::sans(13.0)).color(t::TEXT));
+                    ui.label(RichText::new(&p.name).font(t::sans(13.0)).color(t::text()));
                     let (text, color) = match (&p.error, p.connected) {
-                        (Some(e), _) => (e.clone(), t::BAD),
-                        (None, true) => ("connected".into(), t::OK),
-                        (None, false) => ("off".into(), t::FAINT),
+                        (Some(e), _) => (e.clone(), t::bad()),
+                        (None, true) => ("connected".into(), t::ok()),
+                        (None, false) => ("off".into(), t::faint()),
                     };
                     ui.label(RichText::new(text).font(t::sans(12.0)).color(color));
                 });
@@ -1036,16 +1036,16 @@ impl App {
                     panic = true;
                 }
                 let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), egui::Sense::hover());
-                kit::led(ui.painter(), r.center(), 4.0, lit.then_some(t::OK));
+                kit::led(ui.painter(), r.center(), 4.0, lit.then_some(t::ok()));
                 let from = self
                     .midi_in
                     .as_ref()
                     .and_then(|m| m.last_port.clone())
                     .map(|p| format!("activity · last: {p}"))
                     .unwrap_or_else(|| "activity".into());
-                ui.label(RichText::new(from).font(t::sans(12.0)).color(t::FAINT));
+                ui.label(RichText::new(from).font(t::sans(12.0)).color(t::faint()));
             });
-            ui.label(RichText::new("Keys play the selected channel: the focused piano roll, else the rack selection.").font(t::sans(12.0)).color(t::FAINT));
+            ui.label(RichText::new("Keys play the selected channel: the focused piano roll, else the rack selection.").font(t::sans(12.0)).color(t::faint()));
         });
         card(ui, "output devices & clock sync", |ui| {
             let out_ports = self
@@ -1057,13 +1057,13 @@ impl App {
                 ui.label(
                     RichText::new("MIDI output is off in this run.")
                         .font(t::sans(13.0))
-                        .color(t::FAINT),
+                        .color(t::faint()),
                 );
             } else if out_ports.is_empty() {
                 ui.label(
                     RichText::new("No MIDI outputs found. Connect hardware gear or a virtual port, then Rescan.")
                         .font(t::sans(13.0))
-                        .color(t::FAINT),
+                        .color(t::faint()),
                 );
             }
             for p in &out_ports {
@@ -1072,11 +1072,11 @@ impl App {
                     if kit_switch(ui, &mut on) {
                         s.midi.set_out_on(&p.name, on);
                     }
-                    ui.label(RichText::new(&p.name).font(t::sans(13.0)).color(t::TEXT));
+                    ui.label(RichText::new(&p.name).font(t::sans(13.0)).color(t::text()));
                     let (text, color) = match (&p.error, p.connected) {
-                        (Some(e), _) => (e.clone(), t::BAD),
-                        (None, true) => ("connected".into(), t::OK),
-                        (None, false) => ("off".into(), t::FAINT),
+                        (Some(e), _) => (e.clone(), t::bad()),
+                        (None, true) => ("connected".into(), t::ok()),
+                        (None, false) => ("off".into(), t::faint()),
                     };
                     ui.label(RichText::new(text).font(t::sans(12.0)).color(color));
                 });
@@ -1111,9 +1111,9 @@ impl App {
                     format!("Sending to {open} port(s) · {ticks} pulses sent")
                 };
                 ui.label(RichText::new(info).font(t::sans(12.0)).color(if open == 0 {
-                    t::WAIT
+                    t::wait()
                 } else {
-                    t::FAINT
+                    t::faint()
                 }));
             }
         });
@@ -1165,7 +1165,7 @@ impl App {
                 ui.label(
                     RichText::new(format!("{:+} semitones", s.midi.transpose))
                         .font(t::sans(13.0))
-                        .color(t::TEXT),
+                        .color(t::text()),
                 );
                 if s.midi.transpose != 0
                     && kit::tool_button(ui, "Reset", kit::Kind::Ghost, true).clicked()
@@ -1186,7 +1186,7 @@ impl App {
                     kit_switch(ui, &mut s.midi.quantize_record);
                 },
             );
-            ui.label(RichText::new("Record (R) + Play writes what you play into the selected pattern, one undo step per pass.").font(t::sans(12.0)).color(t::FAINT));
+            ui.label(RichText::new("Record (R) + Play writes what you play into the selected pattern, one undo step per pass.").font(t::sans(12.0)).color(t::faint()));
         });
         card(ui, "controller links", |ui| {
             if s.midi.bindings.is_empty() {
@@ -1195,7 +1195,7 @@ impl App {
                         "No links yet. Right-click a knob → Link to controller…, then move a knob.",
                     )
                     .font(t::sans(13.0))
-                    .color(t::FAINT),
+                    .color(t::faint()),
                 );
             } else {
                 let mut remove: Option<keyframexl::automation::Target> = None;
@@ -1205,7 +1205,7 @@ impl App {
                         ui.label(
                             RichText::new(format!("CH {} · CC {}", b.channel, b.cc))
                                 .font(t::mono(12.0))
-                                .color(t::MUTED),
+                                .color(t::muted()),
                         );
                         if kit::tool_button(ui, "×", kit::Kind::Ghost, true)
                             .on_hover_text("Forget this link")
@@ -1224,7 +1224,7 @@ impl App {
                     "A knob moves its control over the full range. One gesture is one undo step.",
                 )
                 .font(t::sans(12.0))
-                .color(t::FAINT),
+                .color(t::faint()),
             );
         });
         (panic, rescan)
@@ -1257,8 +1257,36 @@ fn general_page(ui: &mut egui::Ui, s: &mut Settings, checking_updates: bool) -> 
                 ui.label(
                     RichText::new(format!("system scale {:.0}%", native * 100.0))
                         .font(t::sans(12.0))
-                        .color(t::FAINT),
+                        .color(t::faint()),
                 );
+            },
+        );
+        row(
+            ui,
+            "Theme",
+            Some(match (s.general.theme, t::system_theme()) {
+                (crate::settings::ThemeMode::System, Some(t::Theme::Light)) => {
+                    "The desktop asks for light."
+                }
+                (crate::settings::ThemeMode::System, Some(t::Theme::Dark)) => {
+                    "The desktop asks for dark."
+                }
+                (crate::settings::ThemeMode::System, None) => {
+                    "The desktop gives no preference: dark."
+                }
+                _ => "Light or dark interface. Faceplates stay dark.",
+            }),
+            |ui| {
+                use crate::settings::ThemeMode;
+                let labels: Vec<&str> = ThemeMode::ALL.iter().map(|m| m.label()).collect();
+                let cur = ThemeMode::ALL
+                    .iter()
+                    .position(|m| *m == s.general.theme)
+                    .unwrap_or(0);
+                let (pick, _) = kit::chips(ui, "gen-theme", &labels, cur, None);
+                if let Some(i) = pick {
+                    s.general.theme = ThemeMode::ALL[i];
+                }
             },
         );
         row(
@@ -1377,7 +1405,7 @@ fn general_page(ui: &mut egui::Ui, s: &mut Settings, checking_updates: bool) -> 
             ui.label(
                 RichText::new(format!("v{}", crate::updater::CURRENT_VERSION))
                     .font(t::mono(12.5))
-                    .color(t::TEXT),
+                    .color(t::text()),
             );
             if kit::tool_button(
                 ui,
@@ -1424,12 +1452,12 @@ fn nav(ui: &mut egui::Ui, page: Page, height: f32) -> Option<Page> {
             ne: 0,
             se: 0,
         },
-        t::SIDE,
+        t::side(),
     );
     p.vline(
         col.right(),
         col.y_range(),
-        egui::Stroke::new(1.0_f32, t::EDGE),
+        egui::Stroke::new(1.0_f32, t::edge()),
     );
     let mut pick = None;
     for (i, sec) in Page::ALL.iter().enumerate() {
@@ -1440,18 +1468,18 @@ fn nav(ui: &mut egui::Ui, page: Page, height: f32) -> Option<Page> {
         let resp = ui.interact(r, ui.id().with(("settings-nav", i)), egui::Sense::click());
         let on = *sec == page;
         let fill = if on {
-            t::CTL_TOP
+            t::ctl_top()
         } else if resp.hovered() {
-            t::RAISED
+            t::raised()
         } else {
-            t::SIDE
+            t::side()
         };
         p.rect_filled(r, 7.0, fill);
         if on {
             p.rect_filled(
                 egui::Rect::from_min_size(r.left_top() + vec2(0.0, 8.0), vec2(3.0, 16.0)),
                 1.5,
-                t::BRAND,
+                t::brand(),
             );
         }
         p.text(
@@ -1459,7 +1487,7 @@ fn nav(ui: &mut egui::Ui, page: Page, height: f32) -> Option<Page> {
             Align2::LEFT_CENTER,
             sec.label(),
             t::sans(14.0),
-            if on { t::TEXT } else { t::MUTED },
+            if on { t::text() } else { t::muted() },
         );
         if resp.clicked() {
             pick = Some(*sec);
@@ -1486,8 +1514,8 @@ fn audio_summary(r: &crate::audio::Running) -> String {
 /// A small sunken label (backend name).
 fn badge(ui: &mut egui::Ui, text: &str, ink: egui::Color32) {
     egui::Frame::new()
-        .fill(t::SUNKEN)
-        .stroke(egui::Stroke::new(1.0_f32, t::EDGE))
+        .fill(t::sunken())
+        .stroke(egui::Stroke::new(1.0_f32, t::edge()))
         .corner_radius(4.0)
         .inner_margin(egui::Margin::symmetric(6, 2))
         .show(ui, |ui| {
@@ -1507,11 +1535,11 @@ pub(crate) fn card(ui: &mut egui::Ui, title: &str, body: impl FnOnce(&mut egui::
         Align2::LEFT_CENTER,
         title,
         11.0,
-        t::FAINT,
+        t::faint(),
     );
     egui::Frame::new()
-        .fill(t::SURFACE)
-        .stroke(egui::Stroke::new(1.0_f32, t::EDGE))
+        .fill(t::surface())
+        .stroke(egui::Stroke::new(1.0_f32, t::edge()))
         .corner_radius(9.0)
         .inner_margin(egui::Margin::symmetric(14, 10))
         .show(ui, |ui| {
@@ -1533,13 +1561,13 @@ pub(crate) fn row(
         ui.vertical(|ui| {
             ui.set_width(150.0);
             ui.add_space(4.0);
-            ui.label(RichText::new(name).font(t::sans(13.0)).color(t::TEXT));
+            ui.label(RichText::new(name).font(t::sans(13.0)).color(t::text()));
         });
         ui.horizontal_wrapped(|ui| control(ui));
     });
     if let Some(n) = note {
         ui.add_space(-4.0);
-        ui.label(RichText::new(n).font(t::sans(11.5)).color(t::FAINT));
+        ui.label(RichText::new(n).font(t::sans(11.5)).color(t::faint()));
     }
 }
 
@@ -1548,18 +1576,33 @@ pub(crate) fn kit_switch(ui: &mut egui::Ui, on: &mut bool) -> bool {
     let (r, resp) = ui.allocate_exact_size(vec2(36.0, 20.0), egui::Sense::click());
     let k = ui.ctx().animate_bool_with_time(resp.id, *on, 0.12);
     let p = ui.painter();
-    p.rect_filled(r, 10.0, if *on { t::BRAND_FILL } else { t::CTL_BOTTOM });
+    p.rect_filled(
+        r,
+        10.0,
+        if *on {
+            t::brand_fill()
+        } else {
+            t::ctl_bottom()
+        },
+    );
     p.rect_stroke(
         r,
         10.0,
-        egui::Stroke::new(1.0_f32, if resp.hovered() { t::STRONG } else { t::EDGE }),
+        egui::Stroke::new(
+            1.0_f32,
+            if resp.hovered() {
+                t::strong()
+            } else {
+                t::edge()
+            },
+        ),
         egui::StrokeKind::Inside,
     );
     let x = r.left() + 10.0 + k * (r.width() - 20.0);
     p.circle_filled(
         egui::pos2(x, r.center().y),
         7.0,
-        if *on { t::ON_BRAND } else { t::MUTED },
+        if *on { t::on_brand() } else { t::muted() },
     );
     if resp.clicked() {
         *on = !*on;

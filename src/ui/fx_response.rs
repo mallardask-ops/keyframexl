@@ -184,14 +184,14 @@ pub fn panel(ui: &mut Ui, kind: FxKind, params: &[f32]) {
         Align2::LEFT_TOP,
         view.title,
         t::sans(14.),
-        t::TEXT,
+        t::text(),
     );
     paint.text(
         inset.right_top(),
         Align2::RIGHT_TOP,
         view.axis,
         t::mono(10.),
-        t::MUTED,
+        t::muted(),
     );
     let plot = Rect::from_min_max(inset.min + vec2(0., 25.), inset.max);
     for i in 0..=8 {

@@ -37,7 +37,8 @@ opens on another computer. *File → Import → Import bundle…* unpacks one.
 ## Settings
 
 *Options* has four pages: **Audio**, **MIDI**, **Plugins** and
-**General**. General holds the language (English or Ukrainian), the
+**General**. General holds the theme (dark, light, or the desktop's
+choice; also in *View → Theme*), the language (English or Ukrainian), the
 Welcome screen, the interface size, autosave, *Ask on close*, the window
 system (system title bar, X11 window), what a new project loads
 (*Starter sounds*), and updates.

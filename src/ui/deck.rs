@@ -16,10 +16,10 @@ impl App {
     pub(super) fn deck(&mut self, ui: &mut Ui) {
         let rect = ui.max_rect();
         let p = ui.painter().clone();
-        p.rect_filled(rect, 0.0, t::SIDE);
+        p.rect_filled(rect, 0.0, t::side());
         p.line_segment(
             [rect.left_bottom(), rect.right_bottom()],
-            Stroke::new(1.0_f32, t::EDGE),
+            Stroke::new(1.0_f32, t::edge()),
         );
         let row1 = Rect::from_min_max(rect.min, pos2(rect.right(), rect.top() + ROW1_H));
         let row2 = Rect::from_min_max(pos2(rect.left(), row1.bottom()), rect.max);
@@ -28,7 +28,7 @@ impl App {
                 pos2(rect.left() + PAGE, row2.top()),
                 pos2(rect.right() - PAGE, row2.top()),
             ],
-            Stroke::new(1.0_f32, t::LINE),
+            Stroke::new(1.0_f32, t::line()),
         );
 
         let r1 = Rect::from_min_max(
@@ -88,7 +88,7 @@ impl App {
                 let (rect, resp) =
                     ui.allocate_exact_size(vec2(ui.available_width(), kit::TOOL_H), Sense::hover());
                 let (full, display, color) = match kit::hovered_hint(ui.ctx()) {
-                    Some(h) => (h.clone(), h, t::MUTED),
+                    Some(h) => (h.clone(), h, t::muted()),
                     None => {
                         let full = self.hint().to_string();
                         let mut seen = 0;
@@ -105,7 +105,7 @@ impl App {
                         } else {
                             full.clone()
                         };
-                        (full, short, t::FAINT)
+                        (full, short, t::faint())
                     }
                 };
                 let shown = kit::elide(ui.painter(), &display, t::sans(12.0), rect.width());
@@ -153,17 +153,17 @@ impl App {
                     label,
                     |p, face, ink| {
                         let ic = if current {
-                            t::TEXT
+                            t::text()
                         } else if lit {
                             ink
                         } else {
-                            t::FAINT
+                            t::faint()
                         };
                         kit::led(
                             p,
                             pos2(face.left() + 10.0, face.center().y),
                             2.0,
-                            lit.then_some(t::TEXT),
+                            lit.then_some(t::text()),
                         );
                         icon(p, pos2(face.left() + 18.0 + 7.0, face.center().y - 1.0), ic);
                         p.text(
@@ -171,7 +171,7 @@ impl App {
                             Align2::LEFT_CENTER,
                             label,
                             font.clone(),
-                            if lit { ink } else { t::MUTED },
+                            if lit { ink } else { t::muted() },
                         );
                         if current {
                             p.line_segment(
@@ -179,7 +179,7 @@ impl App {
                                     pos2(face.left() + 8.0, face.bottom() - 2.0),
                                     pos2(face.right() - 8.0, face.bottom() - 2.0),
                                 ],
-                                Stroke::new(1.5_f32, t::TEXT),
+                                Stroke::new(1.5_f32, t::text()),
                             );
                         }
                     },
@@ -429,9 +429,9 @@ impl App {
                 "No audio output: check PipeWire, then restart",
             ),
         };
-        let g = kit::caps_galley(ui.painter(), &text, 12.0, t::MUTED);
+        let g = kit::caps_galley(ui.painter(), &text, 12.0, t::muted());
         let (r, resp) = ui.allocate_exact_size(g.size(), Sense::hover());
-        ui.painter().galley(r.min, g, t::MUTED);
+        ui.painter().galley(r.min, g, t::muted());
         kit::bar_hint(resp, tip);
         if let Some(a) = &self.audio {
             use std::sync::atomic::Ordering;
@@ -452,8 +452,11 @@ impl App {
                     ));
             }
             let (lamp, response) = ui.allocate_exact_size(vec2(12.0, 16.0), Sense::click());
-            ui.painter()
-                .circle_filled(lamp.center(), 3.5, if lit { t::BAD } else { t::LCD_OFF });
+            ui.painter().circle_filled(
+                lamp.center(),
+                3.5,
+                if lit { t::bad() } else { t::lcd_off() },
+            );
             let response = response.on_hover_text(format!(
                 "Audio overloads: {count} since start. Click to reset."
             ));
@@ -484,11 +487,11 @@ impl App {
         let size = vec2(110.0, 32.0);
         let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
         let p = ui.painter();
-        p.rect_filled(rect, 4.0, t::SUNKEN);
+        p.rect_filled(rect, 4.0, t::sunken());
         p.rect_stroke(
             rect,
             4.0,
-            Stroke::new(1.0_f32, t::EDGE),
+            Stroke::new(1.0_f32, t::edge()),
             egui::StrokeKind::Inside,
         );
         let inner = rect.shrink2(vec2(3.0, 3.0));
@@ -496,7 +499,7 @@ impl App {
         let mid_y = inner.center().y;
         p.line_segment(
             [pos2(inner.left(), mid_y), pos2(inner.right(), mid_y)],
-            Stroke::new(1.0_f32, t::LCD_OFF),
+            Stroke::new(1.0_f32, t::lcd_off()),
         );
 
         let mut buf = [0.0f32; 1024];
@@ -529,7 +532,7 @@ impl App {
                     let y = mid_y - s * half_h;
                     pts.push(pos2(x, y));
                 }
-                let color = if peak > 0.99 { t::BAD } else { t::OK };
+                let color = if peak > 0.99 { t::bad() } else { t::ok() };
                 p.add(Shape::line(pts, Stroke::new(1.25_f32, color)));
             }
             DeckMonitor::Spectrum => {
@@ -571,11 +574,11 @@ impl App {
                         pos2(x + bw, inner.bottom()),
                     );
                     let col = if *slot > 0.92 {
-                        t::BAD
+                        t::bad()
                     } else if *slot > 0.78 {
-                        t::WAIT
+                        t::wait()
                     } else {
-                        t::ENC_BLUE
+                        t::enc_blue()
                     };
                     p.rect_filled(bar, 1.0, col);
                 }
@@ -640,7 +643,7 @@ impl App {
                 p,
                 face.right_top() + vec2(-6.0, 6.0),
                 2.5,
-                on.then_some(t::OK),
+                on.then_some(t::ok()),
             )
         };
         // Metronome: the pyramid and its arm.
@@ -652,7 +655,7 @@ impl App {
             "Metronome",
             |p, face, ink| {
                 let c = face.center() + vec2(0.0, 1.0);
-                let ink = if g.metronome { ink } else { t::FAINT };
+                let ink = if g.metronome { ink } else { t::faint() };
                 let s = Stroke::new(1.5_f32, ink);
                 p.add(Shape::closed_line(
                     vec![
@@ -690,9 +693,9 @@ impl App {
             |p, face, ink| {
                 let c = face.center() + vec2(0.0, 1.5);
                 let ink = if g.count_in || counting {
-                    if blink { t::OK } else { ink }
+                    if blink { t::ok() } else { ink }
                 } else {
-                    t::FAINT
+                    t::faint()
                 };
                 let s = Stroke::new(1.5_f32, ink);
                 p.circle_stroke(c, 8.0, s);
@@ -757,9 +760,9 @@ impl App {
             |p, face, ink| {
                 let c = face.center() + vec2(0.0, 1.0);
                 let ink = if g.wait_input || waiting {
-                    if blink { t::OK } else { ink }
+                    if blink { t::ok() } else { ink }
                 } else {
-                    t::FAINT
+                    t::faint()
                 };
                 let s = Stroke::new(1.5_f32, ink);
                 p.line_segment([c + vec2(-6.0, -9.0), c + vec2(6.0, -9.0)], s);
@@ -861,7 +864,7 @@ impl App {
             enabled,
             "Record",
             |p, face, _| {
-                let c = if on || taking { t::BRAND } else { t::FAINT };
+                let c = if on || taking { t::brand() } else { t::faint() };
                 if taking {
                     // Recording: the whole key face reads red.
                     p.circle_filled(face.center(), 11.0, c);
@@ -924,7 +927,7 @@ impl App {
             ui.label(
                 egui::RichText::new(format!("REC {}:{:02}", elapsed / 60, elapsed % 60))
                     .font(t::mono(12.0))
-                    .color(t::BRAND),
+                    .color(t::brand()),
             );
             ui.ctx().request_repaint();
         }
@@ -951,7 +954,7 @@ impl App {
         let top = well.top() + 18.0;
         let lx = well.left() + 12.0;
         // Run indicator: a lit triangle while the transport moves.
-        let run = if playing { t::LCD_ON } else { t::LCD_OFF };
+        let run = if playing { t::lcd_on() } else { t::lcd_off() };
         kit::icon_play(p, pos2(lx + 4.0, top + h / 2.0), 10.0, run);
         let x0 = lx + 16.0;
         kit::caps(
@@ -960,18 +963,18 @@ impl App {
             Align2::LEFT_TOP,
             "bar",
             12.0,
-            t::FAINT,
+            t::faint(),
         );
         let w = kit::seg_text(
             p,
             pos2(x0, top),
             h,
             &format!("{:02}", bar.min(99)),
-            t::LCD_ON,
-            t::LCD_OFF,
+            t::lcd_on(),
+            t::lcd_off(),
         );
         let x1 = x0 + w + 4.0;
-        let w2 = kit::seg_text(p, pos2(x1, top), h, ":", t::LCD_ON, t::LCD_OFF);
+        let w2 = kit::seg_text(p, pos2(x1, top), h, ":", t::lcd_on(), t::lcd_off());
         let x2 = x1 + w2 + 2.0;
         kit::caps(
             p,
@@ -979,21 +982,21 @@ impl App {
             Align2::LEFT_TOP,
             "step",
             12.0,
-            t::FAINT,
+            t::faint(),
         );
         let w3 = kit::seg_text(
             p,
             pos2(x2, top),
             h,
             &format!("{sixteenth:02}"),
-            t::LCD_ON,
-            t::LCD_OFF,
+            t::lcd_on(),
+            t::lcd_off(),
         );
         // Divider, then tempo.
         let dx = x2 + w3 + 10.0;
         p.line_segment(
             [pos2(dx, well.top() + 6.0), pos2(dx, well.bottom() - 6.0)],
-            Stroke::new(1.0_f32, t::LINE),
+            Stroke::new(1.0_f32, t::line()),
         );
         let tx = dx + 12.0;
         kit::caps(
@@ -1002,7 +1005,7 @@ impl App {
             Align2::LEFT_TOP,
             "bpm",
             12.0,
-            t::FAINT,
+            t::faint(),
         );
         let tempo = format!("{:5.1}", self.tempo_now());
         let p = p.clone();
@@ -1023,7 +1026,7 @@ impl App {
             .data(|d| d.get_temp::<String>(ui.id().with("tempo-type")))
             .is_some();
         if !typing {
-            kit::seg_text(&p, pos2(tx, top), h, &tempo, t::LCD_ON, t::LCD_OFF);
+            kit::seg_text(&p, pos2(tx, top), h, &tempo, t::lcd_on(), t::lcd_off());
         }
         kit::caps(
             &p,
@@ -1031,11 +1034,11 @@ impl App {
             Align2::RIGHT_TOP,
             &format!("{}/{}", sig.0, sig.1),
             12.0,
-            t::FAINT,
+            t::faint(),
         );
         // A map in play: a blue dot left of the digits (address colour; shape = state).
         if self.tempo_table().is_some() {
-            p.circle_filled(pos2(tx - 6.0, top + h / 2.0), 2.0, t::ENC_BLUE);
+            p.circle_filled(pos2(tx - 6.0, top + h / 2.0), 2.0, t::enc_blue());
         }
         self.tempo_steppers(ui, steppers);
     }
@@ -1114,7 +1117,7 @@ impl App {
             p.rect_stroke(
                 rect,
                 4.0,
-                Stroke::new(1.0_f32, t::LINE),
+                Stroke::new(1.0_f32, t::line()),
                 egui::StrokeKind::Inside,
             );
             ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);

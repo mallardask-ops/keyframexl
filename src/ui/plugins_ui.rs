@@ -784,7 +784,7 @@ impl App {
             } else {
                 format!("{} · {fmt}", plugin.vendor)
             };
-            ui.label(RichText::new(vendor).font(t::sans(12.0)).color(t::FAINT));
+            ui.label(RichText::new(vendor).font(t::sans(12.0)).color(t::faint()));
             // A failure reads short here; the whole story is in the tooltip.
             let failed = self.plugins.live.get(&id).and_then(|l| l.error.clone());
             match failed {
@@ -794,7 +794,7 @@ impl App {
                     } else {
                         "failed"
                     };
-                    ui.label(RichText::new(short).font(t::sans(12.0)).color(t::BAD))
+                    ui.label(RichText::new(short).font(t::sans(12.0)).color(t::bad()))
                         .on_hover_text(&err);
                     if kit::tip(
                         kit::tool_button(ui, "Reload", kit::Kind::Normal, true),
@@ -912,7 +912,7 @@ impl App {
             ui.label(
                 egui::RichText::new(format!("{} stereo · {routed} routed", extra + 1))
                     .font(t::mono(12.0))
-                    .color(t::MUTED),
+                    .color(t::muted()),
             );
             if kit::tool_button(ui, "Map to inserts", kit::Kind::Ghost, true)
                 .on_hover_text(
@@ -958,7 +958,7 @@ impl App {
         egui::CollapsingHeader::new(
             egui::RichText::new("Route each pair")
                 .font(t::sans(12.0))
-                .color(t::MUTED),
+                .color(t::muted()),
         )
         .id_salt(("wrap-outs", id))
         .show(ui, |ui| {
@@ -971,7 +971,7 @@ impl App {
                         ui.label(
                             egui::RichText::new(format!("{}-{}", 2 * k + 3, 2 * k + 4))
                                 .font(t::mono(12.0))
-                                .color(t::TEXT),
+                                .color(t::text()),
                         );
                         let mut pick = None;
                         kit::dropdown(
@@ -1062,8 +1062,8 @@ impl App {
                         let pan_fmt = |v: f64| if v.abs() < 0.005 { "C".to_string() } else if v < 0.0 { format!("L{:.0}", -v * 100.0) } else { format!("R{:.0}", v * 100.0) };
                         let vol_fmt = |pos: f64| keyframexl::sequence::gain_db_text(keyframexl::sequence::volume_gain(pos as f32));
                         let knobs = [
-                            (kit::Knob { label: "Volume", color: t::ENC_ORANGE, min: 0.0, max: 1.0, default: keyframexl::sequence::volume_pos(1.0) as f64, log: false, fmt: &vol_fmt, hint: "Channel volume. Double-click for 0 dB." }, keyframexl::sequence::volume_pos(inst.volume) as f64, keyframexl::automation::Target::ChannelVolume { inst: ch }),
-                            (kit::Knob { label: "Pan", color: t::ENC_WHITE, min: -1.0, max: 1.0, default: 0.0, log: false, fmt: &pan_fmt, hint: "Channel pan" }, inst.pan as f64, keyframexl::automation::Target::ChannelPan { inst: ch }),
+                            (kit::Knob { label: "Volume", color: t::enc_orange(), min: 0.0, max: 1.0, default: keyframexl::sequence::volume_pos(1.0) as f64, log: false, fmt: &vol_fmt, hint: "Channel volume. Double-click for 0 dB." }, keyframexl::sequence::volume_pos(inst.volume) as f64, keyframexl::automation::Target::ChannelVolume { inst: ch }),
+                            (kit::Knob { label: "Pan", color: t::enc_white(), min: -1.0, max: 1.0, default: 0.0, log: false, fmt: &pan_fmt, hint: "Channel pan" }, inst.pan as f64, keyframexl::automation::Target::ChannelPan { inst: ch }),
                         ];
                         for (k, (spec, v, target)) in knobs.into_iter().enumerate() {
                             let mut v = v;
@@ -1096,7 +1096,7 @@ impl App {
             if let Some((tr, k)) = slot {
                 card(ui, "mixer slot", |ui| {
                     row(ui, "Place", None, |ui| {
-                        ui.label(RichText::new(format!("{} · slot {}", self.mixer_name(tr), k + 1)).font(t::sans(13.0)).color(t::TEXT));
+                        ui.label(RichText::new(format!("{} · slot {}", self.mixer_name(tr), k + 1)).font(t::sans(13.0)).color(t::text()));
                     });
                     row(ui, "On", Some("Off bypasses the effect (the slot LED)."), |ui| {
                         let mut on = self.song.mixer[tr].fx[k].enabled;
@@ -1109,7 +1109,7 @@ impl App {
                     row(ui, "Mix", Some("Dry/wet of this slot."), |ui| {
                         let mut v = self.song.mixer[tr].fx[k].mix as f64;
                         let fmt = |v: f64| format!("{:.0}%", v * 100.0);
-                        let spec = kit::Knob { label: "Mix", color: t::ENC_GREEN, min: 0.0, max: 1.0, default: 1.0, log: false, fmt: &fmt, hint: "Slot dry/wet" };
+                        let spec = kit::Knob { label: "Mix", color: t::enc_green(), min: 0.0, max: 1.0, default: 1.0, log: false, fmt: &fmt, hint: "Slot dry/wet" };
                         let (_, started, changed) = kit::knob(ui, &spec, &mut v);
                         if started {
                             self.checkpoint();
@@ -1125,12 +1125,12 @@ impl App {
                 let bridged = self.settings.plugins.bridged && std::env::var_os("KFXL_NO_BRIDGE").is_none();
                 row(ui, "Process", None, |ui| {
                     let text = if bridged { "Own process (bridged): a crash silences only this plugin" } else { "Inside the program: a crash closes it" };
-                    ui.label(RichText::new(text).font(t::sans(13.0)).color(if bridged { t::OK } else { t::WAIT }));
+                    ui.label(RichText::new(text).font(t::sans(13.0)).color(if bridged { t::ok() } else { t::wait() }));
                 });
                 row(ui, "Latency", None, |ui| {
                     let ms = self.audio.as_ref().map(|a| a.running.latency_ms()).unwrap_or(0.0);
                     let text = if bridged { format!("One audio buffer, ≈{ms:.1} ms") } else { "None added".to_string() };
-                    ui.label(RichText::new(text).font(t::sans(13.0)).color(t::TEXT));
+                    ui.label(RichText::new(text).font(t::sans(13.0)).color(t::text()));
                 });
                 ui.horizontal(|ui| {
                     if kit::tool_button(ui, "Change in Settings → Plugins", kit::Kind::Ghost, true).clicked() {
@@ -1140,12 +1140,12 @@ impl App {
             });
             card(ui, "state", |ui| {
                 row(ui, "File", None, |ui| {
-                    ui.label(RichText::new(&plugin.path).font(t::mono(11.5)).color(t::FAINT));
+                    ui.label(RichText::new(&plugin.path).font(t::mono(11.5)).color(t::faint()));
                 });
                 row(ui, "Saved state", Some("The plugin's settings are stored in the project when it is saved."), |ui| {
                     let size = plugin.state.len() * 3 / 4;
                     let text = if size == 0 { "none yet".to_string() } else if size < 1024 { format!("{size} bytes") } else { format!("{:.1} KB", size as f64 / 1024.0) };
-                    ui.label(RichText::new(text).font(t::sans(13.0)).color(t::TEXT));
+                    ui.label(RichText::new(text).font(t::sans(13.0)).color(t::text()));
                 });
                 ui.horizontal(|ui| {
                     if kit::tool_button(ui, "Reload", kit::Kind::Ghost, true).on_hover_text("Load it again from the last saved state").clicked() {
@@ -1170,7 +1170,7 @@ impl App {
             ui.label(
                 RichText::new("Not loaded.")
                     .font(t::sans(13.0))
-                    .color(t::FAINT),
+                    .color(t::faint()),
             );
             return;
         };
@@ -1185,16 +1185,16 @@ impl App {
             ui.label(
                 RichText::new("FLEX runs in standalone FL Studio.")
                     .font(t::sans(13.0))
-                    .color(t::TEXT),
+                    .color(t::text()),
             );
             return;
         }
         if !l.gui {
-            ui.label(RichText::new("This plugin has no editor of its own. Its controls are on the Parameters page.").font(t::sans(13.0)).color(t::MUTED));
+            ui.label(RichText::new("This plugin has no editor of its own. Its controls are on the Parameters page.").font(t::sans(13.0)).color(t::muted()));
             return;
         }
         let Some(parent) = self.plugins.parent else {
-            ui.label(RichText::new("The editor opens in its own window here (Wayland). Settings → General → \"Run as an X11 window\" puts it inside this window, like FL.").font(t::sans(12.0)).color(t::FAINT));
+            ui.label(RichText::new("The editor opens in its own window here (Wayland). Settings → General → \"Run as an X11 window\" puts it inside this window, like FL.").font(t::sans(12.0)).color(t::faint()));
             let open = l.editor;
             if kit::button(
                 ui,
@@ -1310,7 +1310,7 @@ impl App {
             ui.label(
                 RichText::new(format!("{n} parameters"))
                     .font(t::sans(12.0))
-                    .color(t::FAINT),
+                    .color(t::faint()),
             );
         });
         let want = self.plugins.param_filter.to_lowercase();
@@ -1343,7 +1343,7 @@ impl App {
                             let left = egui::Layout::left_to_right(egui::Align::Center);
                             ui.allocate_ui_with_layout(egui::vec2(name_w, 24.0), left, |ui| {
                                 ui.set_width(name_w);
-                                let color = if r.automatable { t::TEXT } else { t::MUTED };
+                                let color = if r.automatable { t::text() } else { t::muted() };
                                 let name = ui
                                     .add(
                                         egui::Label::new(
@@ -1409,7 +1409,7 @@ impl App {
                                 ui.set_width(text_w);
                                 ui.add(
                                     egui::Label::new(
-                                        RichText::new(text).font(t::mono(12.0)).color(t::MUTED),
+                                        RichText::new(text).font(t::mono(12.0)).color(t::muted()),
                                     )
                                     .truncate(),
                                 );
@@ -1562,11 +1562,11 @@ impl App {
     /// Status line for a plugin channel or slot.
     pub(crate) fn plugin_status(&self, id: u64) -> (String, eframe::egui::Color32) {
         match self.plugins.live.get(&id) {
-            None => ("not loaded".into(), t::FAINT),
-            Some(l) if l.error.is_some() => (l.error.clone().unwrap_or_default(), t::BAD),
-            Some(l) if l.proc.is_none() => ("loading…".into(), t::WAIT),
-            Some(l) if l.editor => ("editor open".into(), t::OK),
-            Some(_) => ("ready".into(), t::MUTED),
+            None => ("not loaded".into(), t::faint()),
+            Some(l) if l.error.is_some() => (l.error.clone().unwrap_or_default(), t::bad()),
+            Some(l) if l.proc.is_none() => ("loading…".into(), t::wait()),
+            Some(l) if l.editor => ("editor open".into(), t::ok()),
+            Some(_) => ("ready".into(), t::muted()),
         }
     }
 
@@ -1654,9 +1654,9 @@ impl App {
             )
         };
         ui.label(RichText::new(note).font(t::sans(12.0)).color(if busy {
-            t::WAIT
+            t::wait()
         } else {
-            t::FAINT
+            t::faint()
         }));
         let want = query.to_lowercase();
         let shown: Vec<&Scanned> = list
@@ -1674,21 +1674,21 @@ impl App {
             })
             .collect();
         // The table.
-        egui::Frame::new().fill(t::SUNKEN).stroke(egui::Stroke::new(1.0_f32, t::EDGE)).corner_radius(9.0).inner_margin(egui::Margin::symmetric(0, 4)).show(ui, |ui| {
+        egui::Frame::new().fill(t::sunken()).stroke(egui::Stroke::new(1.0_f32, t::edge())).corner_radius(9.0).inner_margin(egui::Margin::symmetric(0, 4)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             let w = ui.available_width();
             let cols = [30.0, 0.40 * w, 0.14 * w, 0.24 * w];
             let x = |i: usize| cols[..i].iter().sum::<f32>();
             let (head, _) = ui.allocate_exact_size(egui::vec2(w, 22.0), egui::Sense::hover());
             for (i, h) in ["name", "type", "vendor", "status"].iter().enumerate() {
-                kit::caps(ui.painter(), egui::pos2(head.left() + x(i + 1), head.center().y), egui::Align2::LEFT_CENTER, h, 10.5, t::FAINT);
+                kit::caps(ui.painter(), egui::pos2(head.left() + x(i + 1), head.center().y), egui::Align2::LEFT_CENTER, h, 10.5, t::faint());
             }
             if shown.is_empty() {
                 ui.add_space(8.0);
                 let text = if list.is_empty() { "No plugins yet. Windows plugins (e.g. SSD5) need yabridge: yabridgectl add <folder>, then yabridgectl sync. Then Rescan all, or add the folder below." } else { "Nothing matches." };
                 ui.horizontal(|ui| {
                     ui.add_space(16.0);
-                    ui.label(RichText::new(text).font(t::sans(13.0)).color(t::FAINT));
+                    ui.label(RichText::new(text).font(t::sans(13.0)).color(t::faint()));
                 });
                 ui.add_space(8.0);
             }
@@ -1697,25 +1697,25 @@ impl App {
                 for (n, p) in shown.iter().enumerate() {
                     let (r, resp) = ui.allocate_exact_size(egui::vec2(w, 26.0), egui::Sense::click());
                     let on = picked.as_ref() == Some(&p.path);
-                    let fill = if on { t::SELECTION } else if resp.hovered() { t::RAISED } else if n % 2 == 1 { t::SIDE } else { t::SUNKEN };
+                    let fill = if on { t::selection() } else if resp.hovered() { t::raised() } else if n % 2 == 1 { t::side() } else { t::sunken() };
                     let pt = ui.painter();
                     pt.rect_filled(r, 0.0, fill);
                     let off = hidden(p);
-                    let ink = if off || !p.usable() { t::FAINT } else { t::TEXT };
+                    let ink = if off || !p.usable() { t::faint() } else { t::text() };
                     let y = r.center().y;
                     let (status, color) = match &p.status {
-                        Status::Ok if off => ("hidden from lists".to_string(), t::FAINT),
-                        Status::Ok => ("ready".to_string(), t::OK),
-                        Status::Hangs => ("hangs, not loaded".to_string(), t::BAD),
-                        Status::Crashes => ("crashes, not loaded".to_string(), t::BAD),
-                        Status::Failed(e) => (e.clone(), t::BAD),
+                        Status::Ok if off => ("hidden from lists".to_string(), t::faint()),
+                        Status::Ok => ("ready".to_string(), t::ok()),
+                        Status::Hangs => ("hangs, not loaded".to_string(), t::bad()),
+                        Status::Crashes => ("crashes, not loaded".to_string(), t::bad()),
+                        Status::Failed(e) => (e.clone(), t::bad()),
                     };
                     kit::led(pt, egui::pos2(r.left() + 16.0, y), 3.5, Some(color));
                     let font = t::sans(13.0);
                     let cell = |i: usize| r.left() + x(i);
                     pt.text(egui::pos2(cell(1), y), egui::Align2::LEFT_CENTER, kit::elide(pt, &p.name, font.clone(), cols[1] - 10.0), font.clone(), ink);
-                    pt.text(egui::pos2(cell(2), y), egui::Align2::LEFT_CENTER, format!("{} · {}", if p.instrument { "Instrument" } else { "Effect" }, crate::plugins::format_of(&p.path).to_uppercase()), t::sans(12.0), t::MUTED);
-                    pt.text(egui::pos2(cell(3), y), egui::Align2::LEFT_CENTER, kit::elide(pt, &p.vendor, t::sans(12.0), cols[3] - 10.0), t::sans(12.0), t::MUTED);
+                    pt.text(egui::pos2(cell(2), y), egui::Align2::LEFT_CENTER, format!("{} · {}", if p.instrument { "Instrument" } else { "Effect" }, crate::plugins::format_of(&p.path).to_uppercase()), t::sans(12.0), t::muted());
+                    pt.text(egui::pos2(cell(3), y), egui::Align2::LEFT_CENTER, kit::elide(pt, &p.vendor, t::sans(12.0), cols[3] - 10.0), t::sans(12.0), t::muted());
                     pt.text(egui::pos2(cell(4), y), egui::Align2::LEFT_CENTER, kit::elide(pt, &status, t::sans(12.0), w - x(4) - 12.0), t::sans(12.0), color);
                     if resp.clicked() {
                         picked = Some(p.path.clone());
@@ -1733,7 +1733,11 @@ impl App {
             .cloned()
         {
             card(ui, "selected", |ui| {
-                ui.label(RichText::new(&p.name).font(t::medium(16.0)).color(t::TEXT));
+                ui.label(
+                    RichText::new(&p.name)
+                        .font(t::medium(16.0))
+                        .color(t::text()),
+                );
                 let mut facts = vec![
                     if p.vendor.is_empty() {
                         "unknown vendor".to_string()
@@ -1759,12 +1763,12 @@ impl App {
                 ui.label(
                     RichText::new(facts.join(" · "))
                         .font(t::sans(12.5))
-                        .color(t::MUTED),
+                        .color(t::muted()),
                 );
                 ui.label(
                     RichText::new(p.path.display().to_string())
                         .font(t::mono(11.5))
-                        .color(t::FAINT),
+                        .color(t::faint()),
                 );
                 let off = hidden(&p);
                 let this_busy = single_busy.as_ref() == Some(&p.path);
@@ -1810,7 +1814,7 @@ impl App {
                     }
                 });
                 if !p.usable() {
-                    ui.label(RichText::new("It failed the test load, so the browser hides it. If you just installed it (e.g. SSD5 via yabridge sync), press Rescan this plugin. You can also try loading it anyway:").font(t::sans(12.0)).color(t::WAIT));
+                    ui.label(RichText::new("It failed the test load, so the browser hides it. If you just installed it (e.g. SSD5 via yabridge sync), press Rescan this plugin. You can also try loading it anyway:").font(t::sans(12.0)).color(t::wait()));
                     ui.horizontal_wrapped(|ui| {
                         let label = if p.instrument {
                             "Try adding to channel rack anyway".to_string()
@@ -1827,7 +1831,7 @@ impl App {
                             }
                         }
                     });
-                    ui.label(RichText::new("If it is missing from the list entirely, it is not under any folder below. Add its folder below, then Rescan all. Check with: keyframexl plugin-scan").font(t::sans(12.0)).color(t::FAINT));
+                    ui.label(RichText::new("If it is missing from the list entirely, it is not under any folder below. Add its folder below, then Rescan all. Check with: keyframexl plugin-scan").font(t::sans(12.0)).color(t::faint()));
                 }
             });
         }
@@ -1939,11 +1943,11 @@ impl App {
                 ui.add_space(6.0);
                 ui.horizontal_wrapped(|ui| {
                     let (r, _) = ui.allocate_exact_size(egui::vec2(10.0, 16.0), egui::Sense::hover());
-                    kit::led(ui.painter(), r.center(), 3.0, Some(t::BAD));
+                    kit::led(ui.painter(), r.center(), 3.0, Some(t::bad()));
                     ui.label(
                         RichText::new(format!("Another Wine is running on {prefix} ({}). Plugins cannot start with the chosen Wine until it stops.", exe.display()))
                             .font(t::sans(12.5))
-                            .color(t::TEXT),
+                            .color(t::text()),
                     );
                     if kit::tool_button(ui, "Stop it", kit::Kind::Normal, true)
                         .on_hover_text("Runs its wineserver -k: Windows programs using this prefix close. Then reload the plugins.")
@@ -1973,14 +1977,18 @@ impl App {
                     let there = d.is_dir();
                     let (r, _) =
                         ui.allocate_exact_size(egui::vec2(10.0, 16.0), egui::Sense::hover());
-                    kit::led(ui.painter(), r.center(), 3.0, there.then_some(t::OK));
+                    kit::led(ui.painter(), r.center(), 3.0, there.then_some(t::ok()));
                     ui.label(
                         RichText::new(d.display().to_string())
                             .font(t::mono(12.0))
-                            .color(if there { t::TEXT } else { t::FAINT }),
+                            .color(if there { t::text() } else { t::faint() }),
                     );
                     if !there {
-                        ui.label(RichText::new("missing").font(t::sans(11.5)).color(t::FAINT));
+                        ui.label(
+                            RichText::new("missing")
+                                .font(t::sans(11.5))
+                                .color(t::faint()),
+                        );
                     }
                 });
             }
@@ -1989,11 +1997,11 @@ impl App {
                 ui.horizontal(|ui| {
                     let (r, _) =
                         ui.allocate_exact_size(egui::vec2(10.0, 16.0), egui::Sense::hover());
-                    kit::led(ui.painter(), r.center(), 3.0, d.is_dir().then_some(t::OK));
+                    kit::led(ui.painter(), r.center(), 3.0, d.is_dir().then_some(t::ok()));
                     ui.label(
                         RichText::new(d.display().to_string())
                             .font(t::mono(12.0))
-                            .color(t::TEXT),
+                            .color(t::text()),
                     );
                     if kit::tool_button(ui, "Remove", kit::Kind::Ghost, true).clicked() {
                         remove = Some(i);
@@ -2010,7 +2018,7 @@ impl App {
                 {
                     s.plugins.extra_dirs.push(d);
                 }
-                ui.label(RichText::new("Also $VST3_PATH, $VST_PATH, and $CLAP_PATH. yabridge puts Windows plugins in ~/.vst3/yabridge (VST3) and ~/.vst/yabridge (VST2).").font(t::sans(12.0)).color(t::FAINT));
+                ui.label(RichText::new("Also $VST3_PATH, $VST_PATH, and $CLAP_PATH. yabridge puts Windows plugins in ~/.vst3/yabridge (VST3) and ~/.vst/yabridge (VST2).").font(t::sans(12.0)).color(t::faint()));
             });
         });
         ui.data_mut(|d| d.insert_temp(id, (query, kind, picked)));
@@ -2120,7 +2128,7 @@ impl App {
             egui::Align2::CENTER_CENTER,
             shown,
             t::sans(12.0),
-            if cur.is_some() { t::TEXT } else { t::FAINT },
+            if cur.is_some() { t::text() } else { t::faint() },
         );
         kit::tip(resp, tip);
         let next = kit::tool_button(ui, "▶", kit::Kind::Ghost, n > 0);
@@ -2154,28 +2162,28 @@ fn fl_link_panel(ui: &mut egui::Ui) {
         ui.label(
             RichText::new("FL Studio (live link)")
                 .font(t::medium(15.0))
-                .color(t::TEXT),
+                .color(t::text()),
         );
         let (word, color) = match &state {
             LinkState::Off => ("Not running", None),
-            LinkState::Starting(_) => ("Starting", Some(t::WAIT)),
-            LinkState::Connected => ("Connected", Some(t::OK)),
-            LinkState::Degraded(_) => ("Check", Some(t::WAIT)),
-            LinkState::Error(_) => ("Error", Some(t::BAD)),
+            LinkState::Starting(_) => ("Starting", Some(t::wait())),
+            LinkState::Connected => ("Connected", Some(t::ok())),
+            LinkState::Degraded(_) => ("Check", Some(t::wait())),
+            LinkState::Error(_) => ("Error", Some(t::bad())),
         };
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new(word).font(t::sans(13.0)).color(t::TEXT));
+            ui.label(RichText::new(word).font(t::sans(13.0)).color(t::text()));
             let (r, _) = ui.allocate_exact_size(egui::vec2(14.0, 18.0), egui::Sense::hover());
             kit::led(ui.painter(), r.center(), 4.0, color);
         });
     });
-    ui.label(RichText::new("This channel plays FL Studio's selected channel: its notes go to FL, FL's sound comes back here. Use it for FLEX and other Image-Line instruments that do not work inside FL Studio VSTi.").font(t::sans(13.0)).color(t::MUTED));
+    ui.label(RichText::new("This channel plays FL Studio's selected channel: its notes go to FL, FL's sound comes back here. Use it for FLEX and other Image-Line instruments that do not work inside FL Studio VSTi.").font(t::sans(13.0)).color(t::muted()));
     match &state {
         LinkState::Starting(m) | LinkState::Degraded(m) => {
-            ui.label(RichText::new(m).font(t::sans(13.0)).color(t::WAIT));
+            ui.label(RichText::new(m).font(t::sans(13.0)).color(t::wait()));
         }
         LinkState::Error(m) => {
-            ui.label(RichText::new(m).font(t::sans(13.0)).color(t::BAD));
+            ui.label(RichText::new(m).font(t::sans(13.0)).color(t::bad()));
         }
         _ => {}
     }
@@ -2256,10 +2264,10 @@ fn fl_link_panel(ui: &mut egui::Ui) {
                     ui.painter(),
                     r.center(),
                     3.5,
-                    ok.map(|ok| if ok { t::OK } else { t::WAIT }),
+                    ok.map(|ok| if ok { t::ok() } else { t::wait() }),
                 );
-                ui.label(RichText::new(what).font(t::sans(13.0)).color(t::TEXT));
-                ui.label(RichText::new(text).font(t::sans(13.0)).color(t::MUTED));
+                ui.label(RichText::new(what).font(t::sans(13.0)).color(t::text()));
+                ui.label(RichText::new(text).font(t::sans(13.0)).color(t::muted()));
                 ui.end_row();
             }
         });
@@ -2279,7 +2287,7 @@ fn fl_link_panel(ui: &mut egui::Ui) {
     ui.add_space(10.0);
     // FLEX: what is known to make it start under Wine, checked in FL's prefix.
     let pf = &st.preflight;
-    ui.label(RichText::new("FLEX").font(t::medium(13.0)).color(t::TEXT));
+    ui.label(RichText::new("FLEX").font(t::medium(13.0)).color(t::text()));
     let ready = pf.vkd3d && pf.verdana;
     ui.label(
         RichText::new(if ready {
@@ -2288,7 +2296,7 @@ fn fl_link_panel(ui: &mut egui::Ui) {
             "FLEX is reported to start under Wine only when FL's prefix has vkd3d-proton (its d3d12.dll in system32) and the Verdana font; without them it crashes while loading. Nothing is installed for you."
         })
         .font(t::sans(12.0))
-        .color(if ready { t::MUTED } else { t::WAIT }),
+        .color(if ready { t::muted() } else { t::wait() }),
     );
     ui.label(
         RichText::new(format!(
@@ -2302,22 +2310,22 @@ fn fl_link_panel(ui: &mut egui::Ui) {
             pf.wine.as_deref().unwrap_or("system Wine not found"),
         ))
         .font(t::mono(11.0))
-        .color(t::FAINT),
+        .color(t::faint()),
     );
     if pf.needs_cert_patch() {
-        ui.label(RichText::new("FL Studio 2026.1.4 and later do not start on stock Wine (\"The validity of the program could not be verified\"): use a Wine with merge request 11824, such as DAW-GE-Proton11-6c, or FL 2026.1.3.").font(t::sans(12.0)).color(t::WAIT));
+        ui.label(RichText::new("FL Studio 2026.1.4 and later do not start on stock Wine (\"The validity of the program could not be verified\"): use a Wine with merge request 11824, such as DAW-GE-Proton11-6c, or FL 2026.1.3.").font(t::sans(12.0)).color(t::wait()));
     }
     ui.label(
         RichText::new("FLEX does not run inside FL Studio VSTi; this link is the way to use it.")
             .font(t::sans(12.0))
-            .color(t::FAINT),
+            .color(t::faint()),
     );
     ui.add_space(8.0);
-    ui.label(RichText::new("In FL: add the instrument to the Channel rack and keep its channel selected. FL hears this channel's notes on its MIDI input \"KeyFrameXL - FL link\" (switched on for you). The input stays while KeyFrameXL runs; restart FL only if it was opened before the first FL link channel of this session. One link channel at a time: FL plays only its selected channel.").font(t::sans(12.0)).color(t::FAINT));
+    ui.label(RichText::new("In FL: add the instrument to the Channel rack and keep its channel selected. FL hears this channel's notes on its MIDI input \"KeyFrameXL - FL link\" (switched on for you). The input stays while KeyFrameXL runs; restart FL only if it was opened before the first FL link channel of this session. One link channel at a time: FL plays only its selected channel.").font(t::sans(12.0)).color(t::faint()));
     ui.label(
         RichText::new("Not in WAV export yet: FL cannot render faster than real time.")
             .font(t::sans(12.0))
-            .color(t::FAINT),
+            .color(t::faint()),
     );
 }
 

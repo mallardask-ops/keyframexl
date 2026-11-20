@@ -312,9 +312,9 @@ pub(crate) fn show(ui: &mut egui::Ui, src: &str, size: f32) -> Option<String> {
                     3 => size + 1.0,
                     _ => size,
                 };
-                wrapped(ui, spans, hsize, t::TEXT, true, &mut clicked);
+                wrapped(ui, spans, hsize, t::text(), true, &mut clicked);
             }
-            Block::Para(spans) => wrapped(ui, spans, size, t::TEXT, false, &mut clicked),
+            Block::Para(spans) => wrapped(ui, spans, size, t::text(), false, &mut clicked),
             Block::Item {
                 depth,
                 marker,
@@ -331,39 +331,43 @@ pub(crate) fn show(ui: &mut egui::Ui, src: &str, size: f32) -> Option<String> {
                         egui::Align2::LEFT_CENTER,
                         marker,
                         t::sans(size),
-                        if *depth == 0 { t::WAIT } else { t::MUTED },
+                        if *depth == 0 { t::wait() } else { t::muted() },
                     );
                     ui.vertical(|ui| {
-                        wrapped(ui, body, size, t::TEXT, false, &mut clicked);
+                        wrapped(ui, body, size, t::text(), false, &mut clicked);
                     });
                 });
             }
             Block::Quote(spans) => {
                 egui::Frame::new()
-                    .fill(t::WAIT_SOFT)
-                    .stroke(Stroke::new(1.0_f32, t::LINE))
+                    .fill(t::wait_soft())
+                    .stroke(Stroke::new(1.0_f32, t::line()))
                     .corner_radius(4.0)
                     .inner_margin(egui::Margin::symmetric(8, 5))
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        wrapped(ui, spans, size, t::MUTED, false, &mut clicked);
+                        wrapped(ui, spans, size, t::muted(), false, &mut clicked);
                     });
             }
             Block::Rule => {
                 ui.add_space(2.0);
                 let (r, _) = ui.allocate_exact_size(vec2(width, 1.0), egui::Sense::hover());
-                ui.painter().rect_filled(r, 0.0, t::LINE);
+                ui.painter().rect_filled(r, 0.0, t::line());
                 ui.add_space(2.0);
             }
             Block::Code(text) => {
                 egui::Frame::new()
-                    .fill(t::BG)
-                    .stroke(Stroke::new(1.0_f32, t::LINE))
+                    .fill(t::bg())
+                    .stroke(Stroke::new(1.0_f32, t::line()))
                     .corner_radius(4.0)
                     .inner_margin(egui::Margin::symmetric(8, 6))
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        ui.label(RichText::new(text).font(t::mono(size - 1.0)).color(t::TEXT));
+                        ui.label(
+                            RichText::new(text)
+                                .font(t::mono(size - 1.0))
+                                .color(t::text()),
+                        );
                     });
             }
         }
@@ -392,10 +396,10 @@ fn wrapped(
                     let mut rt = RichText::new(text);
                     rt = if *code {
                         rt.font(t::mono(size - 1.0))
-                            .color(t::TEXT)
-                            .background_color(t::RAISED)
+                            .color(t::text())
+                            .background_color(t::raised())
                     } else if *bold || heading {
-                        rt.font(t::semibold(size)).color(t::TEXT)
+                        rt.font(t::semibold(size)).color(t::text())
                     } else {
                         rt.font(t::sans(size)).color(color)
                     };
@@ -411,7 +415,7 @@ fn wrapped(
                         t::sans(size)
                     };
                     let resp = ui
-                        .link(RichText::new(text).font(font).color(t::ENC_BLUE))
+                        .link(RichText::new(text).font(font).color(t::enc_blue()))
                         .on_hover_text(url);
                     if resp.clicked() {
                         *clicked = Some(url.clone());

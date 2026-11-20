@@ -166,7 +166,7 @@ fn chips<T: Copy + PartialEq>(
 fn wave(p: &egui::Painter, r: Rect, frames: &[[f32; 2]], color: Color32) {
     p.line_segment(
         [r.left_center(), r.right_center()],
-        Stroke::new(1.0_f32, t::SURFACE),
+        Stroke::new(1.0_f32, t::surface()),
     );
     if frames.is_empty() {
         return;
@@ -391,7 +391,7 @@ impl App {
                         .show_ui(ui, |ui| {
                             kit::menu_style(ui);
                             for cat in keyframexl::forge::library::Category::ALL {
-                                ui.label(egui::RichText::new(cat.label()).font(t::sans(11.5)).color(t::FAINT));
+                                ui.label(egui::RichText::new(cat.label()).font(t::sans(11.5)).color(t::faint()));
                                 for r in Recipe::ALL.into_iter().filter(|r| r.category() == cat) {
                                     if ui.selectable_label(false, r.label()).clicked() {
                                         adopt = Some(r.styled(game_style));
@@ -400,7 +400,7 @@ impl App {
                             }
                             if !user.is_empty() {
                                 ui.separator();
-                                ui.label(egui::RichText::new("My sounds").font(t::sans(11.5)).color(t::FAINT));
+                                ui.label(egui::RichText::new("My sounds").font(t::sans(11.5)).color(t::faint()));
                                 for u in user.iter() {
                                     if ui.selectable_label(false, &u.name).clicked() {
                                         adopt = Some(u.clone());
@@ -415,7 +415,7 @@ impl App {
                 });
                 ui.horizontal_wrapped(|ui| {
                     let (r, _) = ui.allocate_exact_size(vec2(84.0, 20.0), Sense::hover());
-                    kit::caps(ui.painter(), r.left_center(), Align2::LEFT_CENTER, "GAME STYLE", 10.0, t::MUTED);
+                    kit::caps(ui.painter(), r.left_center(), Align2::LEFT_CENTER, "GAME STYLE", 10.0, t::muted());
                     let names = ["Any", "Retro", "Cartoon", "Heavy", "Sci-fi"];
                     let at = game_style.map_or(0, |s| Style::ALL.iter().position(|x| *x == s).unwrap_or(0) + 1);
                     let (pick, r) = kit::chips(ui, &format!("forge-game-style-{id}"), &names, at, None);
@@ -429,7 +429,7 @@ impl App {
                 });
                 ui.horizontal_wrapped(|ui| {
                     let (r, _) = ui.allocate_exact_size(vec2(84.0, 20.0), Sense::hover());
-                    kit::caps(ui.painter(), r.left_center(), Align2::LEFT_CENTER, "MAKE IT", 10.0, t::MUTED);
+                    kit::caps(ui.painter(), r.left_center(), Align2::LEFT_CENTER, "MAKE IT", 10.0, t::muted());
                     for s in Style::ALL {
                         let hint = match s {
                             Style::Retro => "Chip waves, chip noise, fewer bits",
@@ -445,11 +445,11 @@ impl App {
                     }
                 });
 
-                panel(ui, "sound", t::ENC_WHITE, |ui| {
+                panel(ui, "sound", t::enc_white(), |ui| {
                     let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 84.0), Sense::click());
                     let painter = ui.painter();
                     let well = kit::sunken(painter, r, 6.0).shrink(6.0);
-                    wave(painter, well, &sound.rendered.frames, t::ENC_WHITE);
+                    wave(painter, well, &sound.rendered.frames, t::enc_white());
                     let db = 20.0 * sound.rendered.peak.max(1e-6).log10();
                     kit::caps(
                         painter,
@@ -457,19 +457,19 @@ impl App {
                         Align2::RIGHT_TOP,
                         &format!("{} · PEAK {db:.1} DB", secs(sound.rendered.seconds())),
                         10.0,
-                        t::FAINT,
+                        t::faint(),
                     );
                     if sound.stale() {
-                        kit::caps(painter, well.left_top() + vec2(2.0, 2.0), Align2::LEFT_TOP, "RENDERING", 10.0, t::WAIT);
+                        kit::caps(painter, well.left_top() + vec2(2.0, 2.0), Align2::LEFT_TOP, "RENDERING", 10.0, t::wait());
                     }
                     if resp.on_hover_text("Click to hear it").clicked() {
                         play = true;
                     }
                 });
 
-                panel(ui, "character", t::ENC_WHITE, |ui| {
+                panel(ui, "character", t::enc_white(), |ui| {
                     ui.horizontal_wrapped(|ui| {
-                        let c = t::ENC_WHITE;
+                        let c = t::enc_white();
                         let hints = [
                             "Small and high .. huge, low and long",
                             "Lazy, soft, shallow sweeps .. wild, loud, deep sweeps",
@@ -487,7 +487,7 @@ impl App {
                     });
                 });
 
-                panel(ui, "ideas", t::ENC_GREEN, |ui| {
+                panel(ui, "ideas", t::enc_green(), |ui| {
                     ui.horizontal_wrapped(|ui| {
                         let label = if growing { "Growing" } else { "Mutate" };
                         mutate_now = kit::button(ui, label, kit::Kind::Normal, !growing)
@@ -499,7 +499,7 @@ impl App {
                         }
                     });
                     if view.ideas.is_empty() {
-                        ui.label(egui::RichText::new("Mutate grows eight relatives of this sound. Click one to hear it, double-click to keep it.").color(t::MUTED));
+                        ui.label(egui::RichText::new("Mutate grows eight relatives of this sound. Click one to hear it, double-click to keep it.").color(t::muted()));
                         return;
                     }
                     let cols = if ui.available_width() >= 560.0 { 4 } else { 2 };
@@ -514,10 +514,10 @@ impl App {
                                 let lit = view.heard == Some(i);
                                 let well = kit::sunken(painter, r, 6.0).shrink(4.0);
                                 if lit || resp.hovered() {
-                                    painter.rect_stroke(r, 6.0, Stroke::new(1.0_f32, if lit { t::ENC_GREEN } else { t::STRONG }), egui::StrokeKind::Inside);
+                                    painter.rect_stroke(r, 6.0, Stroke::new(1.0_f32, if lit { t::enc_green() } else { t::strong() }), egui::StrokeKind::Inside);
                                 }
-                                wave(painter, well, &idea.sound.frames, if lit { t::ENC_GREEN } else { t::MUTED });
-                                kit::caps(painter, well.left_top() + vec2(2.0, 1.0), Align2::LEFT_TOP, &format!("{:02}", i + 1), 10.0, t::FAINT);
+                                wave(painter, well, &idea.sound.frames, if lit { t::enc_green() } else { t::muted() });
+                                kit::caps(painter, well.left_top() + vec2(2.0, 1.0), Align2::LEFT_TOP, &format!("{:02}", i + 1), 10.0, t::faint());
                                 let resp = resp.on_hover_text("Click to hear · double-click to use it");
                                 if resp.double_clicked() {
                                     adopt = Some(idea.patch.clone());
@@ -541,19 +541,19 @@ impl App {
                 let jobs = Bouncing { now: bouncing, channels: &channels };
                 layers_panel(ui, &mut ed, id, &mut p, &mut view, &mut load_sample, &jobs, &mut bounce);
                 if let Some(l) = p.layers.get_mut(view.layer) {
-                    let color = t::ENC_BLUE;
+                    let color = t::enc_blue();
                     panel(ui, &format!("layer {:02} · {}", view.layer + 1, l.name), color, |ui| {
                         layer_editor(ui, &mut ed, id, l, &mut view, &mut load_sample, &jobs, &mut bounce);
                     });
                 }
-                panel(ui, "master effects", t::ENC_WHITE, |ui| {
+                panel(ui, "master effects", t::enc_white(), |ui| {
                     fx_list(ui, &mut ed, &format!("forge-master-{id}"), &mut p.fx);
                 });
-                panel(ui, "export for game", t::ENC_WHITE, |ui| {
+                panel(ui, "export for game", t::enc_white(), |ui| {
                     ui.horizontal_wrapped(|ui| {
                         // View settings, not the sound: no undo step.
                         let mut scratch = Edit::default();
-                        scratch.knob(ui, "FILES", t::ENC_WHITE, &mut view.count, (1.0, 20.0, 5.0), false, &|v| format!("{:.0}", v.round()), "The sound, then variations of it: a little different each, so repeats never sound robotic");
+                        scratch.knob(ui, "FILES", t::enc_white(), &mut view.count, (1.0, 20.0, 5.0), false, &|v| format!("{:.0}", v.round()), "The sound, then variations of it: a little different each, so repeats never sound robotic");
                         view.count = view.count.round().clamp(1.0, 20.0);
                         ui.vertical(|ui| {
                             if let (Some(i), _) = kit::chips(ui, &format!("forge-fmt-{id}"), &["WAV", "OGG"], view.ogg as usize, None) {
@@ -1025,7 +1025,7 @@ fn layers_panel(
     jobs: &Bouncing,
     bounce: &mut Option<(Into, forge::Bounce)>,
 ) {
-    panel(ui, "layers", t::ENC_BLUE, |ui| {
+    panel(ui, "layers", t::enc_blue(), |ui| {
         let solo_any = p.layers.iter().any(|l| l.solo);
         let mut remove = None;
         for (i, l) in p.layers.iter_mut().enumerate() {
@@ -1038,7 +1038,7 @@ fn layers_panel(
                     let solo = egui::Button::new(
                         egui::RichText::new("S")
                             .font(t::mono(12.0))
-                            .color(if l.solo { t::WAIT } else { t::MUTED }),
+                            .color(if l.solo { t::wait() } else { t::muted() }),
                     )
                     .min_size(vec2(24.0, 22.0));
                     if ui
@@ -1054,7 +1054,7 @@ fn layers_panel(
                     let text = format!("{:02}  {}", i + 1, l.name);
                     let label = egui::RichText::new(text)
                         .font(t::sans(14.0))
-                        .color(if audible { t::TEXT } else { t::MUTED });
+                        .color(if audible { t::text() } else { t::muted() });
                     if ui
                         .selectable_label(view.layer == i, label)
                         .on_hover_text("Edit this layer below")
@@ -1071,7 +1071,7 @@ fn layers_panel(
                     ui.label(
                         egui::RichText::new(what)
                             .font(t::sans(12.5))
-                            .color(t::FAINT),
+                            .color(t::faint()),
                     );
                     if ui
                         .small_button("×")
@@ -1100,7 +1100,7 @@ fn layers_panel(
                     jobs.name(b.channel),
                     super::roll::note_name(b.key)
                 ))
-                .color(t::WAIT),
+                .color(t::wait()),
             );
         }
         if p.layers.is_empty() {
@@ -1108,7 +1108,7 @@ fn layers_panel(
                 egui::RichText::new(
                     "No layers: the sound is silent. Add one, or pick a recipe in Start from.",
                 )
-                .color(t::MUTED),
+                .color(t::muted()),
             );
         }
         ui.horizontal(|ui| {
@@ -1182,7 +1182,7 @@ fn layer_editor(
     jobs: &Bouncing,
     bounce: &mut Option<(Into, forge::Bounce)>,
 ) {
-    let c = t::ENC_BLUE;
+    let c = t::enc_blue();
     let salt = format!("forge-{id}-{}", view.layer);
     let mut name = l.name.clone();
     let r = ui.add(
@@ -1451,7 +1451,7 @@ fn layer_editor(
             &format!("{salt}-pitch"),
             &mut l.pitch,
             Line::Pitch,
-            t::ENC_BLUE,
+            t::enc_blue(),
             length,
         ),
         Line::Volume => curve_editor(
@@ -1460,7 +1460,7 @@ fn layer_editor(
             &format!("{salt}-amp"),
             &mut l.amp,
             Line::Volume,
-            t::ENC_GREEN,
+            t::enc_green(),
             length,
         ),
         Line::Filter => {
@@ -1479,7 +1479,7 @@ fn layer_editor(
                     &format!("{salt}-cut"),
                     &mut l.cutoff,
                     Line::Filter,
-                    t::ENC_ORANGE,
+                    t::enc_orange(),
                     length,
                 );
                 ui.horizontal_wrapped(|ui| {
@@ -1487,7 +1487,7 @@ fn layer_editor(
                         ui,
                         ed,
                         "RESO",
-                        t::ENC_ORANGE,
+                        t::enc_orange(),
                         &mut l.resonance,
                         (0.0, 1.0, 0.0),
                         false,
@@ -1507,7 +1507,7 @@ fn layer_editor(
         Align2::LEFT_CENTER,
         "LAYER EFFECTS",
         10.0,
-        t::MUTED,
+        t::muted(),
     );
     fx_list(ui, ed, &format!("{salt}-fx"), &mut l.fx);
 }
@@ -1540,13 +1540,13 @@ fn curve_editor(
     let to_t = |px: f32| ((px - r.left()) / r.width()).clamp(0.0, 1.0);
     let to_v = |py: f32| (lo + (r.bottom() - py) / r.height() * (hi - lo)).clamp(lo, hi);
     // Guides: octaves for pitch, decades for the filter, halves for volume.
-    let guide = Stroke::new(1.0_f32, t::SURFACE);
+    let guide = Stroke::new(1.0_f32, t::surface());
     match kind {
         Line::Pitch => {
             let mut v = lo;
             while v <= hi + 0.1 {
                 let s = if v == 0.0 {
-                    Stroke::new(1.0_f32, t::LINE)
+                    Stroke::new(1.0_f32, t::line())
                 } else {
                     guide
                 };
@@ -1557,7 +1557,7 @@ fn curve_editor(
                     Align2::LEFT_BOTTOM,
                     &format!("{v:+.0}"),
                     9.0,
-                    t::FAINT,
+                    t::faint(),
                 );
                 v += 12.0;
             }
@@ -1571,7 +1571,7 @@ fn curve_editor(
                     Align2::LEFT_BOTTOM,
                     label,
                     9.0,
-                    t::FAINT,
+                    t::faint(),
                 );
             }
         }
@@ -1690,7 +1690,7 @@ fn curve_editor(
         painter.circle_stroke(
             at,
             if lit { 5.5 } else { 4.0 },
-            Stroke::new(1.0_f32, t::EDGE),
+            Stroke::new(1.0_f32, t::edge()),
         );
         if lit {
             kit::caps(
@@ -1699,7 +1699,7 @@ fn curve_editor(
                 Align2::LEFT_BOTTOM,
                 &format!("{} · {}", secs(p.t as f64 * length), value(p.v)),
                 10.0,
-                t::TEXT,
+                t::text(),
             );
         }
     }
@@ -1726,7 +1726,7 @@ fn fx_list(ui: &mut Ui, ed: &mut Edit, salt: &str, fx: &mut Vec<FxSlot>) {
                     Align2::LEFT_CENTER,
                     slot.kind.label(),
                     10.0,
-                    if slot.enabled { t::TEXT } else { t::MUTED },
+                    if slot.enabled { t::text() } else { t::muted() },
                 );
                 let specs = slot.kind.params();
                 for (n, spec) in specs.iter().enumerate() {
@@ -1736,7 +1736,7 @@ fn fx_list(ui: &mut Ui, ed: &mut Edit, salt: &str, fx: &mut Vec<FxSlot>) {
                         ed.knob(
                             ui,
                             &spec.name.to_uppercase(),
-                            t::ENC_WHITE,
+                            t::enc_white(),
                             &mut v,
                             (spec.min as f64, spec.max as f64, spec.default as f64),
                             spec.log,
@@ -1766,7 +1766,7 @@ fn fx_list(ui: &mut Ui, ed: &mut Edit, salt: &str, fx: &mut Vec<FxSlot>) {
         .selected_text(
             egui::RichText::new("+ Add effect")
                 .font(t::sans(12.5))
-                .color(t::FAINT),
+                .color(t::faint()),
         )
         .show_ui(ui, |ui| {
             kit::menu_style(ui);
@@ -1806,7 +1806,7 @@ mod tests {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let top = ui.cursor().min;
                 area = Rect::from_min_size(top, vec2(ui.available_width(), 150.0)).shrink(10.0);
-                curve_editor(ui, ed, "t", c, kind, t::ENC_BLUE, 1.0);
+                curve_editor(ui, ed, "t", c, kind, t::enc_blue(), 1.0);
             });
         });
         area

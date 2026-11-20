@@ -480,14 +480,14 @@ impl App {
                     true,
                     tl.label(),
                     |p, face, ink| {
-                        tool_icon(p, face.center(), tl, if on { t::TEXT } else { ink });
+                        tool_icon(p, face.center(), tl, if on { t::text() } else { ink });
                         if on {
                             p.line_segment(
                                 [
                                     pos2(face.left() + 7.0, face.bottom() - 2.0),
                                     pos2(face.right() - 7.0, face.bottom() - 2.0),
                                 ],
-                                Stroke::new(1.5_f32, t::TEXT),
+                                Stroke::new(1.5_f32, t::text()),
                             );
                         }
                     },
@@ -693,7 +693,7 @@ impl App {
         painter.rect_filled(
             Rect::from_min_max(well.left_top(), pos2(well.right(), tracks_top)),
             0.0,
-            t::SURFACE,
+            t::surface(),
         );
         kit::caps(
             &painter,
@@ -701,14 +701,14 @@ impl App {
             Align2::LEFT_CENTER,
             "track",
             12.0,
-            t::FAINT,
+            t::faint(),
         );
         painter.line_segment(
             [
                 pos2(view.left(), well.top()),
                 pos2(view.left(), well.bottom()),
             ],
-            Stroke::new(1.0_f32, t::EDGE),
+            Stroke::new(1.0_f32, t::edge()),
         );
         // Grid, ruler and clips paint inside the view only.
         let gp = p.with_clip_rect(view.intersect(well));
@@ -751,13 +751,13 @@ impl App {
                 let text = format!("{}/{}", m.num, m.den);
                 let w = 8.0 + text.len() as f32 * 7.0;
                 let flag = Rect::from_min_size(pos2(x + 1.0, well.top() + 2.0), vec2(w, 12.0));
-                gp.rect_filled(flag, 2.0, t::WAIT);
+                gp.rect_filled(flag, 2.0, t::wait());
                 gp.text(
                     flag.center(),
                     Align2::CENTER_CENTER,
                     text,
                     t::mono(10.5),
-                    t::SUNKEN,
+                    t::sunken(),
                 );
                 label_x = flag.right() + 4.0;
             }
@@ -767,7 +767,7 @@ impl App {
             {
                 label_x = chip.right() + 4.0;
             }
-            let label_col = if strong { t::TEXT } else { t::MUTED };
+            let label_col = if strong { t::text() } else { t::muted() };
             if bar_w * (self.song.bar_tick(b + 1) - tick) as f32 / BAR as f32 >= 22.0 || strong {
                 gp.text(
                     pos2(label_x, well.top() + RULER_H / 2.0 + 3.0),
@@ -782,9 +782,9 @@ impl App {
                 Stroke::new(
                     1.0_f32,
                     if strong {
-                        t::STRONG.gamma_multiply(0.6)
+                        t::strong().gamma_multiply(0.6)
                     } else {
-                        t::LINE
+                        t::line()
                     },
                 ),
             );
@@ -797,30 +797,30 @@ impl App {
                     pos2(chip.left() - 1.0, well.top() + 2.0),
                     pos2(chip.left() - 1.0, well.top() + RULER_H),
                 ],
-                Stroke::new(1.0_f32, t::TEXT),
+                Stroke::new(1.0_f32, t::text()),
             );
-            gp.rect_filled(*chip, 2.0, t::CTL_HOVER);
+            gp.rect_filled(*chip, 2.0, t::ctl_hover());
             let name: String = m.name.chars().take(16).collect();
             gp.text(
                 pos2(chip.left() + 5.0, chip.center().y),
                 Align2::LEFT_CENTER,
                 name,
                 t::mono(10.5),
-                t::TEXT,
+                t::text(),
             );
         }
         if n > 0 {
             let x = grid_l + self.song.end_bar_tick() as f32 / BAR as f32 * bar_w;
             gp.line_segment(
                 [pos2(x, well.top()), pos2(x, grid.top())],
-                Stroke::new(2.0_f32, t::TEXT),
+                Stroke::new(2.0_f32, t::text()),
             );
             gp.text(
                 pos2(x - 4.0, well.top() + RULER_H / 2.0),
                 Align2::RIGHT_CENTER,
                 "END",
                 t::mono(12.0),
-                t::TEXT,
+                t::text(),
             );
         }
 
@@ -855,7 +855,7 @@ impl App {
                 painter.rect_filled(
                     Rect::from_min_max(pos2(well.left(), y), pos2(well.right(), y + lane_h)),
                     0.0,
-                    t::SIDE,
+                    t::side(),
                 );
             }
             painter.line_segment(
@@ -863,15 +863,15 @@ impl App {
                     pos2(well.left(), y + lane_h),
                     pos2(well.right(), y + lane_h),
                 ],
-                Stroke::new(1.0_f32, t::LINE.gamma_multiply(0.6)),
+                Stroke::new(1.0_f32, t::line().gamma_multiply(0.6)),
             );
             let muted = self.song.track_muted(t as u32);
             // Mute LED: lit while the track plays.
             let led_c = pos2(well.left() + 14.0, y + lane_h / 2.0);
             if muted {
-                painter.circle_stroke(led_c, 4.5, Stroke::new(1.5_f32, t::MUTED));
+                painter.circle_stroke(led_c, 4.5, Stroke::new(1.5_f32, t::muted()));
             } else {
-                kit::led(&painter, led_c, 4.5, Some(t::OK));
+                kit::led(&painter, led_c, 4.5, Some(t::ok()));
             }
             let led_hit = Rect::from_center_size(led_c, vec2(24.0, 24.0));
             let led_resp = ui.interact(led_hit, ui.id().with(("track-mute", t)), Sense::click());
@@ -904,9 +904,9 @@ impl App {
                 .map(t::color_from_u32);
             let head_face = Rect::from_min_max(pos2(well.left(), y), pos2(view.left(), y + lane_h));
             // Name ink: dark on light colours, light otherwise.
-            let mut name_ink = if muted { t::FAINT } else { t::MUTED };
+            let mut name_ink = if muted { t::faint() } else { t::muted() };
             if let Some(col) = track_color {
-                painter.rect_filled(head_face, 0.0, kit::mix(t::SIDE, col, 0.45));
+                painter.rect_filled(head_face, 0.0, kit::mix(t::side(), col, 0.45));
                 painter.rect_filled(
                     Rect::from_min_size(head_face.left_top(), vec2(5.0, head_face.height())),
                     0.0,
@@ -915,7 +915,7 @@ impl App {
                 let lum = 0.299 * f32::from(col.r())
                     + 0.587 * f32::from(col.g())
                     + 0.114 * f32::from(col.b());
-                name_ink = if lum > 150.0 { t::KEY_INK } else { t::TEXT };
+                name_ink = if lum > 150.0 { t::key_ink() } else { t::text() };
             }
             if rename.as_ref().is_some_and(|(rt, _)| *rt as usize == t) {
                 let txt = rename.clone().map(|(_, s)| s).unwrap_or_default();
@@ -1026,7 +1026,7 @@ impl App {
                         ui.close_menu();
                     }
                     ui.separator();
-                    for col in t::COLOR_PALETTE {
+                    for col in t::color_palette() {
                         let hex = format!("{:02X}{:02X}{:02X}", col.r(), col.g(), col.b());
                         let on = cur_color == Some(t::u32_from_color(col));
                         let (r, resp) =
@@ -1044,7 +1044,7 @@ impl App {
                             Align2::LEFT_CENTER,
                             format!("#{hex}"),
                             t::sans(13.0),
-                            if on { t::TEXT } else { t::MUTED },
+                            if on { t::text() } else { t::muted() },
                         );
                         if resp.clicked() {
                             self.checkpoint();
@@ -1138,7 +1138,7 @@ impl App {
                 Align2::CENTER_CENTER,
                 "Click the grid or use Add clip to place a pattern.",
                 t::sans(14.0),
-                t::MUTED,
+                t::muted(),
             );
         }
 
@@ -1209,17 +1209,17 @@ impl App {
             // (FL clip look); square corners so the edges read as time.
             let face = r;
             let body = if faded {
-                kit::mix(t::SUNKEN, code, 0.06)
+                kit::mix(t::sunken(), code, 0.06)
             } else {
-                kit::mix(t::PANEL_BOTTOM, code, 0.12 + 0.05 * hover_amt)
+                kit::mix(t::panel_bottom(), code, 0.12 + 0.05 * hover_amt)
             };
             painter.rect_filled(r, 2.0, body);
             let head_h = HEAD_STRIP.min(r.height());
             let head = Rect::from_min_size(r.min, vec2(r.width(), head_h));
             let head_fill = if faded {
-                kit::mix(t::SUNKEN, code, 0.25)
+                kit::mix(t::sunken(), code, 0.25)
             } else {
-                kit::mix(t::PANEL_TOP, code, 0.55 + 0.1 * hover_amt)
+                kit::mix(t::panel_top(), code, 0.55 + 0.1 * hover_amt)
             };
             painter.rect_filled(
                 head,
@@ -1232,11 +1232,11 @@ impl App {
                 head_fill,
             );
             let edge = if selected {
-                t::TEXT
+                t::text()
             } else if faded {
-                t::LINE
+                t::line()
             } else {
-                kit::mix(t::EDGE, code, 0.5)
+                kit::mix(t::edge(), code, 0.5)
             };
             painter.rect_stroke(
                 r,
@@ -1267,7 +1267,7 @@ impl App {
                     Align2::LEFT_CENTER,
                     shown,
                     t::medium(12.0),
-                    if faded { t::FAINT } else { t::TEXT },
+                    if faded { t::faint() } else { t::text() },
                 );
             }
             if badge > 0.0 {
@@ -1276,7 +1276,7 @@ impl App {
                     Align2::RIGHT_CENTER,
                     format!("×{shared}"),
                     t::mono(12.0),
-                    if faded { t::FAINT } else { t::MUTED },
+                    if faded { t::faint() } else { t::muted() },
                 );
             }
             // Where the pattern repeats inside a stretched clip.
@@ -1301,7 +1301,7 @@ impl App {
             {
                 // Automation clip: its envelope across the clip (FL draws the curve).
                 let p2 = painter.with_clip_rect(area.intersect(painter.clip_rect()));
-                let ink = if faded { t::FAINT } else { t::ENC_GREEN };
+                let ink = if faded { t::faint() } else { t::enc_green() };
                 super::automation::paint_clip(&p2, area, env, &self.song, c.offset, len, plen, ink);
             } else if area.height() >= 6.0 {
                 let pitches = pat.notes.iter().filter(|n| !n.muted).map(|n| n.pitch);
@@ -1314,7 +1314,7 @@ impl App {
                     let y = area.top()
                         + (f32::from(high - nn.pitch) + 0.5) / (f32::from(high - low) + 1.0)
                             * area.height();
-                    let ink = if faded { t::FAINT } else { t::TEXT };
+                    let ink = if faded { t::faint() } else { t::text() };
                     for pass in pass0..=pass1 {
                         let (s0, s1) = (nn.start + pass * plen, nn.end() + pass * plen);
                         if s1 <= c.offset || s0 >= c.offset + len {
@@ -1338,9 +1338,9 @@ impl App {
             // Drawn, not a glyph: the UI font has no ▾.
             let mc = marker_rect.center();
             let mink = if faded {
-                t::FAINT
+                t::faint()
             } else {
-                t::TEXT.gamma_multiply(0.85)
+                t::text().gamma_multiply(0.85)
             };
             painter.add(egui::Shape::convex_polygon(
                 vec![
@@ -1396,7 +1396,7 @@ impl App {
                         ui.close_menu();
                     }
                     ui.separator();
-                    for col in t::COLOR_PALETTE {
+                    for col in t::color_palette() {
                         let hex = format!("{:02X}{:02X}{:02X}", col.r(), col.g(), col.b());
                         let on = pat_color == Some(t::u32_from_color(col));
                         let (r, resp) =
@@ -1414,7 +1414,7 @@ impl App {
                             Align2::LEFT_CENTER,
                             format!("#{hex}"),
                             t::sans(13.0),
-                            if on { t::TEXT } else { t::MUTED },
+                            if on { t::text() } else { t::muted() },
                         );
                         if on {
                             ui.painter().text(
@@ -1422,7 +1422,7 @@ impl App {
                                 Align2::RIGHT_CENTER,
                                 "✓",
                                 t::sans(13.0),
-                                t::TEXT,
+                                t::text(),
                             );
                         }
                         if resp.clicked() {
@@ -1537,7 +1537,7 @@ impl App {
                                     painter.rect_stroke(
                                         clip_rect(js, jlen, jt),
                                         3.0,
-                                        Stroke::new(1.5_f32, t::TEXT),
+                                        Stroke::new(1.5_f32, t::text()),
                                         egui::StrokeKind::Inside,
                                     );
                                 }
@@ -1546,7 +1546,7 @@ impl App {
                             painter.rect_stroke(
                                 clip_rect(ns, len, nt),
                                 3.0,
-                                Stroke::new(1.5_f32, t::TEXT),
+                                Stroke::new(1.5_f32, t::text()),
                                 egui::StrokeKind::Inside,
                             );
                         }
@@ -1564,7 +1564,7 @@ impl App {
                         painter.rect_stroke(
                             clip_rect(c.start, end - c.start, c.track.min(999)),
                             3.0,
-                            Stroke::new(1.5_f32, t::TEXT),
+                            Stroke::new(1.5_f32, t::text()),
                             egui::StrokeKind::Inside,
                         );
                     }
@@ -1587,7 +1587,7 @@ impl App {
                         painter.rect_stroke(
                             clip_rect(ns, end - ns, c.track.min(999)),
                             3.0,
-                            Stroke::new(1.5_f32, t::TEXT),
+                            Stroke::new(1.5_f32, t::text()),
                             egui::StrokeKind::Inside,
                         );
                     }
@@ -1883,11 +1883,11 @@ impl App {
                 );
                 let rect = Rect::from_two_pos(a_screen, cur_pos).intersect(grid_seen);
                 if rect.is_positive() {
-                    painter.rect_filled(rect, 2.0, t::TEXT.gamma_multiply(0.08));
+                    painter.rect_filled(rect, 2.0, t::text().gamma_multiply(0.08));
                     painter.rect_stroke(
                         rect,
                         2.0,
-                        Stroke::new(1.5_f32, t::TEXT),
+                        Stroke::new(1.5_f32, t::text()),
                         egui::StrokeKind::Inside,
                     );
                 }
@@ -2103,7 +2103,7 @@ impl App {
                 ui.data(|d| d.get_temp(mark_id)).unwrap_or((0, None));
             match marker.filter(|&i| i < self.song.markers.len()) {
                 Some(i) => {
-                    kit::menu_header(ui, egui::RichText::new("Marker").color(t::MUTED));
+                    kit::menu_header(ui, egui::RichText::new("Marker").color(t::muted()));
                     let edit = ui.add(
                         egui::TextEdit::singleline(&mut self.song.markers[i].name)
                             .char_limit(64)
@@ -2155,7 +2155,8 @@ impl App {
             let (_, _, _, num, den) = bar_at(&self.song.meters, tick);
             kit::menu_header(
                 ui,
-                egui::RichText::new(format!("Time signature from bar {}", bar + 1)).color(t::MUTED),
+                egui::RichText::new(format!("Time signature from bar {}", bar + 1))
+                    .color(t::muted()),
             );
             for (n, d) in [
                 (2, 4),
@@ -2257,13 +2258,13 @@ impl App {
             let xa = grid_l + a as f32 / BAR as f32 * bar_w;
             let xb = grid_l + b as f32 / BAR as f32 * bar_w;
             let band = Rect::from_min_max(pos2(xa, well.top()), pos2(xb, well.top() + 5.0));
-            painter.rect_filled(band, 0.0, t::WAIT);
+            painter.rect_filled(band, 0.0, t::wait());
             let wash = Rect::from_min_max(pos2(xa, well.top() + 5.0), pos2(xb, grid.bottom()));
-            painter.rect_filled(wash, 0.0, t::WAIT.gamma_multiply(0.07));
+            painter.rect_filled(wash, 0.0, t::wait().gamma_multiply(0.07));
             for x in [xa, xb] {
                 painter.line_segment(
                     [pos2(x, well.top()), pos2(x, grid.bottom())],
-                    Stroke::new(1.0_f32, t::WAIT.gamma_multiply(0.7)),
+                    Stroke::new(1.0_f32, t::wait().gamma_multiply(0.7)),
                 );
             }
         }
@@ -2295,12 +2296,12 @@ impl App {
             if x >= grid.left() && x <= grid.right() {
                 painter.line_segment(
                     [pos2(x, well.top() + RULER_H - 2.0), pos2(x, grid.bottom())],
-                    Stroke::new(1.5_f32, t::TEXT),
+                    Stroke::new(1.5_f32, t::text()),
                 );
                 let y = well.top() + RULER_H - 2.0;
                 painter.add(egui::Shape::convex_polygon(
                     vec![pos2(x - 6.0, y - 8.0), pos2(x + 6.0, y - 8.0), pos2(x, y)],
-                    t::TEXT,
+                    t::text(),
                     Stroke::NONE,
                 ));
             }
@@ -2336,14 +2337,14 @@ impl App {
                 scroll_x = at * max_scroll;
             }
             let p = ui.painter();
-            p.rect_filled(track, 3.0, t::SUNKEN);
+            p.rect_filled(track, 3.0, t::sunken());
             p.rect_filled(
                 thumb,
                 3.0,
                 if sr.hovered() || sr.dragged() {
-                    t::STRONG
+                    t::strong()
                 } else {
-                    t::CTL_HOVER
+                    t::ctl_hover()
                 },
             );
         }

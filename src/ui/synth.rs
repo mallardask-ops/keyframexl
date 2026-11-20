@@ -193,8 +193,8 @@ impl Edit {
 /// Shared section card used by Forge and Vocal editors.
 pub(super) fn panel(ui: &mut Ui, title: &str, color: Color32, body: impl FnOnce(&mut Ui)) {
     egui::Frame::new()
-        .fill(t::SURFACE)
-        .stroke(Stroke::new(1.0_f32, t::EDGE))
+        .fill(t::surface())
+        .stroke(Stroke::new(1.0_f32, t::edge()))
         .corner_radius(8.0)
         .inner_margin(egui::Margin::symmetric(12, 10))
         .show(ui, |ui| {
@@ -213,7 +213,7 @@ pub(super) fn panel(ui: &mut Ui, title: &str, color: Color32, body: impl FnOnce(
                 Align2::LEFT_CENTER,
                 title,
                 11.0,
-                t::MUTED,
+                t::muted(),
             );
             body(ui);
         });
@@ -236,7 +236,7 @@ pub(super) fn pair(ui: &mut Ui, mut column: impl FnMut(&mut Ui, usize)) {
 
 /// Recessed deep-slate oscilloscope well unique to KeyFrame Tide.
 fn tide_well(p: &egui::Painter, rect: Rect, radius: f32) -> Rect {
-    p.rect_filled(rect, radius, t::EDGE);
+    p.rect_filled(rect, radius, t::edge());
     let well = rect.shrink(1.0);
     let inner = (radius - 1.0).max(1.0);
     p.rect_filled(well, inner, t::TIDE_WELL);
@@ -252,7 +252,7 @@ fn tide_well(p: &egui::Painter, rect: Rect, radius: f32) -> Rect {
             pos2(well.left() + inner * 0.6, y),
             pos2(well.right() - inner * 0.6, y),
         ],
-        Stroke::new(1.0_f32, t::LOW),
+        Stroke::new(1.0_f32, t::low()),
     );
     well
 }
@@ -290,7 +290,7 @@ fn tide_toggle(ui: &mut Ui, label: &str, on: bool, accent: Color32, hint: &str) 
     } else if resp.hovered() {
         t::TIDE_LINE
     } else {
-        t::EDGE
+        t::edge()
     };
     p.rect_filled(rect, 5.0, fill);
     p.rect_stroke(
@@ -310,7 +310,7 @@ fn tide_toggle(ui: &mut Ui, label: &str, on: bool, accent: Color32, hint: &str) 
         Align2::LEFT_CENTER,
         label,
         font,
-        if on { t::TEXT } else { t::TIDE_MIST },
+        if on { t::text() } else { t::TIDE_MIST },
     );
     if kit::show_focus(ui, &resp) {
         kit::focus_ring(p, rect, 5.0);
@@ -367,7 +367,7 @@ fn tide_pills(
             *label,
             if on { t::medium(12.5) } else { font.clone() },
             if on || resp.hovered() {
-                t::TEXT
+                t::text()
             } else {
                 t::TIDE_MIST
             },
@@ -436,7 +436,7 @@ fn bipolar_bar(
         Align2::CENTER_CENTER,
         signed(*value),
         t::mono(12.0),
-        t::TEXT,
+        t::text(),
     );
     let _ = id;
     kit::tip(
@@ -636,7 +636,7 @@ fn tide_wave_scope(
         })
         .collect();
 
-    let wave_col = if active { t::TIDE_CYAN } else { t::STRONG };
+    let wave_col = if active { t::TIDE_CYAN } else { t::strong() };
     if active {
         fill_under_curve(p, &front_pts, cy, t::TIDE_CYAN.gamma_multiply(0.11));
     }
@@ -658,7 +658,7 @@ fn tide_wave_scope(
         && (mpos - *position).abs() > 0.01
     {
         let mx = rail.left() + mpos.clamp(0.0, 1.0) as f32 * rail.width();
-        p.circle_filled(pos2(mx, rail.center().y), 2.5, t::TEXT);
+        p.circle_filled(pos2(mx, rail.center().y), 2.5, t::text());
     }
 
     // Crisp mono HUD readout.
@@ -673,7 +673,7 @@ fn tide_wave_scope(
             signed(*warp_amount)
         ),
         t::mono(12.0),
-        if active { t::TIDE_MIST } else { t::FAINT },
+        if active { t::TIDE_MIST } else { t::faint() },
     );
     if !active {
         p.text(
@@ -681,7 +681,7 @@ fn tide_wave_scope(
             Align2::RIGHT_TOP,
             "MUTED",
             t::mono(12.0),
-            t::WAIT,
+            t::wait(),
         );
     } else if resp.hovered() || resp.dragged() {
         p.text(
@@ -760,7 +760,7 @@ fn tide_spectral_scope(ui: &mut Ui, ed: &mut Edit, c: &mut keyframexl::synth::Sp
             let h = ((amps[i] / top) as f32 * r.height()).max(2.0);
             let odd = i % 2 == 0; // harmonic 1, 3, 5...
             let col = if !on {
-                t::STRONG.gamma_multiply(0.5)
+                t::strong().gamma_multiply(0.5)
             } else if odd {
                 t::TIDE_CYAN
             } else {
@@ -777,7 +777,7 @@ fn tide_spectral_scope(ui: &mut Ui, ed: &mut Edit, c: &mut keyframexl::synth::Sp
                     pos2(bar.right(), (bar.top() + 2.0).min(bar.bottom())),
                 ),
                 1.0,
-                if on { t::TEXT } else { t::STRONG },
+                if on { t::text() } else { t::strong() },
             );
         } else {
             let stub = Rect::from_min_max(
@@ -793,14 +793,14 @@ fn tide_spectral_scope(ui: &mut Ui, ed: &mut Edit, c: &mut keyframexl::synth::Sp
         Align2::LEFT_TOP,
         format!("SPECTRAL  {n} PARTIALS  TILT {}", signed(c.tilt)),
         t::mono(12.0),
-        if on { t::TIDE_MIST } else { t::FAINT },
+        if on { t::TIDE_MIST } else { t::faint() },
     );
     p.text(
         well.right_top() + vec2(-8.0, 5.0),
         Align2::RIGHT_TOP,
         if on { "X:COUNT  Y:TILT" } else { "MUTED" },
         t::mono(12.0),
-        if on { t::TIDE_CYAN } else { t::WAIT },
+        if on { t::TIDE_CYAN } else { t::wait() },
     );
     kit::tip(
         resp,
@@ -922,7 +922,7 @@ fn tide_filter_scope(ui: &mut Ui, ed: &mut Edit, p: &mut SynthPatch) {
     };
     painter.circle_filled(pos2(cx, cy), node_r + 2.0, t::TIDE_WELL);
     painter.circle_filled(pos2(cx, cy), node_r, t::TIDE_CORAL);
-    painter.circle_stroke(pos2(cx, cy), node_r, Stroke::new(1.2_f32, t::TEXT));
+    painter.circle_stroke(pos2(cx, cy), node_r, Stroke::new(1.2_f32, t::text()));
 
     painter.text(
         well.left_top() + vec2(8.0, 5.0),
@@ -1180,7 +1180,7 @@ fn source_color(s: ModSource) -> Color32 {
         ModSource::Velocity | ModSource::ModWheel | ModSource::Pressure | ModSource::Slide => {
             t::TIDE_CYAN
         }
-        ModSource::Macro(_) => t::ENC_WHITE,
+        ModSource::Macro(_) => t::enc_white(),
     }
 }
 
@@ -1221,7 +1221,7 @@ fn lfo_scope(ui: &mut Ui, lfo: &Lfo, tempo: f64) {
         })
         .collect();
     let col = if lfo.shape == LfoShape::Off {
-        t::STRONG
+        t::strong()
     } else {
         t::TIDE_MINT
     };
@@ -1239,7 +1239,7 @@ fn lfo_scope(ui: &mut Ui, lfo: &Lfo, tempo: f64) {
             r.left() + ph as f32 * r.width(),
             r.center().y - val_at(ph) as f32 * r.height() * 0.44,
         );
-        p.circle_filled(dot, 3.8, t::TEXT);
+        p.circle_filled(dot, 3.8, t::text());
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(33));
     }
@@ -1272,7 +1272,7 @@ fn fx_mini_scope(ui: &mut Ui, kind: keyframexl::fx::FxKind, params: &[f32], on: 
     let col = if on {
         t::TIDE_CYAN
     } else {
-        t::STRONG.gamma_multiply(0.55)
+        t::strong().gamma_multiply(0.55)
     };
     match kind {
         FxKind::Drive => {
@@ -1477,7 +1477,7 @@ fn osc_tab_button(
             t::medium(12.0)
         },
         if selected || on {
-            t::TEXT
+            t::text()
         } else {
             t::TIDE_MIST
         },
@@ -1487,7 +1487,7 @@ fn osc_tab_button(
         Align2::LEFT_BOTTOM,
         if on { pct(level) } else { "OFF".into() },
         t::mono(11.0),
-        if on { t::TIDE_CYAN } else { t::FAINT },
+        if on { t::TIDE_CYAN } else { t::faint() },
     );
 
     // Mini waveform thumbnail on the right half of the tab.
@@ -1497,7 +1497,7 @@ fn osc_tab_button(
         pos2(rect.right() - 7.0, rect.bottom() - 7.0),
     );
     if thumb.width() > 16.0 {
-        preview_fn(p, thumb, if on { t::TIDE_CYAN } else { t::STRONG });
+        preview_fn(p, thumb, if on { t::TIDE_CYAN } else { t::strong() });
     }
 
     kit::tip(led_resp.clone(), format!("Toggle {label} on/off"));
@@ -1608,7 +1608,7 @@ fn audition_keyboard(app: &mut App, ui: &mut Ui, id: u64, octave: &mut i8, accen
         let kb_h = 34.0;
         let (area, resp) = ui.allocate_exact_size(vec2(kb_w, kb_h), Sense::click_and_drag());
         let p = ui.painter();
-        p.rect_filled(area, 4.0, t::EDGE);
+        p.rect_filled(area, 4.0, t::edge());
         let inner = area.shrink(1.0);
         let base_note = ((*octave + 1) * 12) as u8;
         let octaves = 2usize;
@@ -1645,25 +1645,25 @@ fn audition_keyboard(app: &mut App, ui: &mut Ui, id: u64, octave: &mut i8, accen
         // Paint white keys.
         for &(note, r) in &white_rects {
             let active = held_pitch == Some(note);
-            p.rect_filled(r, 2.0, if active { accent } else { t::KEY_WHITE });
+            p.rect_filled(r, 2.0, if active { accent } else { t::key_white() });
             if note % 12 == 0 {
                 p.text(
                     pos2(r.center().x, r.bottom() - 2.0),
                     Align2::CENTER_BOTTOM,
                     super::roll::note_name(note),
                     t::mono(10.0),
-                    if active { t::EDGE } else { t::KEY_INK },
+                    if active { t::edge() } else { t::key_ink() },
                 );
             }
         }
         // Paint black keys on top.
         for &(note, r) in &black_rects {
             let active = held_pitch == Some(note);
-            p.rect_filled(r, 2.0, if active { accent } else { t::KEY_BLACK });
+            p.rect_filled(r, 2.0, if active { accent } else { t::key_black() });
             p.rect_stroke(
                 r,
                 2.0,
-                Stroke::new(1.0_f32, t::EDGE),
+                Stroke::new(1.0_f32, t::edge()),
                 egui::StrokeKind::Inside,
             );
         }
@@ -1712,6 +1712,7 @@ impl App {
             .corner_radius(9.0)
             .inner_margin(egui::Margin::same(8))
             .show(ui, |ui| {
+                let _dark = t::Faceplate::enter(ui);
                 ui.set_width(ui.available_width());
                 ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
 
@@ -1832,7 +1833,7 @@ impl App {
                     ui.label(
                         egui::RichText::new("TIDE")
                             .font(t::semibold(15.0))
-                            .color(t::TEXT),
+                            .color(t::text()),
                     );
 
                     // Interactive signal-chain indicators: [A][B][C] -> [FLT] -> [FX]
@@ -1883,7 +1884,7 @@ impl App {
                             Align2::CENTER_CENTER,
                             tag,
                             t::mono(12.0),
-                            if active { t::TEXT } else { t::FAINT },
+                            if active { t::text() } else { t::faint() },
                         );
                         if kit::tip(resp, tip).clicked() {
                             view.osc_tab = tab_idx;
@@ -1923,7 +1924,7 @@ impl App {
                         Align2::CENTER_CENTER,
                         fx_label,
                         t::mono(12.0),
-                        if fx_on > 0 { t::TEXT } else { t::FAINT },
+                        if fx_on > 0 { t::text() } else { t::faint() },
                     );
                     if kit::tip(fx_resp, "Open Effects bay").clicked() {
                         view.deck_tab = 2;
@@ -1950,7 +1951,7 @@ impl App {
                                 ui.label(
                                     egui::RichText::new(text)
                                         .font(t::sans(12.0))
-                                        .color(t::FAINT),
+                                        .color(t::faint()),
                                 );
                             };
                             // Factory presets by category, then the saved ones.
@@ -2991,7 +2992,7 @@ impl App {
                                             ed.knob(
                                                 ui,
                                                 label,
-                                                if on { t::TIDE_CYAN } else { t::STRONG },
+                                                if on { t::TIDE_CYAN } else { t::strong() },
                                                 &mut v,
                                                 (
                                                     spec.min as f64,
@@ -3082,7 +3083,7 @@ impl App {
                         ed.knob(
                             ui,
                             "GLIDE",
-                            t::ENC_WHITE,
+                            t::enc_white(),
                             &mut p.glide,
                             (0.0, 10.0, 0.0),
                             true,
@@ -3092,7 +3093,7 @@ impl App {
                         ed.knob(
                             ui,
                             "BEND",
-                            t::ENC_WHITE,
+                            t::enc_white(),
                             &mut p.bend_range,
                             (0.0, 48.0, 2.0),
                             false,
@@ -3106,7 +3107,7 @@ impl App {
                 tide_bay(ui, |ui| {
                     ui.horizontal(|ui| {
                         let (sq, _) = ui.allocate_exact_size(vec2(7.0, 7.0), Sense::hover());
-                        ui.painter().rect_filled(sq, 1.5, t::ENC_WHITE);
+                        ui.painter().rect_filled(sq, 1.5, t::enc_white());
                         ui.label(
                             egui::RichText::new("MACRO ROUTING")
                                 .font(t::mono(12.0))
@@ -3129,7 +3130,7 @@ impl App {
                                             pct(m.value)
                                         ))
                                         .font(t::mono(12.0))
-                                        .color(t::TEXT),
+                                        .color(t::text()),
                                     );
                                     let free =
                                         m.routes.iter().position(|rt| rt.depth.abs() <= 0.001);

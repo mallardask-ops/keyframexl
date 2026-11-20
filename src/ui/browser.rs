@@ -336,7 +336,7 @@ impl App {
                         } else {
                             "No instruments yet."
                         };
-                        ui.label(RichText::new(note).font(t::sans(12.0)).color(t::FAINT));
+                        ui.label(RichText::new(note).font(t::sans(12.0)).color(t::faint()));
                     }
                     for plugin in &insts {
                         let r = ui.add(
@@ -424,14 +424,14 @@ impl App {
                         ui.label(
                             RichText::new("No matching effects")
                                 .font(t::sans(12.0))
-                                .color(t::FAINT),
+                                .color(t::faint()),
                         );
                     }
                     if !fxs.is_empty() {
                         ui.label(
                             RichText::new("External plugins")
                                 .font(t::sans(12.0))
-                                .color(t::MUTED),
+                                .color(t::muted()),
                         );
                     }
                     for plugin in &fxs {
@@ -486,7 +486,7 @@ impl App {
                             "{problems} plugin(s) with problems — Settings → Plugins → Problems"
                         ))
                         .font(t::sans(12.0))
-                        .color(t::WAIT),
+                        .color(t::wait()),
                     );
                 }
                 egui::CollapsingHeader::new(RichText::new("Presets").font(t::sans(13.0))).show(
@@ -567,7 +567,7 @@ impl App {
             ui.label(
                 RichText::new(format!("Files: {}", path.display()))
                     .font(t::sans(12.0))
-                    .color(t::FAINT),
+                    .color(t::faint()),
             );
             return;
         }
@@ -830,7 +830,7 @@ impl App {
                     .filter(|(i, _)| SynthPatch::CATEGORIES[*i] == cat)
                 {
                     if first && cat != "Init" {
-                        ui.label(RichText::new(cat).font(t::sans(11.5)).color(t::FAINT));
+                        ui.label(RichText::new(cat).font(t::sans(11.5)).color(t::faint()));
                     }
                     first = false;
                     let key = format!("factory:{}", name.to_lowercase().replace(' ', "-"));
@@ -838,7 +838,7 @@ impl App {
                 }
             }
             if !saved.is_empty() {
-                ui.label(RichText::new("Saved").font(t::sans(11.5)).color(t::FAINT));
+                ui.label(RichText::new("Saved").font(t::sans(11.5)).color(t::faint()));
             }
             for (path, u) in &saved {
                 row(
@@ -918,7 +918,7 @@ impl App {
             });
             if picked.len() > 1 {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Match").font(t::sans(12.0)).color(t::FAINT));
+                    ui.label(RichText::new("Match").font(t::sans(12.0)).color(t::faint()));
                     if ui.selectable_label(!all, "Any").clicked() {
                         all = false;
                     }
@@ -938,7 +938,7 @@ impl App {
                 ui.label(
                     RichText::new("Pick tags to list what has them.")
                         .font(t::sans(12.0))
-                        .color(t::FAINT),
+                        .color(t::faint()),
                 );
                 Vec::new()
             };
@@ -946,7 +946,7 @@ impl App {
                 ui.label(
                     RichText::new("Nothing has these tags.")
                         .font(t::sans(12.0))
-                        .color(t::FAINT),
+                        .color(t::faint()),
                 );
             }
             let known: Vec<Scanned> = self
@@ -1020,7 +1020,7 @@ impl App {
                     .label(
                         RichText::new(format!("{mark}{name}"))
                             .font(t::sans(13.0))
-                            .color(t::FAINT),
+                            .color(t::faint()),
                     )
                     .on_hover_text(format!("{key} is missing"));
                 r.context_menu(|ui| menu_tail(ui, &mut act));
@@ -1140,7 +1140,7 @@ impl App {
                     } else {
                         "No plugins found. Options → Plugins adds folders."
                     };
-                    ui.label(RichText::new(note).font(t::sans(13.0)).color(t::FAINT));
+                    ui.label(RichText::new(note).font(t::sans(13.0)).color(t::faint()));
                 }
                 egui::ScrollArea::vertical()
                     .max_height(320.0)
@@ -1153,7 +1153,7 @@ impl App {
                             if items.is_empty() {
                                 continue;
                             }
-                            ui.label(RichText::new(title).font(t::sans(13.0)).color(t::MUTED));
+                            ui.label(RichText::new(title).font(t::sans(13.0)).color(t::muted()));
                             for p in items {
                                 let label = if p.vendor.is_empty() {
                                     p.name.clone()

@@ -115,7 +115,7 @@ impl App {
                             ui.label(
                                 RichText::new("Nothing matches.")
                                     .font(t::sans(12.0))
-                                    .color(t::FAINT),
+                                    .color(t::faint()),
                             );
                         }
                         egui::ScrollArea::vertical()

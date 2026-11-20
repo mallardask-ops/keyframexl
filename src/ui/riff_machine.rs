@@ -225,7 +225,7 @@ fn score(ui: &mut Ui, notes: &[Note], span: Tick, height: f32, cursor: Option<Ti
                 Align2::RIGHT_CENTER,
                 super::roll::note_name(key as u8),
                 t::mono(10.),
-                t::MUTED,
+                t::muted(),
             );
         }
     }
@@ -277,13 +277,13 @@ fn score(ui: &mut Ui, notes: &[Note], span: Tick, height: f32, cursor: Option<Ti
         Align2::RIGHT_CENTER,
         "VEL",
         t::mono(9.),
-        t::MUTED,
+        t::muted(),
     );
     if let Some(tick) = cursor {
         p.vline(
             x(tick % span),
             grid.top()..=r.bottom() - 4.,
-            Stroke::new(1.5_f32, t::ENC_ORANGE),
+            Stroke::new(1.5_f32, t::enc_orange()),
         );
     }
 }
@@ -295,7 +295,7 @@ fn stage_list(ui: &mut Ui, s: &mut Session) {
             ui.allocate_exact_size(egui::vec2(ui.available_width(), 32.), egui::Sense::click());
         let p = ui.painter();
         if selected || response.hovered() || response.has_focus() {
-            p.rect_filled(rect, 4., if selected { PAPER } else { t::SELECTION });
+            p.rect_filled(rect, 4., if selected { PAPER } else { t::selection() });
         }
         if selected {
             p.rect_filled(
@@ -309,7 +309,7 @@ fn stage_list(ui: &mut Ui, s: &mut Session) {
             egui::Align2::LEFT_CENTER,
             label,
             t::medium(14.),
-            if selected { MINT } else { t::TEXT },
+            if selected { MINT } else { t::text() },
         );
         if s.recipe.enabled[i] {
             p.circle_filled(rect.right_center() - egui::vec2(12., 0.), 3., MINT);
@@ -317,7 +317,7 @@ fn stage_list(ui: &mut Ui, s: &mut Session) {
             p.circle_stroke(
                 rect.right_center() - egui::vec2(12., 0.),
                 3.,
-                egui::Stroke::new(1.0_f32, t::MUTED),
+                egui::Stroke::new(1.0_f32, t::muted()),
             );
         }
         response.widget_info(|| {
@@ -570,19 +570,19 @@ impl App {
             && !ui.ctx().wants_keyboard_input()
             && ui.input(|i| i.key_pressed(egui::Key::Escape));
         egui::TopBottomPanel::top("riff-header")
-            .frame(egui::Frame::new().fill(t::SIDE).inner_margin(14))
+            .frame(egui::Frame::new().fill(t::side()).inner_margin(14))
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new(&inst_name)
                             .font(t::medium(22.))
-                            .color(t::TEXT),
+                            .color(t::text()),
                     );
                     ui.separator();
                     ui.label(
                         egui::RichText::new(&pattern_name)
                             .font(t::sans(14.))
-                            .color(t::MUTED),
+                            .color(t::muted()),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if kit::button(ui, "Throw dice", kit::Kind::Normal, true).clicked() {
@@ -593,7 +593,7 @@ impl App {
                 });
             });
         egui::TopBottomPanel::bottom("riff-transport")
-            .frame(egui::Frame::new().fill(t::SIDE).inner_margin(12))
+            .frame(egui::Frame::new().fill(t::side()).inner_margin(12))
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
                     let available = self.audio.is_some()
@@ -626,7 +626,7 @@ impl App {
         egui::SidePanel::left("riff-stages")
             .resizable(false)
             .exact_width(174.)
-            .frame(egui::Frame::new().fill(t::PANEL_BOTTOM).inner_margin(10))
+            .frame(egui::Frame::new().fill(t::panel_bottom()).inner_margin(10))
             .show_inside(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     ui.label(egui::RichText::new("Stages").font(t::medium(16.)));
@@ -654,7 +654,7 @@ impl App {
                 });
             });
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(t::BG).inner_margin(16))
+            .frame(egui::Frame::new().fill(t::bg()).inner_margin(16))
             .show_inside(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
@@ -706,11 +706,11 @@ impl App {
                                 replaced
                             ))
                             .font(t::sans(12.))
-                            .color(t::MUTED),
+                            .color(t::muted()),
                         );
                         ui.add_space(12.);
                         egui::Frame::new()
-                            .fill(t::SURFACE)
+                            .fill(t::surface())
                             .inner_margin(12)
                             .corner_radius(6)
                             .show(ui, |ui| {

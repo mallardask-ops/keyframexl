@@ -215,15 +215,15 @@ impl App {
                                     pos2(r.right() + STRIP_GAP / 2.0, r.top() + 8.0),
                                     pos2(r.right() + STRIP_GAP / 2.0, r.bottom() - 8.0),
                                 ],
-                                Stroke::new(1.0_f32, t::EDGE),
+                                Stroke::new(1.0_f32, t::edge()),
                             );
                         }
                         // Where the selected track goes (blue) and what feeds it (orange), FL's lit routing.
                         // A notch on the top edge points the way: down into a destination, up out of a source.
                         let mark = if to.contains(&i) {
-                            Some((t::ENC_BLUE, true))
+                            Some((t::enc_blue(), true))
                         } else if from.contains(&i) {
-                            Some((t::ENC_ORANGE, false))
+                            Some((t::enc_orange(), false))
                         } else {
                             None
                         };
@@ -345,7 +345,7 @@ impl App {
                     p.rect_stroke(
                         strip_rects[t].expand(1.0),
                         7.0,
-                        Stroke::new(2.0_f32, t::ENC_BLUE),
+                        Stroke::new(2.0_f32, t::enc_blue()),
                         egui::StrokeKind::Outside,
                     );
                 }
@@ -353,15 +353,15 @@ impl App {
                     p.rect_stroke(
                         strip_rects[t].expand(1.0),
                         7.0,
-                        Stroke::new(2.0_f32, t::BAD),
+                        Stroke::new(2.0_f32, t::bad()),
                         egui::StrokeKind::Outside,
                     );
                 }
                 None => {}
             }
             if let Some(q) = ptr {
-                p.line_segment([drag.start, q], Stroke::new(2.0_f32, t::ENC_BLUE));
-                p.circle_filled(q, 3.0, t::ENC_BLUE);
+                p.line_segment([drag.start, q], Stroke::new(2.0_f32, t::enc_blue()));
+                p.circle_filled(q, 3.0, t::enc_blue());
             }
             if released {
                 self.route_drag = None;
@@ -441,7 +441,7 @@ impl App {
             Align2::LEFT_CENTER,
             "strip eq",
             11.0,
-            t::FAINT,
+            t::faint(),
         );
         ui.add_space(14.0);
         let fmt = |x: f64| {
@@ -454,9 +454,9 @@ impl App {
         let r = keyframexl::sequence::EQ_RANGE as f64;
         ui.horizontal_wrapped(|ui| {
             for (b, (label, color)) in [
-                ("Low", t::ENC_ORANGE),
-                ("Mid", t::ENC_GREEN),
-                ("High", t::ENC_BLUE),
+                ("Low", t::enc_orange()),
+                ("Mid", t::enc_green()),
+                ("High", t::enc_blue()),
             ]
             .into_iter()
             .enumerate()
@@ -600,17 +600,17 @@ impl App {
         let resp = ui.interact(r, ui.id().with(("strip", i)), Sense::click());
         let hover = kit::hover_amount(ui, &resp);
         let top = if selected {
-            t::CTL_HOVER
+            t::ctl_hover()
         } else {
-            kit::mix(t::PANEL_TOP, t::CTL_TOP, hover * 0.5)
+            kit::mix(t::panel_top(), t::ctl_top(), hover * 0.5)
         };
         kit::raised(
             p,
             r,
             6.0,
             top,
-            t::PANEL_BOTTOM,
-            if selected { t::TEXT } else { t::EDGE },
+            t::panel_bottom(),
+            if selected { t::text() } else { t::edge() },
             false,
             1.0,
         );
@@ -674,7 +674,7 @@ impl App {
                 Align2::LEFT_CENTER,
                 &label,
                 t::mono(12.0),
-                if i == 0 { t::TEXT } else { t::MUTED },
+                if i == 0 { t::text() } else { t::muted() },
             );
             // A default name repeats the number, so only a real name is printed ("Inse…" says nothing).
             let full = self.mixer_name(i);
@@ -686,7 +686,7 @@ impl App {
                     Align2::LEFT_CENTER,
                     name,
                     t::sans(12.0),
-                    t::TEXT,
+                    t::text(),
                 );
             } else if i == 0 {
                 p.text(
@@ -694,7 +694,7 @@ impl App {
                     Align2::LEFT_CENTER,
                     "Master",
                     t::sans(12.0),
-                    t::TEXT,
+                    t::text(),
                 );
             }
             lamp_r =
@@ -715,7 +715,7 @@ impl App {
                 Align2::CENTER_CENTER,
                 label,
                 t::mono(12.0),
-                if i == 0 { t::TEXT } else { t::MUTED },
+                if i == 0 { t::text() } else { t::muted() },
             );
             arm_r =
                 Rect::from_center_size(pos2(r.right() - 12.0, r.top() + 12.0), vec2(16.0, 16.0));
@@ -725,7 +725,7 @@ impl App {
                 Align2::CENTER_CENTER,
                 name,
                 t::sans(12.0),
-                t::TEXT,
+                t::text(),
             );
             lamp_r = Rect::from_center_size(pos2(cx, r.top() + 48.0), vec2(18.0, 18.0));
             pan_r = Rect::from_center_size(pos2(cx - 13.0, r.top() + 74.0), vec2(20.0, 20.0));
@@ -744,13 +744,13 @@ impl App {
         let armed = self.is_armed(i);
         let recording = armed && self.rec.parts.iter().any(|p| p.track == i);
         let dot = if recording {
-            t::BAD
+            t::bad()
         } else if armed {
-            t::BRAND
+            t::brand()
         } else if ar.hovered() {
-            t::MUTED
+            t::muted()
         } else {
-            t::LINE
+            t::line()
         };
         p.circle_filled(arm_r.center(), 4.0, dot);
         let tip = if armed {
@@ -768,7 +768,7 @@ impl App {
             p,
             lamp_r.center(),
             4.5,
-            (!track.muted).then_some(if solo { t::ENC_BLUE } else { t::OK }),
+            (!track.muted).then_some(if solo { t::enc_blue() } else { t::ok() }),
         );
         let ctrl = ui.input(|inp| inp.modifiers.command);
         let tip = if i == 0 {
@@ -807,7 +807,7 @@ impl App {
             };
             let spec = kit::Knob {
                 label: "Sep",
-                color: t::ENC_GREEN,
+                color: t::enc_green(),
                 min: -1.0,
                 max: 1.0,
                 default: 0.0,
@@ -849,7 +849,7 @@ impl App {
         };
         let spec = kit::Knob {
             label: "Pan",
-            color: t::ENC_WHITE,
+            color: t::enc_white(),
             min: -1.0,
             max: 1.0,
             default: 0.0,
@@ -881,7 +881,7 @@ impl App {
         let fmt = |pos: f64| gain_db_text(volume_gain(pos as f32));
         let spec = kit::Knob {
             label: "Volume",
-            color: t::ENC_ORANGE,
+            color: t::enc_orange(),
             min: 0.0,
             max: 1.0,
             default: volume_pos(1.0) as f64,
@@ -924,9 +924,9 @@ impl App {
         if level > 0.0 {
             let db = to_db(level);
             for (low, high, color) in [
-                (DB_MIN, -6.0, t::OK),
-                (-6.0, -1.0, t::WAIT),
-                (-1.0, max_db, t::BAD),
+                (DB_MIN, -6.0, t::ok()),
+                (-6.0, -1.0, t::wait()),
+                (-1.0, max_db, t::bad()),
             ] {
                 if db > low {
                     p.rect_filled(
@@ -947,16 +947,16 @@ impl App {
             let y = y_for(db).clamp(meter.top() + 1.0, meter.bottom() - 1.0);
             p.line_segment(
                 [pos2(meter.left(), y), pos2(meter.right(), y)],
-                Stroke::new(2.0_f32, t::TEXT),
+                Stroke::new(2.0_f32, t::text()),
             );
         }
         let clipped = state.clipped;
         let clip_r = Rect::from_center_size(pos2(meter.center().x, fr.top() + 3.0), vec2(8.0, 6.0));
         let cr = ui.interact(clip_r, ui.id().with(("mix-clipbtn", i)), Sense::click());
         if clipped {
-            p.rect_filled(clip_r, 1.0, t::BAD);
+            p.rect_filled(clip_r, 1.0, t::bad());
         } else {
-            p.rect_filled(clip_r, 1.0, t::LCD_OFF);
+            p.rect_filled(clip_r, 1.0, t::lcd_off());
         }
         let clip_tip = "Clip indicator: lights at 0 dBFS; click to reset";
         if cr.on_hover_text(clip_tip).clicked() {
@@ -972,7 +972,7 @@ impl App {
                 Align2::CENTER_CENTER,
                 fmt(v).replace(" dB", ""),
                 t::mono(12.0),
-                t::MUTED,
+                t::muted(),
             );
         } else {
             // Short strips: the readout rides inside the fader's bottom edge
@@ -982,13 +982,13 @@ impl App {
                 pos2(fr.center().x, fr.bottom() - 9.0),
                 vec2(kit::text_width(p, &shown, t::mono(12.0)) + 10.0, 15.0),
             );
-            p.rect_filled(chip, 3.0, t::SUNKEN);
+            p.rect_filled(chip, 3.0, t::sunken());
             p.text(
                 chip.center(),
                 Align2::CENTER_CENTER,
                 shown,
                 t::mono(12.0),
-                t::MUTED,
+                t::muted(),
             );
         }
         // Route to Master (inserts). Click toggles the Master route; drag the
@@ -1009,7 +1009,7 @@ impl App {
                 Align2::CENTER_CENTER,
                 "→ M",
                 t::mono(12.0),
-                if on { t::TEXT } else { t::FAINT },
+                if on { t::text() } else { t::faint() },
             );
             let mut edit = None;
             resp.context_menu(|ui| {
@@ -1199,9 +1199,9 @@ impl App {
             p,
             r,
             8.0,
-            t::PANEL_TOP,
-            t::PANEL_BOTTOM,
-            t::EDGE,
+            t::panel_top(),
+            t::panel_bottom(),
+            t::edge(),
             false,
             1.0,
         );
@@ -1230,7 +1230,7 @@ impl App {
                     dest.push(format!("{} ({:.0}%)", self.mixer_name(snd.to as usize), snd.level * 100.0));
                 }
                 let to = if dest.is_empty() { "nowhere: not routed, silent".to_string() } else { dest.join(", ") };
-                ui.label(egui::RichText::new(format!("To: {to}")).font(t::sans(12.0)).color(if dest.is_empty() { t::WAIT } else { t::FAINT }));
+                ui.label(egui::RichText::new(format!("To: {to}")).font(t::sans(12.0)).color(if dest.is_empty() { t::wait() } else { t::faint() }));
                 // Sidechain links both ways: what ducks this insert, what it ducks.
                 let keyed_by: Vec<String> = m.fx.iter().filter_map(|f| f.sidechain).map(|k| self.mixer_name(k as usize)).collect();
                 let keys: Vec<String> = (1..self.song.mixer.len())
@@ -1238,10 +1238,10 @@ impl App {
                     .map(|j| self.mixer_name(j))
                     .collect();
                 if !keyed_by.is_empty() {
-                    ui.label(egui::RichText::new(format!("Ducks under: {}", keyed_by.join(", "))).font(t::sans(12.0)).color(t::FAINT));
+                    ui.label(egui::RichText::new(format!("Ducks under: {}", keyed_by.join(", "))).font(t::sans(12.0)).color(t::faint()));
                 }
                 if !keys.is_empty() {
-                    ui.label(egui::RichText::new(format!("Sidechains: {}", keys.join(", "))).font(t::sans(12.0)).color(t::FAINT));
+                    ui.label(egui::RichText::new(format!("Sidechains: {}", keys.join(", "))).font(t::sans(12.0)).color(t::faint()));
                 }
             }
             ui.add_space(6.0);
@@ -1249,7 +1249,7 @@ impl App {
             ui.horizontal(|ui| {
                 let mut pan = self.song.mixer[i].pan as f64;
                 let pan_fmt = |v: f64| if v.abs() < 0.005 { "C".to_string() } else if v < 0.0 { format!("L{:.0}", -v * 100.0) } else { format!("R{:.0}", v * 100.0) };
-                let pan_knob = kit::Knob { label: "Pan", color: t::ENC_WHITE, min: -1.0, max: 1.0, default: 0.0, log: false, fmt: &pan_fmt, hint: "Track pan" };
+                let pan_knob = kit::Knob { label: "Pan", color: t::enc_white(), min: -1.0, max: 1.0, default: 0.0, log: false, fmt: &pan_fmt, hint: "Track pan" };
                 kit::automatable(ui, keyframexl::automation::Target::MixerPan { track: i as u16 });
                 let (_, started, changed) = kit::knob(ui, &pan_knob, &mut pan);
                 if started {
@@ -1265,7 +1265,7 @@ impl App {
                 }
                 let mut sep = self.song.mixer[i].sep as f64;
                 let sep_fmt = |v: f64| if v.abs() < 0.005 { "0".to_string() } else if v < 0.0 { format!("{:.0}% narrower", -v * 100.0) } else { format!("{:.0}% wider", v * 100.0) };
-                let sep_knob = kit::Knob { label: "Sep", color: t::ENC_GREEN, min: -1.0, max: 1.0, default: 0.0, log: false, fmt: &sep_fmt, hint: "Stereo separation: left merges to mono, right widens. Double-click resets." };
+                let sep_knob = kit::Knob { label: "Sep", color: t::enc_green(), min: -1.0, max: 1.0, default: 0.0, log: false, fmt: &sep_fmt, hint: "Stereo separation: left merges to mono, right widens. Double-click resets." };
                 let (_, started, changed) = kit::knob(ui, &sep_knob, &mut sep);
                 if started {
                     self.checkpoint();
@@ -1276,7 +1276,7 @@ impl App {
                 }
             });
             ui.add_space(6.0);
-            kit::caps(ui.painter(), ui.cursor().min + vec2(0.0, 6.0), Align2::LEFT_CENTER, "effects", 11.0, t::FAINT);
+            kit::caps(ui.painter(), ui.cursor().min + vec2(0.0, 6.0), Align2::LEFT_CENTER, "effects", 11.0, t::faint());
             ui.add_space(14.0);
             // The slot list scrolls on its own when the inspector is short, so
             // all ten slots stay reachable at dock height.
@@ -1306,14 +1306,14 @@ impl App {
         if selected {
             kit::thumb(&p, row);
         } else if resp.hovered() {
-            p.rect_filled(row, 4.0, t::RAISED.gamma_multiply(0.6));
+            p.rect_filled(row, 4.0, t::raised().gamma_multiply(0.6));
         }
         p.text(
             pos2(row.left() + 6.0, row.center().y),
             Align2::LEFT_CENTER,
             format!("{}", k + 1),
             t::mono(12.0),
-            t::FAINT,
+            t::faint(),
         );
         match &slot {
             Some(s) => {
@@ -1322,7 +1322,7 @@ impl App {
                     vec2(16.0, 16.0),
                 );
                 let lr = ui.interact(lamp, ui.id().with(("slot-on", track, k)), Sense::click());
-                kit::led(&p, lamp.center(), 3.5, s.enabled.then_some(t::OK));
+                kit::led(&p, lamp.center(), 3.5, s.enabled.then_some(t::ok()));
                 if lr
                     .on_hover_text(if s.enabled {
                         "On: click to bypass"
@@ -1343,7 +1343,7 @@ impl App {
                             Align2::RIGHT_CENTER,
                             format!("SC {i}"),
                             t::mono(11.0),
-                            t::ENC_ORANGE,
+                            t::enc_orange(),
                         );
                         r.width() + 6.0
                     }
@@ -1355,7 +1355,7 @@ impl App {
                     Align2::LEFT_CENTER,
                     name,
                     t::sans(13.0),
-                    if s.enabled { t::TEXT } else { t::MUTED },
+                    if s.enabled { t::text() } else { t::muted() },
                 );
                 // Slot mix.
                 let mr = Rect::from_center_size(
@@ -1365,7 +1365,7 @@ impl App {
                 let mut mix = s.mix as f64;
                 let spec = kit::Knob {
                     label: "Mix",
-                    color: t::ENC_GREEN,
+                    color: t::enc_green(),
                     min: 0.0,
                     max: 1.0,
                     default: 1.0,
@@ -1401,7 +1401,7 @@ impl App {
                     Align2::LEFT_CENTER,
                     "(empty)",
                     t::sans(13.0),
-                    t::FAINT,
+                    t::faint(),
                 );
             }
         }
@@ -1471,7 +1471,7 @@ impl App {
                 let now = s.sidechain.map(|i| i as usize);
                 ui.menu_button("Sidechain input", |ui| {
                     kit::menu_style(ui);
-                    ui.label(egui::RichText::new("For plugins with a sidechain input (a ducking compressor, a gate); others ignore it").font(t::sans(12.0)).color(t::FAINT));
+                    ui.label(egui::RichText::new("For plugins with a sidechain input (a ducking compressor, a gate); others ignore it").font(t::sans(12.0)).color(t::faint()));
                     if let Some(to) = this.sidechain_choices(ui, track, now, "Off") {
                         this.set_sidechain(track, k, to);
                         ui.close_menu();
@@ -1754,12 +1754,12 @@ impl App {
                         ui.label(
                             egui::RichText::new(if on { "On" } else { "Bypassed" })
                                 .font(t::sans(13.0))
-                                .color(if on { t::TEXT } else { t::WAIT }),
+                                .color(if on { t::text() } else { t::wait() }),
                         );
                         ui.label(
                             egui::RichText::new(format!("{} · {}", b.vendor, b.category))
                                 .font(t::sans(12.0))
-                                .color(t::FAINT),
+                                .color(t::faint()),
                         );
                         if kit::tool_button(ui, "Reset", kit::Kind::Ghost, true)
                             .on_hover_text("All parameters to their defaults")
@@ -1778,7 +1778,7 @@ impl App {
                         .unwrap_or_else(|| (slot.params.clone(), slot.params.clone(), 0));
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new("A/B").font(t::sans(11.0)).color(t::FAINT),
+                            egui::RichText::new("A/B").font(t::sans(11.0)).color(t::faint()),
                         );
                         let a = kit::tool_button(
                             ui,
@@ -1836,7 +1836,7 @@ impl App {
                                 ui.label(
                                     egui::RichText::new("Two settings to compare")
                                         .font(t::sans(11.0))
-                                        .color(t::FAINT),
+                                        .color(t::faint()),
                                 );
                             },
                         );
@@ -1851,10 +1851,10 @@ impl App {
                                 .map(|n| n.to_string_lossy().to_string())
                                 .unwrap_or_else(|| "Studio (built-in)".into());
                             ui.label(
-                                egui::RichText::new("Impulse").font(t::sans(12.0)).color(t::FAINT),
+                                egui::RichText::new("Impulse").font(t::sans(12.0)).color(t::faint()),
                             );
                             ui.label(
-                                egui::RichText::new(name).font(t::sans(13.0)).color(t::TEXT),
+                                egui::RichText::new(name).font(t::sans(13.0)).color(t::text()),
                             )
                             .on_hover_text(
                                 slot.ir
@@ -2006,7 +2006,7 @@ impl App {
         let now = self.song.mixer[track].fx[k].sidechain.map(|s| s as usize);
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            kit::caps(ui.painter(), ui.cursor().min + vec2(0.0, 12.0), Align2::LEFT_CENTER, "Sidechain", 11.0, t::FAINT);
+            kit::caps(ui.painter(), ui.cursor().min + vec2(0.0, 12.0), Align2::LEFT_CENTER, "Sidechain", 11.0, t::faint());
             ui.add_space(78.0);
             let mut pick: Option<Option<usize>> = None;
             let shown = now.map(|i| self.insert_label(i)).unwrap_or_else(|| "Off · own signal".into());
@@ -2144,14 +2144,14 @@ impl App {
             )
             .shrink2(vec2(3.0, 0.0));
             let active = slot.params[b * 3 + 1].abs() >= 0.05;
-            let color = super::fx_views::COLORS[b];
+            let color = super::fx_views::band_color(b);
             p.rect_filled(
                 c,
                 4.0,
                 if focus == Some(b) {
-                    t::RAISED
+                    t::raised()
                 } else {
-                    t::SUNKEN.gamma_multiply(0.5)
+                    t::sunken().gamma_multiply(0.5)
                 },
             );
             p.rect_filled(
@@ -2169,7 +2169,7 @@ impl App {
                 Align2::CENTER_CENTER,
                 name,
                 11.0,
-                if active { t::TEXT } else { t::MUTED },
+                if active { t::text() } else { t::muted() },
             );
             for j in 0..3 {
                 let pi = b * 3 + j;
@@ -2221,14 +2221,18 @@ impl App {
                     Align2::LEFT_CENTER,
                     label,
                     t::sans(10.0),
-                    t::FAINT,
+                    t::faint(),
                 );
                 p.text(
                     pos2(kr.right() + 5.0, y + 7.0),
                     Align2::LEFT_CENTER,
                     kit::elide(&p, &shown, t::mono(11.0), c.right() - kr.right() - 6.0),
                     t::mono(11.0),
-                    if active || j != 1 { t::TEXT } else { t::MUTED },
+                    if active || j != 1 {
+                        t::text()
+                    } else {
+                        t::muted()
+                    },
                 );
             }
         }
@@ -2285,7 +2289,7 @@ impl App {
                     }
                 ))
                 .font(t::sans(12.0))
-                .color(t::FAINT),
+                .color(t::faint()),
             );
             ui.label(egui::RichText::new(status).font(t::sans(12.0)).color(color));
             let open = self.plugins.live.get(&p.id).is_some_and(|l| l.editor);
@@ -2351,7 +2355,7 @@ impl App {
                     .copied()
                     .unwrap_or(groups[groups.len() - 1]),
                 10.5,
-                t::FAINT,
+                t::faint(),
             );
             ui.horizontal_wrapped(|ui| {
                 for (offset, spec) in specs.iter().enumerate() {
@@ -2364,8 +2368,12 @@ impl App {
                             let pi = group * 3 + offset;
                             let mut v = slot.params[pi] as f64;
                             let fmt = |x: f64| keyframexl::fx::format(spec, x as f32);
-                            let color =
-                                [t::ENC_BLUE, t::ENC_GREEN, t::ENC_WHITE, t::ENC_ORANGE][pi % 4];
+                            let color = [
+                                t::enc_blue(),
+                                t::enc_green(),
+                                t::enc_white(),
+                                t::enc_orange(),
+                            ][pi % 4];
                             let knob = kit::Knob {
                                 label: spec.name,
                                 color,
@@ -2418,7 +2426,7 @@ impl App {
             Align2::LEFT_CENTER,
             "sends",
             11.0,
-            t::FAINT,
+            t::faint(),
         );
         ui.add_space(14.0);
         let sends = self.song.mixer[track].sends.clone();
@@ -2432,7 +2440,7 @@ impl App {
                 let mut lv = s.level as f64;
                 let spec = kit::Knob {
                     label: "Send",
-                    color: t::ENC_BLUE,
+                    color: t::enc_blue(),
                     min: 0.0,
                     max: 1.0,
                     default: 1.0,

@@ -53,7 +53,7 @@ impl App {
         let hp = p.with_clip_rect(g.head);
         hp.line_segment(
             [g.head.left_top(), g.head.right_top()],
-            Stroke::new(1.0_f32, t::EDGE),
+            Stroke::new(1.0_f32, t::edge()),
         );
         let fold = Rect::from_min_size(
             pos2(g.head.left() + 6.0, g.head.top()),
@@ -71,7 +71,7 @@ impl App {
             Align2::CENTER_CENTER,
             if folded { "▸" } else { "▾" },
             t::mono(11.0),
-            if fr.hovered() { t::TEXT } else { t::FAINT },
+            if fr.hovered() { t::text() } else { t::faint() },
         );
         if fr.clicked() {
             ui.ctx()
@@ -88,7 +88,7 @@ impl App {
             Align2::LEFT_CENTER,
             "tempo",
             12.0,
-            t::FAINT,
+            t::faint(),
         );
         let now = self.tempo_now();
         let value_y = if folded {
@@ -101,7 +101,7 @@ impl App {
             Align2::RIGHT_CENTER,
             format!("{now:.1}"),
             t::mono(12.0),
-            t::TEXT,
+            t::text(),
         );
 
         let lane = g.lane;
@@ -109,10 +109,10 @@ impl App {
             return;
         }
         let lp = p.with_clip_rect(lane);
-        lp.rect_filled(lane, 0.0, t::SUNKEN);
+        lp.rect_filled(lane, 0.0, t::sunken());
         lp.line_segment(
             [lane.left_top(), lane.right_top()],
-            Stroke::new(1.0_f32, t::EDGE),
+            Stroke::new(1.0_f32, t::edge()),
         );
         let inner = lane.shrink2(vec2(0.0, 4.0));
         // Bar lines run through the lane, as on the grid (time signatures counted).
@@ -123,9 +123,9 @@ impl App {
                 Stroke::new(
                     1.0_f32,
                     if strong {
-                        t::STRONG.gamma_multiply(0.6)
+                        t::strong().gamma_multiply(0.6)
                     } else {
-                        t::LINE
+                        t::line()
                     },
                 ),
             );
@@ -174,7 +174,7 @@ impl App {
                 lp.hline(
                     lane.x_range(),
                     y(b),
-                    Stroke::new(1.0_f32, t::LINE.gamma_multiply(0.45)),
+                    Stroke::new(1.0_f32, t::line().gamma_multiply(0.45)),
                 );
                 b += 20.0;
             }
@@ -183,7 +183,7 @@ impl App {
                 Align2::LEFT_CENTER,
                 format!("{lo:.0}–{hi:.0}"),
                 t::mono(10.0),
-                t::FAINT,
+                t::faint(),
             );
         }
 
@@ -203,7 +203,7 @@ impl App {
                         let quad = vec![a, b, pos2(b.x, inner.bottom()), pos2(a.x, inner.bottom())];
                         lp.add(egui::Shape::convex_polygon(
                             quad,
-                            t::ENC_BLUE.gamma_multiply(0.12),
+                            t::enc_blue().gamma_multiply(0.12),
                             Stroke::NONE,
                         ));
                     }
@@ -213,9 +213,9 @@ impl App {
             }
         }
         let col = if ghost {
-            t::ENC_BLUE.gamma_multiply(0.45)
+            t::enc_blue().gamma_multiply(0.45)
         } else {
-            t::ENC_BLUE
+            t::enc_blue()
         };
         lp.add(egui::Shape::line(
             line,
@@ -241,12 +241,12 @@ impl App {
             lp.circle_filled(
                 c,
                 if on { r + 1.5 } else { r },
-                if on { t::TEXT } else { col },
+                if on { t::text() } else { col },
             );
             lp.circle_stroke(
                 c,
                 if on { r + 1.5 } else { r },
-                Stroke::new(1.0_f32, t::EDGE),
+                Stroke::new(1.0_f32, t::edge()),
             );
         }
         let table = TempoTable::build(
@@ -278,7 +278,7 @@ impl App {
                 anchor,
                 tip,
                 t::mono(11.0),
-                t::MUTED,
+                t::muted(),
             );
         }
         if folded {

@@ -39,6 +39,13 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
   FL 2026 on stock Wine. One link channel at a time. See
   [docs/fl-link.md](docs/fl-link.md).
 
+### Interface
+- **Light theme** (*Settings → General → Theme*, *View → Theme*): Dark,
+  Light, or System (follows the desktop through xdg-desktop-portal). All
+  text keeps at least 4.5:1 contrast; Tide and the Sampler stay dark, like
+  hardware on a light desk. The dark theme's Play button text is a little
+  more readable.
+
 ### Fixes
 - **Forge export levels.** Export no longer normalises every file to −1 dB
   by default; each recipe is made at its category's level, so a UI click

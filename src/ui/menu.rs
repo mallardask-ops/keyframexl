@@ -41,10 +41,10 @@ fn check(ui: &mut Ui, label: &str, key: &str, on: bool) -> bool {
 impl App {
     pub(super) fn main_menu(&mut self, ui: &mut Ui) {
         let rect = ui.max_rect();
-        ui.painter().rect_filled(rect, 0.0, t::SIDE);
+        ui.painter().rect_filled(rect, 0.0, t::side());
         ui.painter().line_segment(
             [rect.left_bottom(), rect.right_bottom()],
-            egui::Stroke::new(1.0_f32, t::EDGE),
+            egui::Stroke::new(1.0_f32, t::edge()),
         );
         let row = rect.shrink2(vec2(super::PAGE - 8.0, 0.0));
         // Our own title bar: its empty space moves the window, a double-click
@@ -89,7 +89,7 @@ impl App {
                     RichText::new(s)
                         .font(t::medium(12.0))
                         .extra_letter_spacing(0.8)
-                        .color(t::MUTED)
+                        .color(t::muted())
                 };
                 ui.menu_button(title(tr.menu_file), |ui| self.menu_file(ui));
                 ui.menu_button(title(tr.menu_edit), |ui| self.menu_edit(ui));
@@ -115,7 +115,7 @@ impl App {
                     let menus_end = ui.min_rect().right();
                     let buttons = self.title_buttons(ui, rect);
                     let text = format!("{name}{dirty}  —  KeyFrameXL");
-                    let g = ui.painter().layout_no_wrap(text, t::sans(12.0), t::MUTED);
+                    let g = ui.painter().layout_no_wrap(text, t::sans(12.0), t::muted());
                     let room = (menus_end + 16.0)..(buttons - 16.0);
                     let x = rect.center().x.clamp(
                         room.start + g.size().x / 2.0,
@@ -125,7 +125,7 @@ impl App {
                         ui.painter().galley(
                             pos2(x - g.size().x / 2.0, rect.center().y - g.size().y / 2.0),
                             g,
-                            t::MUTED,
+                            t::muted(),
                         );
                     }
                 } else {
@@ -134,7 +134,7 @@ impl App {
                         ui.label(
                             RichText::new(format!("{name}{dirty}"))
                                 .font(t::sans(12.0))
-                                .color(t::FAINT),
+                                .color(t::faint()),
                         );
                     });
                 }
@@ -168,13 +168,13 @@ impl App {
                     r,
                     0.0,
                     if kind == "close" {
-                        t::BRAND_FILL
+                        t::brand_fill()
                     } else {
-                        t::CTL_HOVER
+                        t::ctl_hover()
                     },
                 );
             }
-            let ink = if hot { t::TEXT } else { t::MUTED };
+            let ink = if hot { t::text() } else { t::muted() };
             let s = egui::Stroke::new(1.2_f32, ink);
             let c = r.center();
             match kind {
@@ -468,7 +468,7 @@ impl App {
                 ui.close_menu();
             }
             ui.separator();
-            for col in crate::theme::COLOR_PALETTE {
+            for col in crate::theme::color_palette() {
                 let hex = format!("{:02X}{:02X}{:02X}", col.r(), col.g(), col.b());
                 let on = cur == Some(crate::theme::u32_from_color(col));
                 if ui.selectable_label(on, format!("#{hex}")).clicked() {
@@ -560,6 +560,16 @@ impl App {
             self.close_all_windows();
         }
         ui.separator();
+        ui.menu_button(RichText::new("Theme").font(t::sans(13.0)), |ui| {
+            kit::menu_style(ui);
+            use crate::settings::ThemeMode;
+            for mode in ThemeMode::ALL {
+                if check(ui, mode.label(), "", self.settings.general.theme == mode) {
+                    self.settings.general.theme = mode;
+                    self.save_settings();
+                }
+            }
+        });
         ui.menu_button(RichText::new("Interface size").font(t::sans(13.0)), |ui| {
             kit::menu_style(ui);
             use crate::settings::{UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALES, step_ui_scale};
@@ -650,7 +660,7 @@ impl App {
             ui.menu_button(RichText::new("Last tweaked").font(t::sans(13.0)), |ui| {
                 kit::menu_style(ui);
                 if let Some(name) = &last_name {
-                    ui.label(RichText::new(name).font(t::sans(11.5)).color(t::MUTED));
+                    ui.label(RichText::new(name).font(t::sans(11.5)).color(t::muted()));
                     ui.separator();
                 }
                 let Some(target) = last else {
@@ -826,7 +836,11 @@ impl App {
                                 continue;
                             }
                             ui.add_space(6.0);
-                            ui.label(RichText::new(g.title).font(t::medium(13.0)).color(t::TEXT));
+                            ui.label(
+                                RichText::new(g.title)
+                                    .font(t::medium(13.0))
+                                    .color(t::text()),
+                            );
                             egui::Grid::new(("keys", g.title))
                                 .num_columns(2)
                                 .min_col_width(170.0)
@@ -835,12 +849,12 @@ impl App {
                                 .show(ui, |ui| {
                                     for (k, what) in rows {
                                         ui.label(
-                                            RichText::new(*k).font(t::mono(12.0)).color(t::TEXT),
+                                            RichText::new(*k).font(t::mono(12.0)).color(t::text()),
                                         );
                                         ui.label(
                                             RichText::new(*what)
                                                 .font(t::sans(13.0))
-                                                .color(t::MUTED),
+                                                .color(t::muted()),
                                         );
                                         ui.end_row();
                                     }
@@ -882,18 +896,18 @@ impl App {
                             ui.label(
                                 RichText::new("KeyFrame")
                                     .font(t::semibold(17.0))
-                                    .color(t::TEXT),
+                                    .color(t::text()),
                             );
                             ui.label(
                                 RichText::new("XL")
                                     .font(t::mono_medium(13.0))
-                                    .color(t::BRAND),
+                                    .color(t::brand()),
                             );
                         });
                         ui.label(
                             RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION")))
                                 .font(t::mono(12.0))
-                                .color(t::MUTED),
+                                .color(t::muted()),
                         );
                     });
                 });
@@ -901,10 +915,10 @@ impl App {
                 ui.label(
                     RichText::new("Pattern-based music sequencer for Linux.")
                         .font(t::sans(13.0))
-                        .color(t::TEXT),
+                        .color(t::text()),
                 );
                 if let Some(line) = audio {
-                    ui.label(RichText::new(line).font(t::mono(12.0)).color(t::MUTED));
+                    ui.label(RichText::new(line).font(t::mono(12.0)).color(t::muted()));
                 }
                 ui.add_space(8.0);
                 if ui.button("Close").clicked() {

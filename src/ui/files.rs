@@ -430,7 +430,7 @@ impl App {
                 Align2::LEFT_CENTER,
                 "sort",
                 11.0,
-                t::FAINT,
+                t::faint(),
             );
             let mut pick = None;
             let w = ui.available_width() - 2.0;
@@ -462,7 +462,7 @@ impl App {
             ui.label(
                 egui::RichText::new(text)
                     .font(t::sans(12.0))
-                    .color(t::FAINT),
+                    .color(t::faint()),
             );
             if !done {
                 ui.ctx()
@@ -473,7 +473,7 @@ impl App {
             ui.label(
                 egui::RichText::new("No folders. Add one above.")
                     .font(t::sans(12.0))
-                    .color(t::FAINT),
+                    .color(t::faint()),
             );
         }
         let mut action: Option<(PathBuf, &str)> = None;
@@ -490,7 +490,7 @@ impl App {
             if current {
                 kit::thumb(p, rect);
             } else if resp.hovered() {
-                p.rect_filled(rect, kit::RADIUS - 1.0, t::RAISED.gamma_multiply(0.6));
+                p.rect_filled(rect, kit::RADIUS - 1.0, t::raised().gamma_multiply(0.6));
             }
             let x = rect.left() + 6.0 + *depth as f32 * 12.0;
             let c = pos2(x + 5.0, rect.center().y);
@@ -508,7 +508,7 @@ impl App {
                         c + vec2(-2.0, 4.0),
                     ]
                 };
-                p.add(egui::Shape::convex_polygon(pts, t::MUTED, Stroke::NONE));
+                p.add(egui::Shape::convex_polygon(pts, t::muted(), Stroke::NONE));
             } else if !e.name.ends_with('…') {
                 let tag = ext(&e.path);
                 let playing = self.previewing.as_ref() == Some(&e.path);
@@ -518,11 +518,15 @@ impl App {
                     Align2::LEFT_CENTER,
                     &tag,
                     9.0,
-                    if playing { t::OK } else { t::FAINT },
+                    if playing { t::ok() } else { t::faint() },
                 );
             }
             let tx = x + if e.dir { 14.0 } else { 30.0 };
-            let ink = if e.dir || current { t::TEXT } else { t::MUTED };
+            let ink = if e.dir || current {
+                t::text()
+            } else {
+                t::muted()
+            };
             let shown = kit::elide(p, &e.name, t::sans(13.0), rect.right() - tx - 4.0);
             p.text(
                 pos2(tx, rect.center().y),
@@ -554,7 +558,7 @@ impl App {
                         Align2::CENTER_CENTER,
                         label,
                         t::sans(13.0),
-                        t::TEXT,
+                        t::text(),
                     );
                 }
             }

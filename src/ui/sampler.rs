@@ -237,7 +237,7 @@ struct P<'a> {
 // ---------------------------------------------------------------- Sampler visual primitives
 
 fn smp_well(p: &egui::Painter, rect: Rect, radius: f32) -> Rect {
-    p.rect_filled(rect, radius, t::EDGE);
+    p.rect_filled(rect, radius, t::edge());
     let well = rect.shrink(1.0);
     let inner = (radius - 1.0).max(1.0);
     p.rect_filled(well, inner, t::SMP_WELL);
@@ -253,7 +253,7 @@ fn smp_well(p: &egui::Painter, rect: Rect, radius: f32) -> Rect {
             pos2(well.left() + inner * 0.6, y),
             pos2(well.right() - inner * 0.6, y),
         ],
-        Stroke::new(1.0_f32, t::LOW),
+        Stroke::new(1.0_f32, t::low()),
     );
     well
 }
@@ -338,7 +338,7 @@ fn smp_pills(
             *label,
             if on { t::medium(12.5) } else { font.clone() },
             if on || resp.hovered() {
-                t::TEXT
+                t::text()
             } else {
                 t::SMP_SAND
             },
@@ -448,7 +448,7 @@ fn smp_bipolar_bar(
         Align2::CENTER_CENTER,
         if enabled { signed(*value) } else { "--".into() },
         t::mono(12.0),
-        if enabled { t::TEXT } else { t::FAINT },
+        if enabled { t::text() } else { t::faint() },
     );
     kit::tip(
         resp,
@@ -459,7 +459,7 @@ fn smp_bipolar_bar(
 
 fn mod_source_color(s: ModSource) -> Color32 {
     match s {
-        ModSource::None => t::STRONG,
+        ModSource::None => t::strong(),
         ModSource::Lfo1 | ModSource::Lfo2 | ModSource::ProgLfo1 | ModSource::ProgLfo2 => {
             t::SMP_START
         }
@@ -550,7 +550,7 @@ impl App {
         if preset.zones.is_empty() {
             ui.label(
                 egui::RichText::new("This preset has no zones. Load another .dwp or audio sample.")
-                    .color(t::MUTED),
+                    .color(t::muted()),
             );
             return;
         }
@@ -570,6 +570,7 @@ impl App {
             .corner_radius(9.0)
             .inner_margin(egui::Margin::same(8))
             .show(ui, |ui| {
+                let _dark = t::Faceplate::enter(ui);
                 ui.set_width(ui.available_width());
                 ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
 
@@ -652,7 +653,7 @@ impl App {
                     ui.label(
                         egui::RichText::new("DWP")
                             .font(t::semibold(15.0))
-                            .color(t::TEXT),
+                            .color(t::text()),
                     );
 
                     // Zone & audio telemetry badge.
@@ -731,7 +732,7 @@ impl App {
                             Align2::CENTER_CENTER,
                             format!("▶ {}", super::roll::note_name(z.root)),
                             t::mono(12.0),
-                            if held_now { t::EDGE } else { t::SMP_GOLD },
+                            if held_now { t::edge() } else { t::SMP_GOLD },
                         );
                         kit::tip(btn_resp, "Hold to audition the active zone at its root key");
                     });
@@ -807,7 +808,7 @@ impl App {
         // Paint zones.
         let mut zone_rects: Vec<Rect> = Vec::with_capacity(preset.zones.len());
         for (i, z) in preset.zones.iter().enumerate() {
-            let code = t::PATTERN_CODES[i % t::PATTERN_CODES.len()];
+            let code = t::pattern_codes()[i % t::pattern_codes().len()];
             let r = Rect::from_min_max(
                 pos2(kx(z.low), vy(z.high_velocity)),
                 pos2(kx(z.high) + key_w, vy(z.low_velocity)),
@@ -848,7 +849,7 @@ impl App {
                 Align2::LEFT_TOP,
                 shown,
                 t::mono(12.0),
-                if on { t::TEXT } else { t::FAINT },
+                if on { t::text() } else { t::faint() },
             );
             if pointer.is_some_and(|q| r.contains(q) && map_outer.contains(q)) {
                 hovered_zone = Some(i);
@@ -856,7 +857,7 @@ impl App {
         }
 
         // Paint fused Piano Keyboard strip aligned 1:1 with lo..=hi.
-        p.rect_filled(kb_rect, 3.0, t::EDGE);
+        p.rect_filled(kb_rect, 3.0, t::edge());
         for k in lo..=hi {
             let x0 = kx(k);
             let kr = Rect::from_min_size(
@@ -868,9 +869,9 @@ impl App {
             let col = if active {
                 t::SMP_GOLD
             } else if black {
-                t::KEY_BLACK
+                t::key_black()
             } else {
-                t::KEY_WHITE
+                t::key_white()
             };
             p.rect_filled(kr, 1.5, col);
             if k % 12 == 0 {
@@ -879,7 +880,7 @@ impl App {
                     Align2::LEFT_BOTTOM,
                     super::roll::note_name(k),
                     t::mono(10.0),
-                    if active { t::EDGE } else { t::KEY_INK },
+                    if active { t::edge() } else { t::key_ink() },
                 );
             }
         }
@@ -899,7 +900,7 @@ impl App {
         p.add(Shape::convex_polygon(
             diamond,
             t::SMP_GOLD,
-            Stroke::new(1.0_f32, t::EDGE),
+            Stroke::new(1.0_f32, t::edge()),
         ));
 
         // Interaction state machine: 0=none, 1=piano audition, 2=drag root, 3..6=resize zone L/R/T/B.
@@ -1208,7 +1209,7 @@ impl App {
                     (total_frames * 8) as f64 / (1024.0 * 1024.0),
                 ))
                 .font(t::mono(12.5))
-                .color(t::TEXT),
+                .color(t::text()),
             );
             if !preset.report.is_empty() {
                 egui::Frame::new()
@@ -1656,7 +1657,7 @@ impl App {
                     Align2::CENTER_CENTER,
                     label,
                     t::mono(10.0),
-                    t::EDGE,
+                    t::edge(),
                 );
             };
 
@@ -1827,7 +1828,7 @@ impl App {
         let wide = ui.available_width() >= TWO_COLUMNS;
         let filter_card = |this: &mut Self, ui: &mut Ui, fi: usize| {
             let col = if fi == 0 {
-                t::ENC_ORANGE
+                t::enc_orange()
             } else {
                 t::SMP_FILTER2
             };
@@ -1989,7 +1990,7 @@ impl App {
             let pts1 = make_pts(&|fr| filter_gain(f1.kind, fr, f1.cutoff, f1.emphasis));
             p.add(Shape::line(
                 pts1,
-                Stroke::new(1.4_f32, t::ENC_ORANGE.gamma_multiply(0.75)),
+                Stroke::new(1.4_f32, t::enc_orange().gamma_multiply(0.75)),
             ));
         }
         if f2.kind != FilterKind::Off {
@@ -2024,7 +2025,7 @@ impl App {
                 r.bottom() - (0.28 + flt.emphasis as f32 * 0.62) * r.height(),
             )
         };
-        let nodes = [(0usize, f1, t::ENC_ORANGE), (1usize, f2, t::SMP_FILTER2)];
+        let nodes = [(0usize, f1, t::enc_orange()), (1usize, f2, t::SMP_FILTER2)];
         let drag_id = ui.id().with(("smp-flt-node", id));
         if resp.drag_started()
             && let Some(pt) = resp.interact_pointer_pos()
@@ -2080,7 +2081,7 @@ impl App {
                 Align2::CENTER_CENTER,
                 format!("{}", fi + 1),
                 t::mono(10.0),
-                t::EDGE,
+                t::edge(),
             );
         }
 
@@ -2282,7 +2283,7 @@ impl App {
                                 ui.label(
                                     egui::RichText::new(format!("{:02}", si + 1))
                                         .font(t::mono(12.0))
-                                        .color(t::FAINT),
+                                        .color(t::faint()),
                                 );
                                 let mut src = m.source;
                                 egui::ComboBox::from_id_salt(("msrc", id, si))
@@ -2393,7 +2394,7 @@ impl App {
             for (i, z) in preset.zones.iter().enumerate() {
                 let (row, row_resp) = ui.allocate_exact_size(vec2(w, 32.0), Sense::click());
                 let is_sel = selected == Some(i);
-                let code = t::PATTERN_CODES[i % t::PATTERN_CODES.len()];
+                let code = t::pattern_codes()[i % t::pattern_codes().len()];
                 if is_sel {
                     p.rect_filled(row, 4.0, t::SMP_DECK_HI);
                     p.rect_filled(
@@ -2434,7 +2435,7 @@ impl App {
                     Align2::CENTER_CENTER,
                     "▶",
                     t::mono(10.0),
-                    if down { t::EDGE } else { t::SMP_GOLD },
+                    if down { t::edge() } else { t::SMP_GOLD },
                 );
 
                 // Mini waveform sparkline.
@@ -2489,7 +2490,7 @@ impl App {
                         Align2::LEFT_CENTER,
                         shown,
                         font,
-                        if col_i == 1 { code } else { t::TEXT },
+                        if col_i == 1 { code } else { t::text() },
                     );
                 }
 
@@ -2688,7 +2689,7 @@ fn sampler_lfo_scope(ui: &mut Ui, lfo: &Lfo) {
             r.center().y - (dot_v as f32).clamp(-1.0, 1.0) * r.height() * 0.44,
         ),
         3.2,
-        t::TEXT,
+        t::text(),
     );
     ui.ctx()
         .request_repaint_after(std::time::Duration::from_millis(40));

@@ -125,7 +125,7 @@ impl App {
                 ui,
                 egui::RichText::new(note)
                     .font(t::sans(13.0))
-                    .color(t::MUTED),
+                    .color(t::muted()),
             );
         }
         for s in list {
@@ -419,7 +419,7 @@ impl App {
             self.drop_file_on_channel(id, drag.0.clone());
         }
         let InstrumentKind::Sampler { preset } = &inst.kind else {
-            ui.label(egui::RichText::new("Built-in drum voice. Its steps live in the channel rack and the piano roll; sound parameters arrive with the parameter system.").color(t::MUTED));
+            ui.label(egui::RichText::new("Built-in drum voice. Its steps live in the channel rack and the piano roll; sound parameters arrive with the parameter system.").color(t::muted()));
             return;
         };
         let Some(preset) = preset.clone() else {
@@ -438,6 +438,7 @@ impl App {
     }
 
     fn empty_sampler(&mut self, ui: &mut Ui, id: u64, loading: bool) {
+        let _dark = t::Faceplate::enter(ui);
         let h = ui.available_height().clamp(200.0, 260.0);
         let (area, _) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::hover());
         let p = ui.painter();

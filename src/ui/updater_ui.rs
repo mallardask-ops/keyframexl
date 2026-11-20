@@ -77,12 +77,12 @@ impl App {
                     ui.label(
                         RichText::new("KeyFrameXL")
                             .font(t::semibold(15.0))
-                            .color(t::TEXT),
+                            .color(t::text()),
                     );
                     ui.label(
                         RichText::new(format!("v{CURRENT_VERSION}"))
                             .font(t::mono(12.5))
-                            .color(t::MUTED),
+                            .color(t::muted()),
                     );
                 });
 
@@ -91,7 +91,7 @@ impl App {
                         ui.label(
                             RichText::new("Click Check now to look for newer releases on GitHub.")
                                 .font(t::sans(13.0))
-                                .color(t::MUTED),
+                                .color(t::muted()),
                         );
                         ui.horizontal(|ui| {
                             if kit::button(ui, tr.update_check_again, kit::Kind::Normal, true)
@@ -112,7 +112,7 @@ impl App {
                             ui.label(
                                 RichText::new(tr.update_checking)
                                     .font(t::sans(13.0))
-                                    .color(t::MUTED),
+                                    .color(t::muted()),
                             );
                         });
                     }
@@ -120,12 +120,12 @@ impl App {
                         ui.horizontal(|ui| {
                             let (r, _) =
                                 ui.allocate_exact_size(vec2(12.0, 14.0), egui::Sense::hover());
-                            kit::led(ui.painter(), r.center(), 4.0, Some(t::OK));
+                            kit::led(ui.painter(), r.center(), 4.0, Some(t::ok()));
                             let line = match latest {
                                 Some(ver) => format!("{} (v{ver})", tr.update_up_to_date),
                                 None => tr.update_up_to_date.to_string(),
                             };
-                            ui.label(RichText::new(line).font(t::sans(13.0)).color(t::OK));
+                            ui.label(RichText::new(line).font(t::sans(13.0)).color(t::ok()));
                         });
                         ui.horizontal(|ui| {
                             if kit::button(ui, tr.update_check_again, kit::Kind::Normal, true)
@@ -144,8 +144,8 @@ impl App {
                         ui.horizontal(|ui| {
                             let (r, _) =
                                 ui.allocate_exact_size(vec2(12.0, 14.0), egui::Sense::hover());
-                            kit::led(ui.painter(), r.center(), 4.0, Some(t::BAD));
-                            ui.label(RichText::new(msg).font(t::sans(13.0)).color(t::BAD));
+                            kit::led(ui.painter(), r.center(), 4.0, Some(t::bad()));
+                            ui.label(RichText::new(msg).font(t::sans(13.0)).color(t::bad()));
                         });
                         ui.horizontal(|ui| {
                             if kit::button(ui, tr.update_check_again, kit::Kind::Normal, true)
@@ -164,28 +164,28 @@ impl App {
                         ui.horizontal(|ui| {
                             let (r, _) =
                                 ui.allocate_exact_size(vec2(12.0, 14.0), egui::Sense::hover());
-                            kit::led(ui.painter(), r.center(), 4.0, Some(t::WAIT));
+                            kit::led(ui.painter(), r.center(), 4.0, Some(t::wait()));
                             ui.label(
                                 RichText::new(format!(
                                     "{}: v{CURRENT_VERSION} → v{}",
                                     tr.update_available, info.version
                                 ))
                                 .font(t::semibold(13.5))
-                                .color(t::WAIT),
+                                .color(t::wait()),
                             );
                             if let Some(date) = &info.published_at {
                                 ui.label(
                                     RichText::new(format!("({date})"))
                                         .font(t::mono(11.5))
-                                        .color(t::FAINT),
+                                        .color(t::faint()),
                                 );
                             }
                         });
 
                         if !info.notes.is_empty() {
                             egui::Frame::new()
-                                .fill(t::SUNKEN)
-                                .stroke(Stroke::new(1.0_f32, t::EDGE))
+                                .fill(t::sunken())
+                                .stroke(Stroke::new(1.0_f32, t::edge()))
                                 .corner_radius(6.0)
                                 .inner_margin(egui::Margin::symmetric(12, 10))
                                 .show(ui, |ui| {
@@ -229,7 +229,7 @@ impl App {
                                 };
                                 ui.add(
                                     egui::ProgressBar::new(frac.clamp(0.0, 1.0))
-                                        .fill(t::BRAND_FILL)
+                                        .fill(t::brand_fill())
                                         .animate(total.is_none())
                                         .text(RichText::new(text).font(t::mono(11.5))),
                                 );
@@ -243,7 +243,7 @@ impl App {
                                         tr.update_installing
                                     };
                                     ui.label(
-                                        RichText::new(line).font(t::sans(13.0)).color(t::MUTED),
+                                        RichText::new(line).font(t::sans(13.0)).color(t::muted()),
                                     );
                                 });
                             }
@@ -253,18 +253,18 @@ impl App {
                                         vec2(12.0, 14.0),
                                         egui::Sense::hover(),
                                     );
-                                    kit::led(ui.painter(), r.center(), 4.0, Some(t::OK));
+                                    kit::led(ui.painter(), r.center(), 4.0, Some(t::ok()));
                                     ui.label(
                                         RichText::new(tr.update_ready_restart)
                                             .font(t::sans(13.0))
-                                            .color(t::OK),
+                                            .color(t::ok()),
                                     );
                                 });
                                 if self.dirty() {
                                     ui.label(
                                         RichText::new(tr.update_restart_save_hint)
                                             .font(t::sans(12.5))
-                                            .color(t::WAIT),
+                                            .color(t::wait()),
                                     );
                                 }
                                 ui.horizontal(|ui| {
@@ -292,11 +292,11 @@ impl App {
                                             vec2(12.0, 14.0),
                                             egui::Sense::hover(),
                                         );
-                                        kit::led(ui.painter(), r.center(), 4.0, Some(t::BAD));
+                                        kit::led(ui.painter(), r.center(), 4.0, Some(t::bad()));
                                         ui.label(
                                             RichText::new(format!("{}: {msg}", tr.update_failed))
                                                 .font(t::sans(12.5))
-                                                .color(t::BAD),
+                                                .color(t::bad()),
                                         );
                                     });
                                 }
@@ -306,13 +306,13 @@ impl App {
                                         ui.label(
                                             RichText::new(tr.update_source_build)
                                                 .font(t::sans(12.5))
-                                                .color(t::MUTED),
+                                                .color(t::muted()),
                                         );
                                         ui.label(
                                             RichText::new(SOURCE_UPDATE_CMD)
                                                 .font(t::mono(12.0))
-                                                .color(t::TEXT)
-                                                .background_color(t::RAISED),
+                                                .color(t::text())
+                                                .background_color(t::raised()),
                                         );
                                     });
                                 }
@@ -385,7 +385,9 @@ impl App {
                                 if let Err(e) = &target
                                     && e != "source"
                                 {
-                                    ui.label(RichText::new(e).font(t::sans(12.0)).color(t::FAINT));
+                                    ui.label(
+                                        RichText::new(e).font(t::sans(12.0)).color(t::faint()),
+                                    );
                                 }
                             }
                         }
@@ -401,7 +403,7 @@ impl App {
                     ui.label(
                         RichText::new("Check automatically (daily)")
                             .font(t::sans(12.5))
-                            .color(t::MUTED),
+                            .color(t::muted()),
                     );
                     ui.add_space(12.0);
                     if super::settings_ui::kit_switch(
@@ -414,7 +416,7 @@ impl App {
                     ui.label(
                         RichText::new(tr.update_nightly)
                             .font(t::sans(12.5))
-                            .color(t::MUTED),
+                            .color(t::muted()),
                     );
                 });
             });

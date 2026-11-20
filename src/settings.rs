@@ -283,6 +283,26 @@ impl DeckMonitor {
     }
 }
 
+/// Light or dark interface; System follows the desktop (xdg-desktop-portal).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ThemeMode {
+    #[default]
+    Dark,
+    Light,
+    System,
+}
+
+impl ThemeMode {
+    pub const ALL: [Self; 3] = [Self::Dark, Self::Light, Self::System];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Dark => "Dark",
+            Self::Light => "Light",
+            Self::System => "System",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GeneralSettings {
@@ -313,6 +333,8 @@ pub struct GeneralSettings {
     pub ui_scale: f32,
     /// Master bus oscilloscope / spectrum monitor in the top transport deck.
     pub deck_monitor: DeckMonitor,
+    /// Dark (default), light, or the desktop's choice.
+    pub theme: ThemeMode,
     /// Automatically check GitHub Releases once per day for newer versions.
     pub check_updates: bool,
     /// Follow nightly builds (GitHub prereleases) instead of stable releases only.
@@ -367,6 +389,7 @@ impl Default for GeneralSettings {
             system_title_bar: false,
             ui_scale: 1.0,
             deck_monitor: DeckMonitor::Scope,
+            theme: ThemeMode::Dark,
             check_updates: true,
             nightly_updates: true,
             last_update_check: 0,

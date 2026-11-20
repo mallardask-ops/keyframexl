@@ -906,7 +906,7 @@ fn knob_in_scroll_with(
                 .show(ui, |ui| {
                     let k = super::kit::Knob {
                         label: "Cut",
-                        color: t::ENC_BLUE,
+                        color: t::enc_blue(),
                         min: 0.0,
                         max: 1.0,
                         default: 0.5,

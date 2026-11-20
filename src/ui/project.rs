@@ -154,7 +154,7 @@ impl App {
             .show(ctx, |ui| {
                 let mut info = self.song.info.clone();
                 let row = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {
-                    ui.label(RichText::new(label).font(t::sans(12.0)).color(t::FAINT));
+                    ui.label(RichText::new(label).font(t::sans(12.0)).color(t::faint()));
                     let r = ui.add(
                         egui::TextEdit::singleline(text)
                             .hint_text(hint)
@@ -172,7 +172,7 @@ impl App {
                 ui.label(
                     RichText::new("Comments")
                         .font(t::sans(12.0))
-                        .color(t::FAINT),
+                        .color(t::faint()),
                 );
                 let c = ui.add(
                     egui::TextEdit::multiline(&mut info.comments)
@@ -201,7 +201,7 @@ impl App {
                         "MP3 exports carry the title, author, genre and comments as tags.",
                     )
                     .font(t::sans(11.5))
-                    .color(t::FAINT),
+                    .color(t::faint()),
                 );
             });
         ctx.data_mut(|d| d.insert_temp(id, open));
@@ -267,7 +267,7 @@ impl App {
                         self.project_name()
                     ))
                     .font(t::sans(14.0))
-                    .color(t::TEXT),
+                    .color(t::text()),
                 );
                 ui.add_space(10.0);
                 let (enter, esc) = ui.input(|i| {

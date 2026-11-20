@@ -2859,10 +2859,10 @@ impl App {
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         let rect = ui.max_rect();
         let p = ui.painter();
-        p.rect_filled(rect, 0.0, t::SIDE);
+        p.rect_filled(rect, 0.0, t::side());
         p.line_segment(
             [rect.left_top(), rect.right_top()],
-            Stroke::new(1.0_f32, t::EDGE),
+            Stroke::new(1.0_f32, t::edge()),
         );
         let y = rect.center().y;
         let mut x = rect.left() + PAGE;
@@ -2881,10 +2881,10 @@ impl App {
             None => (self.status.0, &self.status.1),
         };
         let ink = match tone {
-            Tone::Quiet => t::MUTED,
-            Tone::Done => t::OK,
-            Tone::Wait => t::WAIT,
-            Tone::Bad => t::BAD,
+            Tone::Quiet => t::muted(),
+            Tone::Done => t::ok(),
+            Tone::Wait => t::wait(),
+            Tone::Bad => t::bad(),
         };
         if tone != Tone::Quiet {
             let pulse = if tone == Tone::Wait {
@@ -2906,7 +2906,7 @@ impl App {
                     Align2::RIGHT_CENTER,
                     "no audio output",
                     12.0,
-                    t::BAD,
+                    t::bad(),
                 )
                 .left()
                     - 14.0
@@ -2924,7 +2924,7 @@ impl App {
                 _ if self.updater.is_installing() => format!("updating to v{}", info.version),
                 _ => format!("update v{}", info.version),
             };
-            let galley = kit::caps_galley(p, &label, 11.0, t::WAIT);
+            let galley = kit::caps_galley(p, &label, 11.0, t::wait());
             let pill_w = galley.size().x + 16.0;
             let pill_h = 18.0;
             let pill = egui::Rect::from_min_max(
@@ -2938,21 +2938,21 @@ impl App {
                     info.version
                 ));
             let fill = if resp.hovered() {
-                t::CTL_TOP
+                t::ctl_top()
             } else {
-                t::WAIT_SOFT
+                t::wait_soft()
             };
             p.rect_filled(pill, 9.0, fill);
             p.rect_stroke(
                 pill,
                 9.0,
-                Stroke::new(1.0_f32, t::WAIT),
+                Stroke::new(1.0_f32, t::wait()),
                 egui::StrokeKind::Inside,
             );
             p.galley(
                 Pos2::new(pill.left() + 8.0, y - galley.size().y * 0.5),
                 galley,
-                t::WAIT,
+                t::wait(),
             );
             if resp.clicked() {
                 self.updater.dialog_open = true;
@@ -3040,7 +3040,7 @@ impl App {
             });
             let r = menu.response.on_hover_text("Window menu");
             let c = r.rect.center();
-            let ink = if r.hovered() { t::TEXT } else { t::MUTED };
+            let ink = if r.hovered() { t::text() } else { t::muted() };
             ui.painter().add(egui::Shape::convex_polygon(
                 vec![
                     c + vec2(-5.0, -2.5),
@@ -3058,15 +3058,15 @@ impl App {
             let tools_w: f32 = ui.data(|d| d.get_temp(tools_id)).unwrap_or(0.0);
             let room = ui.available_width() - tools_w - 12.0;
             let mut text = sub.to_string();
-            let mut g = kit::caps_galley(&p, &text, 11.0, t::MUTED);
+            let mut g = kit::caps_galley(&p, &text, 11.0, t::muted());
             while g.size().x > room && !text.is_empty() {
                 text.pop();
                 let t = text.trim_end();
-                g = kit::caps_galley(&p, &format!("{t}…"), 11.0, t::MUTED);
+                g = kit::caps_galley(&p, &format!("{t}…"), 11.0, t::muted());
             }
             if room > 24.0 && !text.trim().is_empty() {
                 let (r, _) = ui.allocate_exact_size(g.size(), Sense::hover());
-                p.galley(r.min + vec2(0.0, 1.0), g, t::MUTED);
+                p.galley(r.min + vec2(0.0, 1.0), g, t::muted());
             }
             let tools = ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let right = ui.max_rect().right();
@@ -3084,7 +3084,7 @@ impl App {
         let clip = ui.clip_rect();
         ui.painter().line_segment(
             [Pos2::new(clip.left(), y), Pos2::new(clip.right(), y)],
-            Stroke::new(1.0_f32, t::EDGE),
+            Stroke::new(1.0_f32, t::edge()),
         );
         ui.add_space(8.0);
     }
@@ -3121,14 +3121,14 @@ impl App {
             Align2::CENTER_CENTER,
             "All windows are closed",
             t::medium(15.0),
-            t::TEXT,
+            t::text(),
         );
         p.text(
             c - vec2(0.0, 6.0),
             Align2::CENTER_CENTER,
             "F5 Playlist · F6 Channel rack · F7 Piano roll",
             t::sans(14.0),
-            t::MUTED,
+            t::muted(),
         );
         let b = egui::Rect::from_center_size(c + vec2(0.0, 34.0), vec2(170.0, kit::CONTROL_H));
         let r = ui.interact(b, ui.id().with("restore-layout"), Sense::click());
@@ -3196,7 +3196,7 @@ impl App {
             Align2::CENTER_CENTER,
             text,
             t::medium(15.0),
-            t::TEXT,
+            t::text(),
         );
     }
 
@@ -3271,6 +3271,11 @@ impl eframe::App for App {
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let frame_start = std::time::Instant::now();
+        // The theme switches before anything draws (the style is read per frame).
+        let want = t::resolve(self.settings.general.theme);
+        if want != t::theme() {
+            t::apply(ctx, want);
+        }
         self.sync_convolution_irs(ctx);
         self.capture_export(ctx);
         self.capture_forge_bounce();
@@ -3348,12 +3353,12 @@ impl eframe::App for App {
         self.window_edges(ctx);
         egui::TopBottomPanel::top("menu")
             .exact_height(menu::MENU_H)
-            .frame(egui::Frame::new().fill(t::SIDE))
+            .frame(egui::Frame::new().fill(t::side()))
             .show_separator_line(false)
             .show(ctx, |ui| self.main_menu(ui));
         egui::TopBottomPanel::top("deck")
             .exact_height(DECK_H)
-            .frame(egui::Frame::new().fill(t::SIDE))
+            .frame(egui::Frame::new().fill(t::side()))
             .show_separator_line(false)
             .show(ctx, |ui| self.deck(ui));
         egui::TopBottomPanel::bottom("status")
@@ -3366,23 +3371,23 @@ impl eframe::App for App {
                 .default_width(browser::width(ctx))
                 .width_range(160.0..=360.0)
                 .resizable(true)
-                .frame(egui::Frame::new().fill(t::SIDE))
+                .frame(egui::Frame::new().fill(t::side()))
                 .show_separator_line(false)
                 .show(ctx, |ui| self.browser(ui));
             browser::save_width(ctx, panel.response.rect.width(), self.persist);
         }
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(t::BG))
+            .frame(egui::Frame::new().fill(t::bg()))
             .show(ctx, |ui| {
                 let outer = ui.max_rect();
                 let p = ui.painter();
                 p.line_segment(
                     [outer.left_top(), outer.right_top()],
-                    Stroke::new(1.0_f32, t::EDGE),
+                    Stroke::new(1.0_f32, t::edge()),
                 );
                 p.line_segment(
                     [outer.left_top(), outer.left_bottom()],
-                    Stroke::new(1.0_f32, t::EDGE),
+                    Stroke::new(1.0_f32, t::edge()),
                 );
                 let style = workspace::dock_style(ui.style());
                 // Floating windows: the tab bar is the title bar, flush with the

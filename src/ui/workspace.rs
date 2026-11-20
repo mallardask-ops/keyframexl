@@ -603,12 +603,12 @@ pub fn dock_style(style: &egui::Style) -> egui_dock::Style {
     s.separator.width = 1.0;
     s.separator.extra = 0.0;
     s.separator.extra_interact_width = 7.0;
-    s.separator.color_idle = t::EDGE;
-    s.separator.color_hovered = t::STRONG;
-    s.separator.color_dragged = t::TEXT;
-    s.tab_bar.bg_fill = t::SIDE;
+    s.separator.color_idle = t::edge();
+    s.separator.color_hovered = t::strong();
+    s.separator.color_dragged = t::text();
+    s.tab_bar.bg_fill = t::side();
     s.tab_bar.height = 32.0;
-    s.tab_bar.hline_color = t::EDGE;
+    s.tab_bar.hline_color = t::edge();
     s.tab_bar.corner_radius = CornerRadius {
         nw: 10,
         ne: 10,
@@ -623,41 +623,41 @@ pub fn dock_style(style: &egui::Style) -> egui_dock::Style {
         se: 0,
     };
     let base = egui_dock::TabInteractionStyle {
-        outline_color: t::EDGE,
+        outline_color: t::edge(),
         corner_radius: tab_r,
-        bg_fill: t::SIDE,
-        text_color: t::MUTED,
+        bg_fill: t::side(),
+        text_color: t::muted(),
     };
     s.tab.inactive = base.clone();
     s.tab.hovered = egui_dock::TabInteractionStyle {
-        bg_fill: t::RAISED,
-        text_color: t::TEXT,
+        bg_fill: t::raised(),
+        text_color: t::text(),
         ..base.clone()
     };
     s.tab.active = egui_dock::TabInteractionStyle {
-        bg_fill: t::PANEL_TOP,
-        text_color: t::TEXT,
+        bg_fill: t::panel_top(),
+        text_color: t::text(),
         ..base.clone()
     };
     s.tab.focused = egui_dock::TabInteractionStyle {
-        bg_fill: t::CTL_TOP,
-        text_color: t::TEXT,
+        bg_fill: t::ctl_top(),
+        text_color: t::text(),
         ..base.clone()
     };
     let kb = egui_dock::TabInteractionStyle {
-        outline_color: t::FOCUS,
+        outline_color: t::focus(),
         ..s.tab.focused.clone()
     };
     s.tab.active_with_kb_focus = kb.clone();
     s.tab.inactive_with_kb_focus = egui_dock::TabInteractionStyle {
-        outline_color: t::FOCUS,
+        outline_color: t::focus(),
         ..base.clone()
     };
     s.tab.focused_with_kb_focus = kb;
     s.tab.hline_below_active_tab_name = false;
     s.tab.minimum_width = Some(120.0);
-    s.tab.tab_body.bg_fill = t::PANEL_BOTTOM;
-    s.tab.tab_body.stroke = Stroke::new(1.0_f32, t::EDGE);
+    s.tab.tab_body.bg_fill = t::panel_bottom();
+    s.tab.tab_body.stroke = Stroke::new(1.0_f32, t::edge());
     s.tab.tab_body.corner_radius = CornerRadius {
         nw: 0,
         ne: 0,
@@ -665,13 +665,13 @@ pub fn dock_style(style: &egui::Style) -> egui_dock::Style {
         se: 10,
     };
     s.tab.tab_body.inner_margin = Margin::symmetric(14, 10);
-    s.buttons.close_tab_color = t::FAINT;
-    s.buttons.close_tab_active_color = t::TEXT;
-    s.buttons.close_tab_bg_fill = t::CTL_HOVER;
-    s.overlay.selection_color = t::TEXT.gamma_multiply(0.22);
-    s.overlay.button_color = t::CTL_TOP;
-    s.overlay.button_border_stroke = Stroke::new(1.0_f32, t::EDGE);
-    s.overlay.hovered_leaf_highlight.color = t::TEXT.gamma_multiply(0.08);
-    s.overlay.hovered_leaf_highlight.stroke = Stroke::new(1.0_f32, t::TEXT);
+    s.buttons.close_tab_color = t::faint();
+    s.buttons.close_tab_active_color = t::text();
+    s.buttons.close_tab_bg_fill = t::ctl_hover();
+    s.overlay.selection_color = t::text().gamma_multiply(0.22);
+    s.overlay.button_color = t::ctl_top();
+    s.overlay.button_border_stroke = Stroke::new(1.0_f32, t::edge());
+    s.overlay.hovered_leaf_highlight.color = t::text().gamma_multiply(0.08);
+    s.overlay.hovered_leaf_highlight.stroke = Stroke::new(1.0_f32, t::text());
     s
 }

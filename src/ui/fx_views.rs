@@ -3,15 +3,15 @@ use crate::theme as t;
 use eframe::egui::{self, Color32, Rect, Sense, Stroke, Ui, pos2, vec2};
 use keyframexl::fx::FxKind;
 
-pub const COLORS: [Color32; 7] = [
-    t::ENC_BLUE,
-    t::ENC_ORANGE,
-    t::ENC_GREEN,
-    t::ENC_WHITE,
-    t::ENC_BLUE,
-    t::ENC_ORANGE,
-    t::ENC_GREEN,
-];
+/// EQ band colours (the encoder addresses, repeating).
+pub fn band_color(b: usize) -> Color32 {
+    [
+        t::enc_blue(),
+        t::enc_orange(),
+        t::enc_green(),
+        t::enc_white(),
+    ][b % 4]
+}
 
 pub(super) fn band_db(band: usize, f: f32, hz: f32, gain: f32, q: f32, rate: f32) -> f32 {
     let w = std::f32::consts::TAU * (hz / rate).min(0.49);
@@ -70,7 +70,7 @@ fn freq_x(r: Rect, f: f32) -> f32 {
 }
 fn canvas(ui: &mut Ui, height: f32) -> Rect {
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
-    ui.painter().rect_filled(r, 3.0, t::SUNKEN);
+    ui.painter().rect_filled(r, 3.0, t::sunken());
     r
 }
 /// Hann-windowed magnitude spectrum of `x` (length a power of two), in dB
@@ -158,9 +158,9 @@ pub fn eq(
             }
             let x = fx(f);
             let c = if m == 1 {
-                t::LINE
+                t::line()
             } else {
-                t::LINE.gamma_multiply(0.45)
+                t::line().gamma_multiply(0.45)
             };
             p.line_segment(
                 [pos2(x, r.top()), pos2(x, r.bottom())],
@@ -183,15 +183,15 @@ pub fn eq(
             egui::Align2::CENTER_BOTTOM,
             label,
             t::mono(10.0),
-            t::FAINT,
+            t::faint(),
         );
     }
     for g in [-18.0f32, -12.0, -6.0, 0.0, 6.0, 12.0, 18.0] {
         let y = gy(g);
         let c = if g == 0.0 {
-            t::FAINT
+            t::faint()
         } else {
-            t::LINE.gamma_multiply(0.7)
+            t::line().gamma_multiply(0.7)
         };
         p.line_segment(
             [pos2(r.left(), y), pos2(r.right(), y)],
@@ -206,7 +206,7 @@ pub fn eq(
                 format!("{g:.0}")
             },
             t::mono(10.0),
-            t::FAINT,
+            t::faint(),
         );
     }
     // The spectrum, filled from the floor, on its own dBFS scale.
@@ -233,7 +233,7 @@ pub fn eq(
         pts.push(pos2(r.right(), r.bottom()));
         let top: Vec<_> = pts[1..pts.len() - 1].to_vec();
         // Convex fills tear on a jagged outline: fill column by column.
-        let mesh_c = t::MUTED.gamma_multiply(0.22);
+        let mesh_c = t::muted().gamma_multiply(0.22);
         let mut mesh = egui::Mesh::default();
         for w in top.windows(2) {
             let base = mesh.vertices.len() as u32;
@@ -247,7 +247,7 @@ pub fn eq(
         p.add(mesh);
         p.add(egui::Shape::line(
             top,
-            Stroke::new(1.0_f32, t::MUTED.gamma_multiply(0.7)),
+            Stroke::new(1.0_f32, t::muted().gamma_multiply(0.7)),
         ));
     }
     let steps = (r.width() / 2.0).max(32.0) as usize;
@@ -269,7 +269,7 @@ pub fn eq(
         if params[b * 3 + 1].abs() < 0.05 {
             continue;
         }
-        let c = COLORS[b];
+        let c = band_color(b);
         let mut mesh = egui::Mesh::default();
         let zero = gy(0.0);
         let fill = c.gamma_multiply(if *focus == Some(b) { 0.34 } else { 0.22 });
@@ -305,7 +305,7 @@ pub fn eq(
             )
         })
         .collect();
-    p.add(egui::Shape::line(sum, Stroke::new(2.0_f32, t::TEXT)));
+    p.add(egui::Shape::line(sum, Stroke::new(2.0_f32, t::text())));
     let mut started = false;
     let mut changed = false;
     let mut hot = None;
@@ -320,15 +320,15 @@ pub fn eq(
         let active = params[i + 1].abs() >= 0.05;
         let lit = response.hovered() || response.dragged() || *focus == Some(b);
         if lit {
-            p.circle_stroke(center, 10.0, Stroke::new(1.5_f32, COLORS[b]));
+            p.circle_stroke(center, 10.0, Stroke::new(1.5_f32, band_color(b)));
         }
         p.circle_filled(
             center,
             7.0,
             if active || lit {
-                COLORS[b]
+                band_color(b)
             } else {
-                COLORS[b].gamma_multiply(0.45)
+                band_color(b).gamma_multiply(0.45)
             },
         );
         p.text(
@@ -336,7 +336,7 @@ pub fn eq(
             egui::Align2::CENTER_CENTER,
             format!("{}", b + 1),
             t::mono(9.5),
-            t::SUNKEN,
+            t::sunken(),
         );
         if response.drag_started() || response.clicked() {
             *focus = Some(b);
@@ -398,15 +398,15 @@ pub fn eq(
         ][b];
         let text = format!("{name}   {}   {}   Q {}", fmt(0), fmt(1), fmt(2));
         let at = pos2(r.left() + 8.0, full.top() + 6.0);
-        let g = p.layout_no_wrap(text, t::mono(11.5), t::TEXT);
+        let g = p.layout_no_wrap(text, t::mono(11.5), t::text());
         let bg = Rect::from_min_size(at - vec2(4.0, 2.0), g.size() + vec2(8.0, 4.0));
-        p.rect_filled(bg, 3.0, t::SUNKEN.gamma_multiply(0.85));
+        p.rect_filled(bg, 3.0, t::sunken().gamma_multiply(0.85));
         p.rect_filled(
             Rect::from_min_size(bg.min, vec2(3.0, bg.height())),
             1.0,
-            COLORS[b],
+            band_color(b),
         );
-        p.galley(at + vec2(2.0, 0.0), g, t::TEXT);
+        p.galley(at + vec2(2.0, 0.0), g, t::text());
     }
     (started, changed)
 }
@@ -425,12 +425,12 @@ pub fn dynamics(ui: &mut Ui, kind: FxKind, p: &[f32], gr: Option<f32>) {
         pos2(full.right() - 6.0, full.bottom() - 6.0),
     );
     let r = Rect::from_min_max(full.min, pos2(meter.left() - 8.0, full.max.y));
-    painter.rect_filled(meter, 1.0, t::LCD_OFF);
+    painter.rect_filled(meter, 1.0, t::lcd_off());
     for db in [3.0, 6.0, 12.0, 18.0] {
         let y = meter.top() + meter.height() * db / GR_RANGE;
         painter.line_segment(
             [pos2(meter.left() - 3.0, y), pos2(meter.left() - 1.0, y)],
-            Stroke::new(1.0_f32, t::FAINT),
+            Stroke::new(1.0_f32, t::faint()),
         );
     }
     let g = gr.unwrap_or(0.0).clamp(0.0, GR_RANGE);
@@ -439,7 +439,7 @@ pub fn dynamics(ui: &mut Ui, kind: FxKind, p: &[f32], gr: Option<f32>) {
             meter.min,
             pos2(meter.right(), meter.top() + meter.height() * g / GR_RANGE),
         );
-        painter.rect_filled(fill, 1.0, t::WAIT);
+        painter.rect_filled(fill, 1.0, t::wait());
     }
     painter.text(
         pos2(full.right() - 4.0, full.top() + 3.0),
@@ -450,7 +450,7 @@ pub fn dynamics(ui: &mut Ui, kind: FxKind, p: &[f32], gr: Option<f32>) {
             "GR".to_string()
         },
         t::mono(10.5),
-        if g > 0.05 { t::TEXT } else { t::MUTED },
+        if g > 0.05 { t::text() } else { t::muted() },
     );
     let xy = |x: f32, y: f32| {
         pos2(
@@ -460,7 +460,7 @@ pub fn dynamics(ui: &mut Ui, kind: FxKind, p: &[f32], gr: Option<f32>) {
     };
     painter.line_segment(
         [xy(-60.0, -60.0), xy(0.0, 0.0)],
-        Stroke::new(1.0_f32, t::LINE),
+        Stroke::new(1.0_f32, t::line()),
     );
     let threshold = if kind == FxKind::Compressor {
         p[0]
@@ -478,25 +478,28 @@ pub fn dynamics(ui: &mut Ui, kind: FxKind, p: &[f32], gr: Option<f32>) {
             xy(x, y.clamp(-60.0, 0.0))
         })
         .collect();
-    painter.add(egui::Shape::line(points, Stroke::new(2.0_f32, t::ENC_BLUE)));
+    painter.add(egui::Shape::line(
+        points,
+        Stroke::new(2.0_f32, t::enc_blue()),
+    ));
     let x = xy(threshold.clamp(-60.0, 0.0), -60.0).x;
     painter.line_segment(
         [pos2(x, r.top()), pos2(x, r.bottom())],
-        Stroke::new(1.0_f32, t::MUTED),
+        Stroke::new(1.0_f32, t::muted()),
     );
     painter.text(
         r.left_top() + vec2(4.0, 3.0),
         egui::Align2::LEFT_TOP,
         "OUT dB",
         t::sans(10.0),
-        t::MUTED,
+        t::muted(),
     );
     painter.text(
         r.right_bottom() - vec2(4.0, 3.0),
         egui::Align2::RIGHT_BOTTOM,
         "IN dB",
         t::sans(10.0),
-        t::MUTED,
+        t::muted(),
     );
 }
 pub fn ambience(ui: &mut Ui, kind: FxKind, p: &[f32]) {
@@ -511,7 +514,7 @@ pub fn ambience(ui: &mut Ui, kind: FxKind, p: &[f32]) {
             let h = r.height() * 0.85 * (p[1] / 100.0).powi(n - 1);
             painter.line_segment(
                 [pos2(x, r.bottom()), pos2(x, r.bottom() - h)],
-                Stroke::new(2.0_f32, t::ENC_BLUE),
+                Stroke::new(2.0_f32, t::enc_blue()),
             );
         }
         painter.text(
@@ -519,7 +522,7 @@ pub fn ambience(ui: &mut Ui, kind: FxKind, p: &[f32]) {
             egui::Align2::LEFT_TOP,
             format!("{} steps / tap", p[0] as i32),
             t::sans(11.0),
-            t::MUTED,
+            t::muted(),
         );
     } else {
         let feedback = 0.7 + 0.28 * p[0] / 100.0;
@@ -534,13 +537,16 @@ pub fn ambience(ui: &mut Ui, kind: FxKind, p: &[f32]) {
                 )
             })
             .collect();
-        painter.add(egui::Shape::line(points, Stroke::new(2.0_f32, t::ENC_BLUE)));
+        painter.add(egui::Shape::line(
+            points,
+            Stroke::new(2.0_f32, t::enc_blue()),
+        ));
         painter.text(
             r.left_top() + vec2(4.0, 4.0),
             egui::Align2::LEFT_TOP,
             "Decay (approx.)",
             t::sans(11.0),
-            t::MUTED,
+            t::muted(),
         );
     }
 }
@@ -592,7 +598,11 @@ pub fn bloom(
         ("D", "Dense", Color32::from_rgb(211, 162, 242)),
     ];
     let selected = (params[1].round() as usize).min(3);
-    let accent = if enabled { modes[selected].2 } else { t::MUTED };
+    let accent = if enabled {
+        modes[selected].2
+    } else {
+        t::muted()
+    };
     let (panel, _) =
         ui.allocate_exact_size(vec2(ui.available_width().max(250.0), 245.0), Sense::hover());
     let center = panel.center_top() + vec2(0.0, 94.0);
@@ -641,7 +651,7 @@ pub fn bloom(
         Align2::CENTER_CENTER,
         format!("{amount:.0}%"),
         t::mono(18.0),
-        t::TEXT,
+        t::text(),
     );
     kit::caps(
         paint,
@@ -649,7 +659,7 @@ pub fn bloom(
         Align2::CENTER_CENTER,
         "Amount",
         11.0,
-        t::MUTED,
+        t::muted(),
     );
     for (i, (letter, name, _)) in modes.iter().enumerate() {
         let pos = panel.center_bottom() + vec2((i as f32 - 1.5) * 53.0, -43.0);
@@ -661,7 +671,7 @@ pub fn bloom(
                     if i == selected {
                         Color32::BLACK
                     } else {
-                        t::TEXT
+                        t::text()
                     },
                 ))
                 .fill(if i == selected {
@@ -682,7 +692,7 @@ pub fn bloom(
         Align2::CENTER_CENTER,
         modes[selected].1,
         t::sans(13.0),
-        t::TEXT,
+        t::text(),
     );
     (started, changed)
 }
@@ -693,9 +703,9 @@ pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
     use keyframexl::fx::{TIME_HINTS, TIME_MODES, TIME_STEPS};
     let colors = [
         Color32::from_rgb(64, 69, 74),
-        t::ENC_BLUE,
-        t::ENC_GREEN,
-        t::ENC_ORANGE,
+        t::enc_blue(),
+        t::enc_green(),
+        t::enc_orange(),
         Color32::from_rgb(211, 162, 242),
         Color32::from_rgb(120, 58, 52),
     ];
@@ -706,7 +716,7 @@ pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
         ui.label(
             egui::RichText::new("Loop")
                 .font(t::sans(13.0))
-                .color(t::MUTED),
+                .color(t::muted()),
         );
         if ui
             .add(
@@ -771,7 +781,7 @@ pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
         egui::Align2::LEFT_TOP,
         "1/16 steps · click to change · right-click to reset",
         t::sans(10.5),
-        t::FAINT,
+        t::faint(),
     );
     let (cols, rows, gap) = (8usize, 2usize, 3.0);
     let cw = (inner.width() - gap * (cols - 1) as f32) / cols as f32;
@@ -819,7 +829,7 @@ pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
                 if active {
                     colors[mode].gamma_multiply(0.8)
                 } else {
-                    t::EDGE
+                    t::edge()
                 },
             ),
             egui::StrokeKind::Inside,
@@ -827,7 +837,7 @@ pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
         let ink = if active {
             colors[mode]
         } else {
-            t::FAINT.gamma_multiply(0.5)
+            t::faint().gamma_multiply(0.5)
         };
         paint.text(
             rect.center(),
@@ -841,7 +851,7 @@ pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
             egui::Align2::LEFT_TOP,
             format!("{}", i + 1),
             t::mono(8.0),
-            t::FAINT.gamma_multiply(0.7),
+            t::faint().gamma_multiply(0.7),
         );
     }
     let mut smooth = params[1] as f64;
@@ -851,7 +861,7 @@ pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
             (
                 &mut smooth,
                 keyframexl::fx::FxKind::Time.params()[1],
-                t::ENC_WHITE,
+                t::enc_white(),
                 "Fade at step edges",
             ),
             (
@@ -890,7 +900,7 @@ pub fn multiband(ui: &mut Ui, track: usize, slot: usize, params: &mut [f32]) -> 
     let mut started = false;
     let mut changed = false;
     let names = ["LOW", "MID", "HIGH"];
-    let colors = [t::ENC_ORANGE, t::ENC_GREEN, t::ENC_BLUE];
+    let colors = [t::enc_orange(), t::enc_green(), t::enc_blue()];
     ui.horizontal(|ui| {
         for band in 0..3 {
             ui.vertical(|ui| {
@@ -949,7 +959,7 @@ pub fn multiband(ui: &mut Ui, track: usize, slot: usize, params: &mut [f32]) -> 
             let fmt = |x: f64| keyframexl::fx::format(&spec, x as f32);
             let knob = kit::Knob {
                 label: spec.name,
-                color: t::ENC_WHITE,
+                color: t::enc_white(),
                 min: spec.min as f64,
                 max: spec.max as f64,
                 default: spec.default as f64,
@@ -1046,7 +1056,7 @@ fn face_dial(
             egui::Align2::CENTER_TOP,
             label.to_uppercase(),
             t::sans(9.0),
-            t::MUTED,
+            t::muted(),
         );
     }
     p.text(
@@ -1054,7 +1064,7 @@ fn face_dial(
         egui::Align2::CENTER_BOTTOM,
         keyframexl::fx::format(spec, v as f32),
         t::mono(12.0),
-        t::TEXT,
+        t::text(),
     );
     (started, changed)
 }
@@ -1094,7 +1104,7 @@ fn xy_pad(
     p.rect_stroke(
         pad,
         5.0,
-        Stroke::new(1.0_f32, t::EDGE),
+        Stroke::new(1.0_f32, t::edge()),
         egui::StrokeKind::Inside,
     );
     for k in 1..4 {
@@ -1131,21 +1141,21 @@ fn xy_pad(
         egui::Align2::CENTER_TOP,
         title,
         9.5,
-        t::MUTED,
+        t::muted(),
     );
     p.text(
         pos2(pad.center().x, pad.bottom() + 20.0),
         egui::Align2::CENTER_TOP,
         format!("X {}", keyframexl::fx::format(xspec, params[xpi])),
         t::mono(9.5),
-        t::FAINT,
+        t::faint(),
     );
     p.text(
         pos2(pad.center().x, pad.bottom() + 32.0),
         egui::Align2::CENTER_TOP,
         format!("Y {}", keyframexl::fx::format(yspec, params[ypi])),
         t::mono(9.5),
-        t::FAINT,
+        t::faint(),
     );
     let _ = (track, slot);
     (started, changed)
@@ -1161,7 +1171,7 @@ fn face_bg(ui: &mut Ui, height: f32) -> (Rect, egui::Painter) {
     p.rect_stroke(
         rect,
         6.0,
-        Stroke::new(1.0_f32, t::EDGE),
+        Stroke::new(1.0_f32, t::edge()),
         egui::StrokeKind::Inside,
     );
     (rect, p)
@@ -1213,30 +1223,33 @@ pub fn filter(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, b
             curve_point(plot, i as f32 / 96.0, (db + 36.0) / 48.0)
         })
         .collect();
-    paint.add(egui::Shape::line(curve, Stroke::new(2.0_f32, t::ENC_BLUE)));
+    paint.add(egui::Shape::line(
+        curve,
+        Stroke::new(2.0_f32, t::enc_blue()),
+    ));
     let fpos = (fc / 20.0).log(1000.0);
     paint.vline(
         egui::lerp(plot.x_range(), fpos.clamp(0.0, 1.0)),
         plot.y_range(),
-        Stroke::new(1.0_f32, t::WAIT.gamma_multiply(0.7)),
+        Stroke::new(1.0_f32, t::wait().gamma_multiply(0.7)),
     );
     paint.text(
         plot.left_top() + vec2(0.0, -1.0),
         egui::Align2::LEFT_TOP,
         "20",
         t::mono(9.0),
-        t::FAINT,
+        t::faint(),
     );
     paint.text(
         plot.right_top() + vec2(0.0, -1.0),
         egui::Align2::RIGHT_TOP,
         "20k",
         t::mono(9.0),
-        t::FAINT,
+        t::faint(),
     );
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        let (s, c) = face_dial(ui, track, slot, 1, &specs[1], p, t::ENC_BLUE, 78.0);
+        let (s, c) = face_dial(ui, track, slot, 1, &specs[1], p, t::enc_blue(), 78.0);
         started |= s;
         changed |= c;
         ui.vertical(|ui| {
@@ -1244,7 +1257,7 @@ pub fn filter(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, b
             ui.label(
                 egui::RichText::new("TYPE")
                     .font(t::sans(10.0))
-                    .color(t::FAINT),
+                    .color(t::faint()),
             );
             let mut t = kind.clamp(0, 2);
             for (i, name) in ["LP", "BP", "HP"].iter().enumerate() {
@@ -1258,12 +1271,12 @@ pub fn filter(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, b
                     t = i;
                 }
             }
-            let (s, c) = face_dial(ui, track, slot, 2, &specs[2], p, t::ENC_WHITE, 54.0);
+            let (s, c) = face_dial(ui, track, slot, 2, &specs[2], p, t::enc_white(), 54.0);
             started |= s;
             changed |= c;
         });
         ui.add_space(6.0);
-        let (s, c) = face_dial(ui, track, slot, 3, &specs[3], p, t::ENC_GREEN, 54.0);
+        let (s, c) = face_dial(ui, track, slot, 3, &specs[3], p, t::enc_green(), 54.0);
         started |= s;
         changed |= c;
     });
@@ -1298,35 +1311,38 @@ pub fn drive(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, bo
             )
         })
         .collect();
-    paint.add(egui::Shape::line(line, Stroke::new(2.2_f32, t::ENC_ORANGE)));
+    paint.add(egui::Shape::line(
+        line,
+        Stroke::new(2.2_f32, t::enc_orange()),
+    ));
     paint.text(
         plot.left_top(),
         egui::Align2::LEFT_TOP,
         "IN",
         t::mono(9.0),
-        t::FAINT,
+        t::faint(),
     );
     paint.text(
         plot.right_bottom() + vec2(0.0, -3.0),
         egui::Align2::RIGHT_BOTTOM,
         "OUT",
         t::mono(9.0),
-        t::FAINT,
+        t::faint(),
     );
     ui.add_space(2.0);
     ui.horizontal(|ui| {
-        let (s, c) = face_dial(ui, track, slot, 0, &specs[0], p, t::ENC_ORANGE, 78.0);
+        let (s, c) = face_dial(ui, track, slot, 0, &specs[0], p, t::enc_orange(), 78.0);
         started |= s;
         changed |= c;
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
-                for (pi, color) in [(1, t::ENC_WHITE), (2, t::ENC_GREEN)] {
+                for (pi, color) in [(1, t::enc_white()), (2, t::enc_green())] {
                     let (s, c) = face_dial(ui, track, slot, pi, &specs[pi], p, color, 54.0);
                     started |= s;
                     changed |= c;
                 }
             });
-            let (s, c) = face_dial(ui, track, slot, 3, &specs[3], p, t::ENC_BLUE, 54.0);
+            let (s, c) = face_dial(ui, track, slot, 3, &specs[3], p, t::enc_blue(), 54.0);
             started |= s;
             changed |= c;
         });
@@ -1346,34 +1362,34 @@ pub fn chorus(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, b
     for i in 0..3 {
         let phase = t * p[2] * std::f32::consts::TAU + i as f32 * 2.094;
         let dot = c + vec2(phase.cos(), phase.sin()) * (r + 10.0);
-        paint.circle_filled(dot, 3.5, t::ENC_BLUE.gamma_multiply(0.85));
+        paint.circle_filled(dot, 3.5, t::enc_blue().gamma_multiply(0.85));
         paint.line_segment(
             [c, dot],
-            Stroke::new(1.0_f32, t::ENC_BLUE.gamma_multiply(0.25)),
+            Stroke::new(1.0_f32, t::enc_blue().gamma_multiply(0.25)),
         );
     }
-    paint.circle_filled(c, 5.0, t::ENC_BLUE);
+    paint.circle_filled(c, 5.0, t::enc_blue());
     paint.text(
         pos2(face.left() + 16.0, face.center().y),
         egui::Align2::LEFT_CENTER,
         format!("{:.2} ms", p[0]),
         t::mono(12.0),
-        t::MUTED,
+        t::muted(),
     );
     ui.add_space(2.0);
     ui.horizontal(|ui| {
-        let (s, c) = face_dial(ui, track, slot, 1, &specs[1], p, t::ENC_BLUE, 72.0);
+        let (s, c) = face_dial(ui, track, slot, 1, &specs[1], p, t::enc_blue(), 72.0);
         started |= s;
         changed |= c;
-        let (s, c) = face_dial(ui, track, slot, 2, &specs[2], p, t::ENC_GREEN, 60.0);
+        let (s, c) = face_dial(ui, track, slot, 2, &specs[2], p, t::enc_green(), 60.0);
         started |= s;
         changed |= c;
         ui.vertical(|ui| {
-            let (s, c) = face_dial(ui, track, slot, 0, &specs[0], p, t::ENC_WHITE, 48.0);
+            let (s, c) = face_dial(ui, track, slot, 0, &specs[0], p, t::enc_white(), 48.0);
             started |= s;
             changed |= c;
         });
-        let (s, c) = face_dial(ui, track, slot, 3, &specs[3], p, t::ENC_WHITE, 48.0);
+        let (s, c) = face_dial(ui, track, slot, 3, &specs[3], p, t::enc_white(), 48.0);
         started |= s;
         changed |= c;
     });
@@ -1386,9 +1402,9 @@ pub fn hyper_chorus(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (b
     let (mut started, mut changed) = (false, false);
     ui.horizontal(|ui| {
         for (xpi, ypi, title, color) in [
-            (0, 1, "DELAY", t::ENC_BLUE),
-            (2, 3, "MOD", t::ENC_GREEN),
-            (4, 5, "MOVE", t::ENC_ORANGE),
+            (0, 1, "DELAY", t::enc_blue()),
+            (2, 3, "MOD", t::enc_green()),
+            (4, 5, "MOVE", t::enc_orange()),
         ] {
             let (s, c) = xy_pad(
                 ui,
@@ -1414,7 +1430,7 @@ pub fn hyper_chorus(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (b
             egui::Align2::LEFT_CENTER,
             "Lines",
             10.0,
-            t::FAINT,
+            t::faint(),
         );
         ui.add_space(40.0);
         for n in 4..=8 {
@@ -1432,8 +1448,8 @@ pub fn hyper_chorus(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (b
         }
     });
     for pair in [
-        [(7, t::ENC_WHITE), (8, t::ENC_WHITE)],
-        [(9, t::ENC_GREEN), (10, t::ENC_BLUE)],
+        [(7, t::enc_white()), (8, t::enc_white())],
+        [(9, t::enc_green()), (10, t::enc_blue())],
     ] {
         ui.horizontal(|ui| {
             for (pi, color) in pair {
@@ -1471,9 +1487,9 @@ pub fn squeeze(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, 
             ),
             0.0,
             if in_keep {
-                t::ENC_GREEN.gamma_multiply(0.6)
+                t::enc_green().gamma_multiply(0.6)
             } else {
-                t::WAIT.gamma_multiply(0.8)
+                t::wait().gamma_multiply(0.8)
             },
         );
     }
@@ -1488,22 +1504,22 @@ pub fn squeeze(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, 
         .collect();
     paint.add(egui::Shape::line(
         line,
-        Stroke::new(1.6_f32, t::TEXT.gamma_multiply(0.7)),
+        Stroke::new(1.6_f32, t::text().gamma_multiply(0.7)),
     ));
     paint.text(
         plot.left_top() + vec2(0.0, 2.0),
         egui::Align2::LEFT_TOP,
         format!("{bits:.0} bit"),
         t::mono(9.0),
-        t::FAINT,
+        t::faint(),
     );
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         for (pi, color) in [
-            (0, t::ENC_WHITE),
-            (4, t::WAIT),
-            (1, t::ENC_WHITE),
-            (2, t::ENC_WHITE),
+            (0, t::enc_white()),
+            (4, t::wait()),
+            (1, t::enc_white()),
+            (2, t::enc_white()),
         ] {
             let (s, c) = face_dial(ui, track, slot, pi, &specs[pi], p, color, 54.0);
             started |= s;
@@ -1512,10 +1528,10 @@ pub fn squeeze(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, 
     });
     ui.horizontal(|ui| {
         for (pi, color) in [
-            (5, t::ENC_GREEN),
-            (6, t::ENC_WHITE),
-            (7, t::ENC_BLUE),
-            (8, t::ENC_BLUE),
+            (5, t::enc_green()),
+            (6, t::enc_white()),
+            (7, t::enc_blue()),
+            (8, t::enc_blue()),
         ] {
             let (s, c) = face_dial(ui, track, slot, pi, &specs[pi], p, color, 54.0);
             started |= s;
@@ -1526,7 +1542,7 @@ pub fn squeeze(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, 
         ui.label(
             egui::RichText::new("RELATION")
                 .font(t::sans(10.0))
-                .color(t::FAINT),
+                .color(t::faint()),
         );
         ui.add_space(6.0);
         let mut rel = p[3].round() as usize;
@@ -1580,30 +1596,30 @@ pub fn stereo(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, b
             c + vec2(x * r, -y * r)
         })
         .collect();
-    paint.add(egui::Shape::line(pts, Stroke::new(2.0_f32, t::ENC_GREEN)));
+    paint.add(egui::Shape::line(pts, Stroke::new(2.0_f32, t::enc_green())));
     paint.text(
         c + vec2(0.0, r + 10.0),
         egui::Align2::CENTER_TOP,
         "L",
         t::mono(9.0),
-        t::FAINT,
+        t::faint(),
     );
     paint.text(
         c + vec2(r + 8.0, 0.0),
         egui::Align2::LEFT_CENTER,
         "R",
         t::mono(9.0),
-        t::FAINT,
+        t::faint(),
     );
     ui.add_space(2.0);
     ui.horizontal(|ui| {
-        let (s, c) = face_dial(ui, track, slot, 0, &specs[0], p, t::ENC_GREEN, 74.0);
+        let (s, c) = face_dial(ui, track, slot, 0, &specs[0], p, t::enc_green(), 74.0);
         started |= s;
         changed |= c;
-        let (s, c) = face_dial(ui, track, slot, 1, &specs[1], p, t::ENC_WHITE, 58.0);
+        let (s, c) = face_dial(ui, track, slot, 1, &specs[1], p, t::enc_white(), 58.0);
         started |= s;
         changed |= c;
-        let (s, c) = face_dial(ui, track, slot, 2, &specs[2], p, t::ENC_BLUE, 58.0);
+        let (s, c) = face_dial(ui, track, slot, 2, &specs[2], p, t::enc_blue(), 58.0);
         started |= s;
         changed |= c;
     });
@@ -1629,24 +1645,29 @@ pub fn balance(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, 
                 pos2(x + 22.0, plot.bottom()),
             ),
             3.0,
-            if i == 0 { t::ENC_BLUE } else { t::ENC_GREEN }.gamma_multiply(0.6),
+            if i == 0 {
+                t::enc_blue()
+            } else {
+                t::enc_green()
+            }
+            .gamma_multiply(0.6),
         );
         paint.text(
             pos2(x, plot.bottom() + 2.0),
             egui::Align2::CENTER_TOP,
             name,
             t::mono(9.0),
-            t::FAINT,
+            t::faint(),
         );
     }
     let at = plot.center().x + pan * plot.width() * 0.35;
-    paint.vline(at, plot.y_range(), Stroke::new(1.5_f32, t::WAIT));
+    paint.vline(at, plot.y_range(), Stroke::new(1.5_f32, t::wait()));
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        let (s, c) = face_dial(ui, track, slot, 0, &specs[0], p, t::ENC_WHITE, 76.0);
+        let (s, c) = face_dial(ui, track, slot, 0, &specs[0], p, t::enc_white(), 76.0);
         started |= s;
         changed |= c;
-        let (s, c) = face_dial(ui, track, slot, 1, &specs[1], p, t::ENC_BLUE, 76.0);
+        let (s, c) = face_dial(ui, track, slot, 1, &specs[1], p, t::enc_blue(), 76.0);
         started |= s;
         changed |= c;
     });
@@ -1660,9 +1681,12 @@ pub fn mid_side(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool,
     let (face, paint) = face_bg(ui, 92.0);
     let plot = face.shrink2(vec2(24.0, 14.0));
     let side = (p[0] / 100.0).clamp(0.0, 2.0);
-    for (i, (g, name, color)) in [(1.0f32, "MID", t::ENC_BLUE), (side, "SIDE", t::ENC_GREEN)]
-        .into_iter()
-        .enumerate()
+    for (i, (g, name, color)) in [
+        (1.0f32, "MID", t::enc_blue()),
+        (side, "SIDE", t::enc_green()),
+    ]
+    .into_iter()
+    .enumerate()
     {
         let x = plot.left() + plot.width() * (0.3 + 0.4 * i as f32);
         let h = plot.height() * (g / 2.0).clamp(0.0, 1.0) * 0.8;
@@ -1679,23 +1703,23 @@ pub fn mid_side(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool,
             egui::Align2::CENTER_TOP,
             name,
             t::mono(9.0),
-            t::FAINT,
+            t::faint(),
         );
     }
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        let (s, c) = face_dial(ui, track, slot, 0, &specs[0], p, t::ENC_GREEN, 72.0);
+        let (s, c) = face_dial(ui, track, slot, 0, &specs[0], p, t::enc_green(), 72.0);
         started |= s;
         changed |= c;
-        let (s, c) = face_dial(ui, track, slot, 1, &specs[1], p, t::ENC_BLUE, 54.0);
+        let (s, c) = face_dial(ui, track, slot, 1, &specs[1], p, t::enc_blue(), 54.0);
         started |= s;
         changed |= c;
         ui.vertical(|ui| {
-            let (s, c) = face_dial(ui, track, slot, 2, &specs[2], p, t::ENC_WHITE, 48.0);
+            let (s, c) = face_dial(ui, track, slot, 2, &specs[2], p, t::enc_white(), 48.0);
             started |= s;
             changed |= c;
         });
-        let (s, c) = face_dial(ui, track, slot, 3, &specs[3], p, t::ENC_WHITE, 48.0);
+        let (s, c) = face_dial(ui, track, slot, 3, &specs[3], p, t::enc_white(), 48.0);
         started |= s;
         changed |= c;
     });
@@ -1703,7 +1727,7 @@ pub fn mid_side(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool,
         ui.label(
             egui::RichText::new("SOLO")
                 .font(t::sans(10.0))
-                .color(t::FAINT),
+                .color(t::faint()),
         );
         let mut solo = p[4].round() as usize;
         for (i, name) in ["Off", "Mid", "Side"].iter().enumerate() {
@@ -1743,30 +1767,33 @@ pub fn phaser(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, b
             curve_point(plot, x, y * 0.8 + 0.1)
         })
         .collect();
-    paint.add(egui::Shape::line(line, Stroke::new(2.0_f32, t::ENC_ORANGE)));
+    paint.add(egui::Shape::line(
+        line,
+        Stroke::new(2.0_f32, t::enc_orange()),
+    ));
     paint.text(
         plot.left_top(),
         egui::Align2::LEFT_TOP,
         "100 Hz",
         t::mono(9.0),
-        t::FAINT,
+        t::faint(),
     );
     paint.text(
         plot.right_top(),
         egui::Align2::RIGHT_TOP,
         "10 kHz",
         t::mono(9.0),
-        t::FAINT,
+        t::faint(),
     );
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        let (s, c) = face_dial(ui, track, slot, 0, &specs[0], p, t::ENC_ORANGE, 72.0);
+        let (s, c) = face_dial(ui, track, slot, 0, &specs[0], p, t::enc_orange(), 72.0);
         started |= s;
         changed |= c;
-        let (s, c) = face_dial(ui, track, slot, 1, &specs[1], p, t::ENC_GREEN, 60.0);
+        let (s, c) = face_dial(ui, track, slot, 1, &specs[1], p, t::enc_green(), 60.0);
         started |= s;
         changed |= c;
-        let (s, c) = face_dial(ui, track, slot, 2, &specs[2], p, t::ENC_WHITE, 60.0);
+        let (s, c) = face_dial(ui, track, slot, 2, &specs[2], p, t::enc_white(), 60.0);
         started |= s;
         changed |= c;
     });
@@ -1825,27 +1852,30 @@ pub fn eq3(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, bool
             curve_point(plot, x, (db + 18.0) / 36.0)
         })
         .collect();
-    paint.add(egui::Shape::line(line, Stroke::new(2.0_f32, t::ENC_GREEN)));
+    paint.add(egui::Shape::line(
+        line,
+        Stroke::new(2.0_f32, t::enc_green()),
+    ));
     paint.text(
         plot.left_top(),
         egui::Align2::LEFT_TOP,
         "20",
         t::mono(9.0),
-        t::FAINT,
+        t::faint(),
     );
     paint.text(
         plot.right_top(),
         egui::Align2::RIGHT_TOP,
         "20k",
         t::mono(9.0),
-        t::FAINT,
+        t::faint(),
     );
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         for (name, color, idxs) in [
-            ("LOW", t::ENC_ORANGE, vec![0usize, 1]),
-            ("MID", t::ENC_GREEN, vec![2, 3, 4]),
-            ("HIGH", t::ENC_BLUE, vec![5, 6]),
+            ("LOW", t::enc_orange(), vec![0usize, 1]),
+            ("MID", t::enc_green(), vec![2, 3, 4]),
+            ("HIGH", t::enc_blue(), vec![5, 6]),
         ] {
             ui.vertical(|ui| {
                 ui.label(egui::RichText::new(name).font(t::sans(9.0)).color(color));
@@ -1881,7 +1911,7 @@ pub fn auto_pan(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool,
             egui::Align2::CENTER_TOP,
             name,
             t::mono(9.0),
-            t::FAINT,
+            t::faint(),
         );
     }
     let t = ui.input(|i| i.time) as f32 * p[0] * std::f32::consts::TAU;
@@ -1892,17 +1922,17 @@ pub fn auto_pan(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool,
             curve_point(plot, x, 0.5 + ph.cos() * 0.08)
         })
         .collect();
-    paint.add(egui::Shape::line(pts, Stroke::new(1.5_f32, t::ENC_GREEN)));
+    paint.add(egui::Shape::line(pts, Stroke::new(1.5_f32, t::enc_green())));
     let x = (t.sin() * p[1] / 100.0) * 0.5 + 0.5;
     paint.circle_filled(
         pos2(egui::lerp(plot.x_range(), x), plot.center().y),
         5.0,
-        t::ENC_GREEN,
+        t::enc_green(),
     );
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         for pi in 0..2 {
-            let (s, c) = face_dial(ui, track, slot, pi, &specs[pi], p, t::ENC_GREEN, 72.0);
+            let (s, c) = face_dial(ui, track, slot, pi, &specs[pi], p, t::enc_green(), 72.0);
             started |= s;
             changed |= c;
         }
@@ -1939,11 +1969,11 @@ pub fn tremolo(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, 
             curve_point(plot, x, y)
         })
         .collect();
-    paint.add(egui::Shape::line(pts, Stroke::new(2.0_f32, t::ENC_GREEN)));
+    paint.add(egui::Shape::line(pts, Stroke::new(2.0_f32, t::enc_green())));
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         for pi in 0..3 {
-            let (s, c) = face_dial(ui, track, slot, pi, &specs[pi], p, t::ENC_GREEN, 64.0);
+            let (s, c) = face_dial(ui, track, slot, pi, &specs[pi], p, t::enc_green(), 64.0);
             started |= s;
             changed |= c;
         }
@@ -1970,23 +2000,26 @@ pub fn bitcrusher(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (boo
         pts.push(curve_point(plot, x, 0.5 + q * 0.36));
         let _ = src;
     }
-    paint.add(egui::Shape::line(pts, Stroke::new(2.0_f32, t::ENC_ORANGE)));
+    paint.add(egui::Shape::line(
+        pts,
+        Stroke::new(2.0_f32, t::enc_orange()),
+    ));
     paint.text(
         plot.left_top(),
         egui::Align2::LEFT_TOP,
         format!("{bits:.0} bit"),
         t::mono(9.0),
-        t::FAINT,
+        t::faint(),
     );
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        let (s, c) = face_dial(ui, track, slot, 0, &specs[0], p, t::ENC_WHITE, 72.0);
+        let (s, c) = face_dial(ui, track, slot, 0, &specs[0], p, t::enc_white(), 72.0);
         started |= s;
         changed |= c;
-        let (s, c) = face_dial(ui, track, slot, 1, &specs[1], p, t::ENC_BLUE, 60.0);
+        let (s, c) = face_dial(ui, track, slot, 1, &specs[1], p, t::enc_blue(), 60.0);
         started |= s;
         changed |= c;
-        let (s, c) = face_dial(ui, track, slot, 2, &specs[2], p, t::ENC_GREEN, 60.0);
+        let (s, c) = face_dial(ui, track, slot, 2, &specs[2], p, t::enc_green(), 60.0);
         started |= s;
         changed |= c;
     });
@@ -2012,25 +2045,29 @@ pub fn noise_gate(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (boo
             ),
             0.0,
             if open {
-                t::ENC_GREEN
+                t::enc_green()
             } else {
                 Color32::from_gray(55)
             },
         );
     }
     let y = plot.bottom() - plot.height() * thr * 0.9;
-    paint.hline(plot.x_range(), y, Stroke::new(1.5_f32, t::WAIT));
+    paint.hline(plot.x_range(), y, Stroke::new(1.5_f32, t::wait()));
     paint.text(
         pos2(plot.right(), y - 2.0),
         egui::Align2::RIGHT_BOTTOM,
         keyframexl::fx::format(&specs[0], p[0]),
         t::mono(9.0),
-        t::WAIT,
+        t::wait(),
     );
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         for pi in 0..3 {
-            let color = if pi == 0 { t::ENC_GREEN } else { t::ENC_WHITE };
+            let color = if pi == 0 {
+                t::enc_green()
+            } else {
+                t::enc_white()
+            };
             let (s, c) = face_dial(ui, track, slot, pi, &specs[pi], p, color, 64.0);
             started |= s;
             changed |= c;
@@ -2108,27 +2145,27 @@ pub fn tilt_eq(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, 
     ];
     paint.add(egui::Shape::line(
         pts.to_vec(),
-        Stroke::new(2.0_f32, t::ENC_BLUE),
+        Stroke::new(2.0_f32, t::enc_blue()),
     ));
-    paint.circle_filled(pts[1], 4.0, t::WAIT);
+    paint.circle_filled(pts[1], 4.0, t::wait());
     paint.text(
         plot.left_top(),
         egui::Align2::LEFT_TOP,
         "20",
         t::mono(9.0),
-        t::FAINT,
+        t::faint(),
     );
     paint.text(
         plot.right_top(),
         egui::Align2::RIGHT_TOP,
         "20k",
         t::mono(9.0),
-        t::FAINT,
+        t::faint(),
     );
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         for pi in 0..2 {
-            let (s, c) = face_dial(ui, track, slot, pi, &specs[pi], p, t::ENC_BLUE, 72.0);
+            let (s, c) = face_dial(ui, track, slot, pi, &specs[pi], p, t::enc_blue(), 72.0);
             started |= s;
             changed |= c;
         }
@@ -2181,7 +2218,7 @@ pub fn wavefolder(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (boo
         );
         started |= s;
         changed |= c;
-        let (s, c) = face_dial(ui, track, slot, 1, &specs[1], p, t::ENC_WHITE, 60.0);
+        let (s, c) = face_dial(ui, track, slot, 1, &specs[1], p, t::enc_white(), 60.0);
         started |= s;
         changed |= c;
     });
@@ -2204,30 +2241,33 @@ pub fn transient(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool
             curve_point(plot, x, (body + head).clamp(0.05, 0.95))
         })
         .collect();
-    paint.add(egui::Shape::line(pts, Stroke::new(2.0_f32, t::ENC_ORANGE)));
+    paint.add(egui::Shape::line(
+        pts,
+        Stroke::new(2.0_f32, t::enc_orange()),
+    ));
     paint.text(
         plot.left_bottom() + vec2(0.0, 2.0),
         egui::Align2::LEFT_TOP,
         "HIT",
         t::mono(9.0),
-        t::FAINT,
+        t::faint(),
     );
     paint.text(
         plot.right_bottom() + vec2(0.0, 2.0),
         egui::Align2::RIGHT_TOP,
         "BODY",
         t::mono(9.0),
-        t::FAINT,
+        t::faint(),
     );
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        let (s, c) = face_dial(ui, track, slot, 0, &specs[0], p, t::ENC_ORANGE, 72.0);
+        let (s, c) = face_dial(ui, track, slot, 0, &specs[0], p, t::enc_orange(), 72.0);
         started |= s;
         changed |= c;
-        let (s, c) = face_dial(ui, track, slot, 1, &specs[1], p, t::ENC_GREEN, 64.0);
+        let (s, c) = face_dial(ui, track, slot, 1, &specs[1], p, t::enc_green(), 64.0);
         started |= s;
         changed |= c;
-        let (s, c) = face_dial(ui, track, slot, 2, &specs[2], p, t::ENC_WHITE, 54.0);
+        let (s, c) = face_dial(ui, track, slot, 2, &specs[2], p, t::enc_white(), 54.0);
         started |= s;
         changed |= c;
     });
@@ -2268,7 +2308,7 @@ pub fn vocoder(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, 
         egui::Align2::LEFT_TOP,
         format!("{bands} bands"),
         t::mono(9.0),
-        t::FAINT,
+        t::faint(),
     );
     ui.add_space(4.0);
     ui.horizontal(|ui| {
@@ -2276,7 +2316,7 @@ pub fn vocoder(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, 
             let color = if pi == 0 {
                 Color32::from_rgb(211, 162, 242)
             } else {
-                t::ENC_WHITE
+                t::enc_white()
             };
             let (s, c) = face_dial(ui, track, slot, pi, &specs[pi], p, color, 54.0);
             started |= s;
@@ -2306,18 +2346,18 @@ pub fn convolution(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bo
             curve_point(plot, x, 0.5 + env * noise * 0.36)
         })
         .collect();
-    paint.add(egui::Shape::line(pts, Stroke::new(1.2_f32, t::ENC_BLUE)));
+    paint.add(egui::Shape::line(pts, Stroke::new(1.2_f32, t::enc_blue())));
     paint.text(
         plot.left_top(),
         egui::Align2::LEFT_TOP,
         "IMPULSE",
         t::mono(9.0),
-        t::FAINT,
+        t::faint(),
     );
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         for pi in 0..3 {
-            let (s, c) = face_dial(ui, track, slot, pi, &specs[pi], p, t::ENC_BLUE, 64.0);
+            let (s, c) = face_dial(ui, track, slot, pi, &specs[pi], p, t::enc_blue(), 64.0);
             started |= s;
             changed |= c;
         }
@@ -2345,7 +2385,7 @@ pub fn stereo_shaper(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (
             paint.rect_stroke(
                 rect,
                 3.0,
-                Stroke::new(1.0_f32, t::EDGE),
+                Stroke::new(1.0_f32, t::edge()),
                 egui::StrokeKind::Inside,
             );
             let pi = match (r, c) {
@@ -2360,14 +2400,14 @@ pub fn stereo_shaper(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (
                 egui::Align2::LEFT_TOP,
                 names[r][c],
                 t::sans(8.0),
-                t::FAINT,
+                t::faint(),
             );
             paint.text(
                 rect.center() + vec2(0.0, 5.0),
                 egui::Align2::CENTER_CENTER,
                 keyframexl::fx::format(&specs[pi], p[pi]),
                 t::mono(11.0),
-                if pi == 3 { t::ENC_ORANGE } else { t::TEXT },
+                if pi == 3 { t::enc_orange() } else { t::text() },
             );
         }
     }
@@ -2376,26 +2416,26 @@ pub fn stereo_shaper(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (
         egui::Align2::LEFT_TOP,
         "L",
         t::mono(8.0),
-        t::FAINT,
+        t::faint(),
     );
     paint.text(
         plot.right_top() + vec2(0.0, -10.0),
         egui::Align2::RIGHT_TOP,
         "R",
         t::mono(8.0),
-        t::FAINT,
+        t::faint(),
     );
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         for pi in 0..4 {
-            let (s, c) = face_dial(ui, track, slot, pi, &specs[pi], p, t::ENC_WHITE, 50.0);
+            let (s, c) = face_dial(ui, track, slot, pi, &specs[pi], p, t::enc_white(), 50.0);
             started |= s;
             changed |= c;
         }
     });
     ui.horizontal(|ui| {
         for pi in 4..6 {
-            let (s, c) = face_dial(ui, track, slot, pi, &specs[pi], p, t::ENC_BLUE, 54.0);
+            let (s, c) = face_dial(ui, track, slot, pi, &specs[pi], p, t::enc_blue(), 54.0);
             started |= s;
             changed |= c;
         }

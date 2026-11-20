@@ -635,9 +635,9 @@ impl App {
         // Header: what it drives, its length.
         ui.horizontal(|ui| {
             let (ok, note) = if env.target.exists(&self.song) {
-                (t::MUTED, self.auto_label(env.target))
+                (t::muted(), self.auto_label(env.target))
             } else {
-                (t::BAD, "Its control is gone".to_string())
+                (t::bad(), "Its control is gone".to_string())
             };
             ui.label(egui::RichText::new(note).font(t::sans(13.0)).color(ok));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -651,7 +651,7 @@ impl App {
                 ui.label(
                     egui::RichText::new(format!("{bars} bar{}", if bars == 1 { "" } else { "s" }))
                         .font(t::mono(12.0))
-                        .color(t::TEXT),
+                        .color(t::text()),
                 );
                 if kit::tool_button(ui, "−", kit::Kind::Ghost, bars > 1)
                     .on_hover_text("One bar shorter")
@@ -661,11 +661,11 @@ impl App {
                 }
             });
         });
-        ui.label(egui::RichText::new("Click to add a point, drag to move it, right-click to delete. Alt+drag up/down on a segment bends it.").font(t::sans(11.5)).color(t::FAINT));
+        ui.label(egui::RichText::new("Click to add a point, drag to move it, right-click to delete. Alt+drag up/down on a segment bends it.").font(t::sans(11.5)).color(t::faint()));
         let size = vec2(ui.available_width(), ui.available_height().max(160.0));
         let (rect, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
         let p = ui.painter_at(rect);
-        p.rect_filled(rect, 6.0, t::SUNKEN);
+        p.rect_filled(rect, 6.0, t::sunken());
         let inner = rect.shrink2(vec2(10.0, 12.0));
         let x = |tk: Tick| inner.left() + inner.width() * tk as f32 / len as f32;
         let target = env.target;
@@ -683,9 +683,9 @@ impl App {
                 Stroke::new(
                     1.0_f32,
                     if strong {
-                        t::LINE
+                        t::line()
                     } else {
-                        t::LINE.gamma_multiply(0.45)
+                        t::line().gamma_multiply(0.45)
                     },
                 ),
             );
@@ -695,13 +695,13 @@ impl App {
                     Align2::LEFT_TOP,
                     format!("{}", tk / BAR + 1),
                     t::mono(10.5),
-                    t::FAINT,
+                    t::faint(),
                 );
             }
             tk += BAR / 4;
         }
         if lo < 0.0 && hi > 0.0 {
-            p.hline(inner.x_range(), y(0.0), Stroke::new(1.0_f32, t::LINE));
+            p.hline(inner.x_range(), y(0.0), Stroke::new(1.0_f32, t::line()));
         }
         // The curve, filled below like FL's clip.
         let mut line: Vec<Pos2> = Vec::new();
@@ -722,11 +722,14 @@ impl App {
             ];
             p.add(egui::Shape::convex_polygon(
                 quad,
-                t::ENC_GREEN.gamma_multiply(0.12),
+                t::enc_green().gamma_multiply(0.12),
                 Stroke::NONE,
             ));
         }
-        p.add(egui::Shape::line(line, Stroke::new(1.6_f32, t::ENC_GREEN)));
+        p.add(egui::Shape::line(
+            line,
+            Stroke::new(1.6_f32, t::enc_green()),
+        ));
         // Points and gestures.
         let hit = |pos: Pos2| {
             env.points
@@ -742,9 +745,13 @@ impl App {
             p.circle_filled(
                 c,
                 if on { 6.0 } else { 4.5 },
-                if on { t::TEXT } else { t::ENC_GREEN },
+                if on { t::text() } else { t::enc_green() },
             );
-            p.circle_stroke(c, if on { 6.0 } else { 4.5 }, Stroke::new(1.0_f32, t::EDGE));
+            p.circle_stroke(
+                c,
+                if on { 6.0 } else { 4.5 },
+                Stroke::new(1.0_f32, t::edge()),
+            );
         }
         if let Some(pos) = resp.hover_pos() {
             let v = value_at(pos.y);
@@ -753,7 +760,7 @@ impl App {
                 Align2::LEFT_BOTTOM,
                 self.auto_value_text(env.target, v),
                 t::mono(11.0),
-                t::MUTED,
+                t::muted(),
             );
         }
         let alt = ui.input(|i| i.modifiers.alt);

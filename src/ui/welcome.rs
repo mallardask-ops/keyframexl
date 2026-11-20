@@ -197,12 +197,12 @@ impl TemplateKind {
     /// Address colour of the card's stripe.
     fn accent(self) -> egui::Color32 {
         match self {
-            TemplateKind::EmptyBeat => t::BRAND,
-            TemplateKind::DemoBeat => t::ENC_BLUE,
-            TemplateKind::TideStudio => t::ENC_GREEN,
-            TemplateKind::ForgeSfx => t::ENC_ORANGE,
-            TemplateKind::VocalSession => t::WAIT,
-            TemplateKind::BlankMinimal => t::ENC_WHITE,
+            TemplateKind::EmptyBeat => t::brand(),
+            TemplateKind::DemoBeat => t::enc_blue(),
+            TemplateKind::TideStudio => t::enc_green(),
+            TemplateKind::ForgeSfx => t::enc_orange(),
+            TemplateKind::VocalSession => t::wait(),
+            TemplateKind::BlankMinimal => t::enc_white(),
         }
     }
 }
@@ -405,11 +405,11 @@ pub fn show_welcome(
         MODAL_H.min((screen.height() - 32.0).max(380.0)),
     );
     let frame = egui::Frame::new()
-        .fill(t::BG)
-        .stroke(Stroke::new(1.5_f32, t::EDGE))
+        .fill(t::bg())
+        .stroke(Stroke::new(1.5_f32, t::edge()))
         .corner_radius(10.0);
     egui::Modal::new(egui::Id::new("kfxl-welcome"))
-        .backdrop_color(t::SHADOW.gamma_multiply(0.7))
+        .backdrop_color(t::shadow().gamma_multiply(0.7))
         .frame(frame)
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
@@ -456,13 +456,13 @@ fn header(
 ) {
     let p = ui.painter().clone();
     let h = Rect::from_min_size(modal.min, vec2(modal.width(), HEADER_H));
-    p.rect_filled(h.shrink2(vec2(1.0, 0.0)), top_corners(9), t::PANEL_TOP);
+    p.rect_filled(h.shrink2(vec2(1.0, 0.0)), top_corners(9), t::panel_top());
     p.line_segment(
         [
             pos2(h.left(), h.bottom() - 0.5),
             pos2(h.right(), h.bottom() - 0.5),
         ],
-        Stroke::new(1.0_f32, t::LINE),
+        Stroke::new(1.0_f32, t::line()),
     );
     kit::icon_brand(
         &p,
@@ -475,21 +475,21 @@ fn header(
         Align2::LEFT_TOP,
         copy.title,
         t::semibold(20.0),
-        t::TEXT,
+        t::text(),
     );
     p.text(
         pos2(x + title_w + 10.0, h.top() + 33.0),
         Align2::LEFT_BOTTOM,
         format!("v{}", env!("CARGO_PKG_VERSION")),
         t::mono(12.0),
-        t::MUTED,
+        t::muted(),
     );
     p.text(
         pos2(x, h.top() + 40.0),
         Align2::LEFT_TOP,
         copy.subtitle,
         t::sans(12.0),
-        t::MUTED,
+        t::muted(),
     );
 
     let close =
@@ -526,14 +526,14 @@ fn header(
         );
         let r = ui.interact(pill, ui.id().with("welcome-update"), Sense::click());
         let hover = kit::hover_amount(ui, &r);
-        p.rect_filled(pill, 6.0, kit::mix(t::WAIT_SOFT, t::SELECTION, hover));
+        p.rect_filled(pill, 6.0, kit::mix(t::wait_soft(), t::selection(), hover));
         p.rect_stroke(
             pill,
             6.0,
-            Stroke::new(1.0_f32, t::WAIT),
+            Stroke::new(1.0_f32, t::wait()),
             egui::StrokeKind::Inside,
         );
-        p.text(pill.center(), Align2::CENTER_CENTER, label, font, t::WAIT);
+        p.text(pill.center(), Align2::CENTER_CENTER, label, font, t::wait());
         if kit::show_focus(ui, &r) {
             kit::focus_ring(&p, pill, 6.0);
         }
@@ -560,14 +560,14 @@ fn footer(
             sw: 9,
             se: 9,
         },
-        t::PANEL_BOTTOM,
+        t::panel_bottom(),
     );
     p.line_segment(
         [
             pos2(f.left(), f.top() + 0.5),
             pos2(f.right(), f.top() + 0.5),
         ],
-        Stroke::new(1.0_f32, t::LINE),
+        Stroke::new(1.0_f32, t::line()),
     );
 
     // Checkbox: sunken box, a check when on.
@@ -589,7 +589,7 @@ fn footer(
     kit::sunken(&p, bx, 4.0);
     if *show_on_startup {
         let c = bx.center();
-        let st = Stroke::new(1.8_f32, t::TEXT);
+        let st = Stroke::new(1.8_f32, t::text());
         p.line_segment([c + vec2(-4.0, 0.0), c + vec2(-1.5, 3.0)], st);
         p.line_segment([c + vec2(-1.5, 3.0), c + vec2(4.5, -3.5)], st);
     }
@@ -598,7 +598,7 @@ fn footer(
         Align2::LEFT_CENTER,
         copy.show_on_startup,
         t::sans(13.0),
-        if r.hovered() { t::TEXT } else { t::MUTED },
+        if r.hovered() { t::text() } else { t::muted() },
     );
     if kit::show_focus(ui, &r) {
         kit::focus_ring(&p, bx, 4.0);
@@ -638,14 +638,14 @@ fn left_column(
             sw: 9,
             se: 0,
         },
-        t::SIDE,
+        t::side(),
     );
     p.line_segment(
         [
             pos2(col.right() - 0.5, col.top()),
             pos2(col.right() - 0.5, col.bottom()),
         ],
-        Stroke::new(1.0_f32, t::LINE),
+        Stroke::new(1.0_f32, t::line()),
     );
     let inner = col.shrink(PAD);
     kit::caps(
@@ -654,7 +654,7 @@ fn left_column(
         Align2::LEFT_CENTER,
         copy.recent_heading,
         12.0,
-        t::MUTED,
+        t::muted(),
     );
 
     // Quick actions pinned to the bottom.
@@ -707,7 +707,7 @@ fn left_column(
         lui.label(
             RichText::new(copy.recent_empty)
                 .font(t::sans(13.0))
-                .color(t::MUTED),
+                .color(t::muted()),
         );
         if kit::button(&mut lui, copy.btn_open_empty, kit::Kind::Normal, true).clicked() {
             action.get_or_insert(WelcomeAction::OpenProject);
@@ -738,9 +738,9 @@ fn brand_button(ui: &mut Ui, label: &str, width: f32) -> egui::Response {
         p,
         rect,
         kit::RADIUS,
-        kit::mix(t::BRAND_TOP, t::BRAND_GLOW, hover),
-        kit::mix(t::BRAND_FILL, t::BRAND_TOP, hover),
-        t::BRAND_EDGE,
+        kit::mix(t::brand_top(), t::brand_glow(), hover),
+        kit::mix(t::brand_fill(), t::brand_top(), hover),
+        t::brand_edge(),
         r.is_pointer_button_down_on(),
         kit::DEPTH,
     );
@@ -749,7 +749,7 @@ fn brand_button(ui: &mut Ui, label: &str, width: f32) -> egui::Response {
         Align2::CENTER_CENTER,
         label,
         t::medium(14.0),
-        t::ON_BRAND,
+        t::on_brand(),
     );
     if kit::show_focus(ui, &r) {
         kit::focus_ring(p, rect, kit::RADIUS);
@@ -783,7 +783,7 @@ fn recent_row(ui: &mut Ui, i: usize, path: &Path, copy: &WelcomeCopy) -> bool {
     let _ = i;
     let p = ui.painter();
     if r.hovered() || r.has_focus() {
-        p.rect_filled(rect, 6.0, t::SELECTION);
+        p.rect_filled(rect, 6.0, t::selection());
     }
     let badge_w = if missing {
         kit::text_width(p, &copy.recent_missing.to_uppercase(), t::mono(12.0)) + 16.0
@@ -797,7 +797,7 @@ fn recent_row(ui: &mut Ui, i: usize, path: &Path, copy: &WelcomeCopy) -> bool {
         Align2::LEFT_TOP,
         name,
         t::medium(13.0),
-        if missing { t::MUTED } else { t::TEXT },
+        if missing { t::muted() } else { t::text() },
     );
     let dir = kit::elide(p, &short_dir(path), t::mono(11.0), text_w);
     p.text(
@@ -805,7 +805,7 @@ fn recent_row(ui: &mut Ui, i: usize, path: &Path, copy: &WelcomeCopy) -> bool {
         Align2::LEFT_TOP,
         dir,
         t::mono(11.0),
-        t::FAINT,
+        t::faint(),
     );
     if missing {
         kit::caps(
@@ -814,7 +814,7 @@ fn recent_row(ui: &mut Ui, i: usize, path: &Path, copy: &WelcomeCopy) -> bool {
             Align2::RIGHT_CENTER,
             copy.recent_missing,
             12.0,
-            t::BAD,
+            t::bad(),
         );
     }
     if kit::show_focus(ui, &r) {
@@ -845,7 +845,7 @@ fn right_column(
         Align2::LEFT_CENTER,
         copy.templates_heading,
         12.0,
-        t::MUTED,
+        t::muted(),
     );
     let mut rui = ui.new_child(
         UiBuilder::new()
@@ -906,13 +906,13 @@ fn right_column(
                 }
                 // Genre starters: a groove, chords and a mix, ready to play.
                 let colors = [
-                    t::WAIT,
-                    t::BRAND,
-                    t::ENC_BLUE,
-                    t::ENC_ORANGE,
-                    t::ENC_GREEN,
-                    t::ENC_WHITE,
-                    t::ENC_BLUE,
+                    t::wait(),
+                    t::brand(),
+                    t::enc_blue(),
+                    t::enc_orange(),
+                    t::enc_green(),
+                    t::enc_white(),
+                    t::enc_blue(),
                 ];
                 for pair in keyframexl::genres::Genre::ALL.chunks(2) {
                     ui.horizontal(|ui| {
@@ -960,7 +960,7 @@ fn right_column(
                 ui.label(
                     RichText::new(copy.no_match)
                         .font(t::sans(13.0))
-                        .color(t::MUTED),
+                        .color(t::muted()),
                 );
                 return None;
             }
@@ -1001,7 +1001,7 @@ fn search_field(ui: &mut Ui, query: &mut String, copy: &WelcomeCopy) {
             .hint_text(
                 RichText::new(copy.search_hint)
                     .font(t::sans(13.0))
-                    .color(t::FAINT),
+                    .color(t::faint()),
             )
             .vertical_align(Align::Center)
             .desired_width(rect.width() - 20.0),
@@ -1042,17 +1042,17 @@ fn card(ui: &mut Ui, title: &str, desc: &str, tag: &str, accent: egui::Color32, 
         Align2::LEFT_TOP,
         kit::elide(p, title, t::medium(14.0), text_w),
         t::medium(14.0),
-        t::TEXT,
+        t::text(),
     );
-    let desc = p.layout(desc.to_string(), t::sans(12.0), t::MUTED, text_w);
-    p.galley(pos2(x, face.top() + 34.0 + dy), desc, t::MUTED);
+    let desc = p.layout(desc.to_string(), t::sans(12.0), t::muted(), text_w);
+    p.galley(pos2(x, face.top() + 34.0 + dy), desc, t::muted());
     kit::caps(
         p,
         pos2(x, face.bottom() - 10.0 + dy),
         Align2::LEFT_BOTTOM,
         tag,
         12.0,
-        t::FAINT,
+        t::faint(),
     );
     if kit::show_focus(ui, &r) {
         kit::focus_ring(ui.painter(), outer, kit::RADIUS);
@@ -1079,7 +1079,7 @@ fn list_row(ui: &mut Ui, idx: usize, name: &str, w: f32) -> bool {
         Align2::LEFT_CENTER,
         format!("{:02}", idx + 1),
         t::mono(11.0),
-        t::FAINT,
+        t::faint(),
     );
     let name_x = face.left() + 46.0;
     p.text(
@@ -1087,7 +1087,7 @@ fn list_row(ui: &mut Ui, idx: usize, name: &str, w: f32) -> bool {
         Align2::LEFT_CENTER,
         kit::elide(p, name, t::sans(13.0), face.right() - name_x - 10.0),
         t::sans(13.0),
-        t::TEXT,
+        t::text(),
     );
     if kit::show_focus(ui, &r) {
         kit::focus_ring(ui.painter(), outer, kit::RADIUS);

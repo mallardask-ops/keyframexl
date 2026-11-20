@@ -113,7 +113,7 @@ impl App {
         let status = self.audio.as_ref().map(|a| a.vocal.status.clone());
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-            panel(ui, "voicebank", t::ENC_BLUE, |ui| {
+            panel(ui, "voicebank", t::enc_blue(), |ui| {
                 let installed = install::installed();
                 ui.horizontal_wrapped(|ui| {
                     let shown = if v.name.is_empty() { "No voicebank".to_string() } else { v.name.clone() };
@@ -125,7 +125,7 @@ impl App {
                             }
                         }
                         if installed.is_empty() {
-                            ui.label(egui::RichText::new("None installed yet").color(t::MUTED));
+                            ui.label(egui::RichText::new("None installed yet").color(t::muted()));
                         }
                     });
                     if kit::button(ui, "Folder…", kit::Kind::Normal, busy.is_none()).on_hover_text("Use an unpacked UTAU voicebank folder (the one with oto.ini)").clicked()
@@ -154,25 +154,25 @@ impl App {
                     ui.hyperlink_to(egui::RichText::new("Teto's terms of use").size(12.0), install::TETO_TERMS);
                 });
                 if let Some(label) = &busy {
-                    ui.label(egui::RichText::new(format!("{label}…")).color(t::WAIT));
+                    ui.label(egui::RichText::new(format!("{label}…")).color(t::wait()));
                 }
                 if v.bank.is_empty() {
-                    ui.label(egui::RichText::new("This channel has no voice yet. Download Kasane Teto, install a .zip, or pick a bank folder. Any UTAU voicebank works.").color(t::MUTED));
+                    ui.label(egui::RichText::new("This channel has no voice yet. Download Kasane Teto, install a .zip, or pick a bank folder. Any UTAU voicebank works.").color(t::muted()));
                 } else {
-                    ui.label(egui::RichText::new(&v.bank).font(t::sans(11.5)).color(t::FAINT));
+                    ui.label(egui::RichText::new(&v.bank).font(t::sans(11.5)).color(t::faint()));
                 }
                 if let Some(st) = &status {
                     if st.busy() {
-                        ui.label(egui::RichText::new(format!("Rendering the singing: {} of {}", st.done.load(std::sync::atomic::Ordering::Relaxed), st.total.load(std::sync::atomic::Ordering::Relaxed))).color(t::WAIT));
+                        ui.label(egui::RichText::new(format!("Rendering the singing: {} of {}", st.done.load(std::sync::atomic::Ordering::Relaxed), st.total.load(std::sync::atomic::Ordering::Relaxed))).color(t::wait()));
                     }
                     for m in st.messages() {
-                        ui.label(egui::RichText::new(m).color(t::BAD));
+                        ui.label(egui::RichText::new(m).color(t::bad()));
                     }
                 }
             });
-            panel(ui, "voice", t::ENC_GREEN, |ui| {
+            panel(ui, "voice", t::enc_green(), |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    let c = t::ENC_GREEN;
+                    let c = t::enc_green();
                     let p = &mut v.params;
                     ed.knob(ui, "VIBRATO", c, &mut p.vibrato_depth, (0.0, 150.0, 35.0), false, &|x| format!("{x:.0} ct"), "Vibrato depth on long notes, in cents");
                     ed.knob(ui, "RATE", c, &mut p.vibrato_rate, (2.0, 9.0, 5.5), false, &|x| format!("{x:.1} Hz"), "Vibrato speed");
@@ -185,8 +185,8 @@ impl App {
             });
             pair(ui, |ui, col| {
                 if col == 0 {
-                    panel(ui, "default lyric", t::ENC_ORANGE, |ui| {
-                        ui.label(egui::RichText::new("What a note sings until you type a lyric for it.").color(t::MUTED));
+                    panel(ui, "default lyric", t::enc_orange(), |ui| {
+                        ui.label(egui::RichText::new("What a note sings until you type a lyric for it.").color(t::muted()));
                         let r = ui.add(egui::TextEdit::singleline(&mut v.default_lyric).desired_width(140.0));
                         if r.changed() {
                             if kit::first_edit(ui, &r) {
@@ -197,10 +197,10 @@ impl App {
                         kit::end_edit(ui, &r);
                     });
                 } else {
-                    panel(ui, "singing", t::ENC_WHITE, |ui| {
+                    panel(ui, "singing", t::enc_white(), |ui| {
                         ui.label("Open the piano roll, draw notes, then double-click a note (or press F2) and type its lyric: ka, shi, tsu, か, カ, or Cyrillic.");
-                        ui.label(egui::RichText::new("+  keeps the vowel of the note before   ·   -  is a rest   ·   Enter / Tab moves on to the next note").color(t::MUTED));
-                        ui.label(egui::RichText::new("Tools → Lyrics… in the piano roll pastes a whole text over the notes. The event lane tunes each note: Velocity = loudness, Mod X = vibrato depth, Mod Y = gender.").color(t::MUTED));
+                        ui.label(egui::RichText::new("+  keeps the vowel of the note before   ·   -  is a rest   ·   Enter / Tab moves on to the next note").color(t::muted()));
+                        ui.label(egui::RichText::new("Tools → Lyrics… in the piano roll pastes a whole text over the notes. The event lane tunes each note: Velocity = loudness, Mod X = vibrato depth, Mod Y = gender.").color(t::muted()));
                         if kit::button(ui, "Piano roll", kit::Kind::Normal, true).clicked() {
                             self.open_roll(id);
                         }
@@ -318,7 +318,7 @@ impl App {
             self.roll_sel.len()
         };
         egui::Window::new("Lyrics").open(&mut open).default_width(420.0).collapsible(false).show(ctx, |ui| {
-            ui.label(egui::RichText::new("Paste the words. Each syllable goes onto one note, in time order. Separate with spaces or hyphens: ko-n-ni-chi-ha, こんにちは, привіт. + keeps the last vowel, - is a rest.").color(t::MUTED));
+            ui.label(egui::RichText::new("Paste the words. Each syllable goes onto one note, in time order. Separate with spaces or hyphens: ko-n-ni-chi-ha, こんにちは, привіт. + keeps the last vowel, - is a rest.").color(t::muted()));
             ui.add(egui::TextEdit::multiline(&mut text).desired_rows(6).desired_width(f32::INFINITY));
             let n = split_text(&text).len();
             ui.label(format!("{n} syllable(s) for {targets} note(s){}", if self.roll_sel.is_empty() { " in this channel" } else { " selected" }));

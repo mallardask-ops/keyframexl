@@ -28,7 +28,7 @@ pub fn menu_check(ui: &mut Ui, on: bool, label: &str, key: &str) -> Response {
     if on {
         let c = pos2(r.rect.left() + MENU_PAD.x / 2.0, r.rect.center().y);
         ui.painter()
-            .text(c, Align2::CENTER_CENTER, "✓", t::sans(13.0), t::TEXT);
+            .text(c, Align2::CENTER_CENTER, "✓", t::sans(13.0), t::text());
     }
     r
 }
@@ -111,7 +111,7 @@ pub fn raised(
                 pos2(face.left() + inner * 0.6, y),
                 pos2(face.right() - inner * 0.6, y),
             ],
-            Stroke::new(1.0_f32, t::HI),
+            Stroke::new(1.0_f32, t::hi()),
         );
     }
     face
@@ -119,17 +119,17 @@ pub fn raised(
 
 /// Recessed well: darkest thing on the page, thick outline, inner shadow on top.
 pub fn sunken(p: &Painter, rect: Rect, radius: f32) -> Rect {
-    p.rect_filled(rect, radius, t::EDGE);
+    p.rect_filled(rect, radius, t::edge());
     let well = rect.shrink(EDGE_W);
     let inner = (radius - EDGE_W).max(1.0);
-    p.rect_filled(well, inner, t::SUNKEN);
+    p.rect_filled(well, inner, t::sunken());
     let y = well.top() + 0.5;
     p.line_segment(
         [
             pos2(well.left() + inner * 0.6, y),
             pos2(well.right() - inner * 0.6, y),
         ],
-        Stroke::new(1.0_f32, t::LOW),
+        Stroke::new(1.0_f32, t::low()),
     );
     well
 }
@@ -140,9 +140,9 @@ pub fn control(p: &Painter, rect: Rect, radius: f32, hover: f32, pressed: bool) 
         p,
         rect,
         radius,
-        mix(t::CTL_TOP, t::CTL_HOVER, hover),
-        mix(t::CTL_BOTTOM, t::CTL_TOP, hover),
-        t::EDGE,
+        mix(t::ctl_top(), t::ctl_hover(), hover),
+        mix(t::ctl_bottom(), t::ctl_top(), hover),
+        t::edge(),
         pressed,
         DEPTH,
     )
@@ -154,9 +154,9 @@ pub fn thumb(p: &Painter, rect: Rect) -> Rect {
         p,
         rect,
         RADIUS - 1.0,
-        t::CTL_TOP,
-        t::CTL_BOTTOM,
-        t::EDGE,
+        t::ctl_top(),
+        t::ctl_bottom(),
+        t::edge(),
         false,
         1.0,
     )
@@ -166,7 +166,7 @@ pub fn focus_ring(p: &Painter, rect: Rect, radius: f32) {
     p.rect_stroke(
         rect.expand(2.0),
         radius + 2.0,
-        Stroke::new(1.5_f32, t::FOCUS),
+        Stroke::new(1.5_f32, t::focus()),
         egui::StrokeKind::Outside,
     );
 }
@@ -379,7 +379,7 @@ pub fn paint_button(
     let down = enabled && r.is_pointer_button_down_on();
     let rect = rect.shrink(0.5);
     let (face, ink) = if !enabled {
-        (control(p, rect, RADIUS, 0.0, false), t::FAINT)
+        (control(p, rect, RADIUS, 0.0, false), t::faint())
     } else {
         match kind {
             Kind::Brand => (
@@ -387,16 +387,16 @@ pub fn paint_button(
                     p,
                     rect,
                     RADIUS,
-                    mix(t::BRAND_TOP, t::BRAND_GLOW, hover),
-                    mix(t::BRAND_FILL, t::BRAND_TOP, hover),
-                    t::BRAND_EDGE,
+                    mix(t::brand_top(), t::brand_glow(), hover),
+                    mix(t::brand_fill(), t::brand_top(), hover),
+                    t::brand_edge(),
                     down,
                     DEPTH,
                 ),
-                t::ON_BRAND,
+                t::on_brand(),
             ),
-            Kind::Ghost if hover == 0.0 && !down => (rect.shrink(EDGE_W), t::MUTED),
-            _ => (control(p, rect, RADIUS, hover, down), t::TEXT),
+            Kind::Ghost if hover == 0.0 && !down => (rect.shrink(EDGE_W), t::muted()),
+            _ => (control(p, rect, RADIUS, hover, down), t::text()),
         }
     };
     content(p, face, ink);
@@ -494,9 +494,9 @@ pub fn menu_style(ui: &mut Ui) {
     // Keep noninteractive.weak_bg_fill opaque (the menu fill) so egui's
     // fade_out_to_color() greys out disabled rows instead of fading them to
     // alpha 0, and keep bg_stroke visible so ui.separator() renders a hairline.
-    s.visuals.widgets.noninteractive.weak_bg_fill = t::PANEL_TOP;
-    s.visuals.widgets.noninteractive.bg_fill = t::PANEL_TOP;
-    s.visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, t::LINE);
+    s.visuals.widgets.noninteractive.weak_bg_fill = t::panel_top();
+    s.visuals.widgets.noninteractive.bg_fill = t::panel_top();
+    s.visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, t::line());
     s.visuals.widgets.hovered.bg_stroke = Stroke::NONE;
     s.visuals.widgets.active.bg_stroke = Stroke::NONE;
     s.wrap_mode = Some(egui::TextWrapMode::Extend);
@@ -580,9 +580,9 @@ pub fn chips(
         });
         let on = i == selected;
         let ink = if on || resp.hovered() {
-            t::TEXT
+            t::text()
         } else {
-            t::MUTED
+            t::muted()
         };
         let f = if on { t::medium(13.0) } else { font.clone() };
         p.text(
@@ -604,10 +604,10 @@ pub fn chips(
 
 /// A labelled LED: lit is solid colour, unlit is a dark dimple. No glow.
 pub fn led(p: &Painter, c: Pos2, r: f32, lit: Option<C>) {
-    p.circle_filled(c, r + 1.0, t::EDGE);
+    p.circle_filled(c, r + 1.0, t::edge());
     match lit {
         Some(col) => p.circle_filled(c, r, col),
-        None => p.circle_filled(c, r, t::LCD_OFF),
+        None => p.circle_filled(c, r, t::lcd_off()),
     };
 }
 
@@ -685,7 +685,7 @@ mod knob_curve_tests {
     fn time_knob(max: f64) -> Knob<'static> {
         Knob {
             label: "Decay",
-            color: t::ENC_WHITE,
+            color: t::enc_white(),
             min: 0.0,
             max,
             default: 0.0,
@@ -1047,7 +1047,7 @@ fn knob_behaviour(
                     ui.painter().rect_stroke(
                         rect.expand(1.0),
                         3.0,
-                        Stroke::new(1.5_f32, t::BAD),
+                        Stroke::new(1.5_f32, t::bad()),
                         egui::StrokeKind::Outside,
                     );
                 }
@@ -1061,7 +1061,7 @@ fn knob_behaviour(
                     .show(ui.ctx(), |ui| {
                         egui::Frame::popup(ui.style())
                             .stroke(if mem.bad {
-                                Stroke::new(1.5_f32, t::BAD)
+                                Stroke::new(1.5_f32, t::bad())
                             } else {
                                 ui.style().visuals.window_stroke
                             })
@@ -1125,7 +1125,7 @@ fn paint_encoder(ui: &Ui, r: &Response, c: Pos2, ring: f32, frac: f32, color: C,
     };
     p.add(Shape::line(
         arc(a0, a0 + 1.5 * PI, ring),
-        Stroke::new(track_w, t::SUNKEN),
+        Stroke::new(track_w, t::sunken()),
     ));
     if frac > 0.001 {
         p.add(Shape::line(
@@ -1134,8 +1134,8 @@ fn paint_encoder(ui: &Ui, r: &Response, c: Pos2, ring: f32, frac: f32, color: C,
         ));
     }
     let cap = ring - track_w - 2.0;
-    p.circle_filled(c + vec2(0.0, 1.0), cap + 1.5, t::EDGE);
-    p.circle_filled(c, cap, mix(t::CTL_TOP, t::CTL_HOVER, hover));
+    p.circle_filled(c + vec2(0.0, 1.0), cap + 1.5, t::edge());
+    p.circle_filled(c, cap, mix(t::ctl_top(), t::ctl_hover(), hover));
     let a = a0 + 1.5 * PI * frac;
     let dir = vec2(a.cos(), a.sin());
     p.line_segment(
@@ -1143,7 +1143,7 @@ fn paint_encoder(ui: &Ui, r: &Response, c: Pos2, ring: f32, frac: f32, color: C,
         Stroke::new(if ring > 10.0 { 2.0_f32 } else { 1.5_f32 }, color),
     );
     if show_focus(ui, r) {
-        p.circle_stroke(c, ring + 3.0, Stroke::new(1.5_f32, t::FOCUS));
+        p.circle_stroke(c, ring + 3.0, Stroke::new(1.5_f32, t::focus()));
     }
 }
 
@@ -1189,7 +1189,7 @@ pub fn knob(ui: &mut Ui, k: &Knob, value: &mut f64) -> (Response, bool, bool) {
         Align2::LEFT_BOTTOM,
         k.label,
         11.0,
-        t::MUTED,
+        t::muted(),
     );
     if !typing {
         p.text(
@@ -1197,7 +1197,7 @@ pub fn knob(ui: &mut Ui, k: &Knob, value: &mut f64) -> (Response, bool, bool) {
             Align2::LEFT_TOP,
             shown,
             t::mono(13.0),
-            t::TEXT,
+            t::text(),
         );
     }
     (r, started, changed)
@@ -1435,11 +1435,11 @@ pub fn icon_brand(p: &Painter, rect: Rect) {
     };
 
     if s <= 22.0 {
-        p.rect_filled(base, s * 0.22, t::BG);
+        p.rect_filled(base, s * 0.22, t::bg());
         p.rect_stroke(
             base,
             s * 0.22,
-            Stroke::new(1.0_f32, t::LINE),
+            Stroke::new(1.0_f32, t::line()),
             egui::StrokeKind::Inside,
         );
         for (x, y) in [
@@ -1449,37 +1449,41 @@ pub fn icon_brand(p: &Painter, rect: Rect) {
             (82.0, 20.0),
             (82.0, 82.0),
         ] {
-            p.rect_filled(box_at(x, y, 26.0, 26.0), (5.0 * u).max(0.8), t::TEXT);
+            p.rect_filled(box_at(x, y, 26.0, 26.0), (5.0 * u).max(0.8), t::text());
         }
-        p.rect_filled(box_at(51.0, 51.0, 26.0, 26.0), (5.0 * u).max(0.8), t::BRAND);
+        p.rect_filled(
+            box_at(51.0, 51.0, 26.0, 26.0),
+            (5.0 * u).max(0.8),
+            t::brand(),
+        );
         return;
     }
 
     let chassis = box_at(2.0, 2.0, 124.0, 124.0);
-    p.rect_filled(chassis, 28.0 * u, t::PANEL_TOP);
+    p.rect_filled(chassis, 28.0 * u, t::panel_top());
     p.rect_stroke(
         chassis,
         28.0 * u,
-        Stroke::new((2.0 * u).max(1.0), t::LINE),
+        Stroke::new((2.0 * u).max(1.0), t::line()),
         egui::StrokeKind::Inside,
     );
 
     let well = box_at(14.0, 14.0, 100.0, 100.0);
-    p.rect_filled(well, 18.0 * u, t::SUNKEN);
+    p.rect_filled(well, 18.0 * u, t::sunken());
     p.rect_stroke(
         well,
         18.0 * u,
-        Stroke::new((1.5 * u).max(1.0), t::LINE),
+        Stroke::new((1.5 * u).max(1.0), t::line()),
         egui::StrokeKind::Inside,
     );
 
     for (x, y) in [(52.0, 24.0), (80.0, 52.0), (52.0, 80.0)] {
         let r = box_at(x, y, 24.0, 24.0);
-        p.rect_filled(r, 6.0 * u, t::SURFACE);
+        p.rect_filled(r, 6.0 * u, t::surface());
         p.rect_stroke(
             r,
             6.0 * u,
-            Stroke::new(1.0_f32, t::LINE),
+            Stroke::new(1.0_f32, t::line()),
             egui::StrokeKind::Inside,
         );
     }
@@ -1491,11 +1495,11 @@ pub fn icon_brand(p: &Painter, rect: Rect) {
         (80.0, 24.0),
         (80.0, 80.0),
     ] {
-        p.rect_filled(box_at(x, y, 24.0, 24.0), 6.0 * u, t::TEXT);
+        p.rect_filled(box_at(x, y, 24.0, 24.0), 6.0 * u, t::text());
     }
 
-    p.rect_filled(box_at(52.0, 52.0, 24.0, 24.0), 6.0 * u, t::BRAND);
-    p.rect_filled(box_at(57.0, 70.0, 14.0, 2.6), 1.3 * u, t::ON_BRAND);
+    p.rect_filled(box_at(52.0, 52.0, 24.0, 24.0), 6.0 * u, t::brand());
+    p.rect_filled(box_at(57.0, 70.0, 14.0, 2.6), 1.3 * u, t::on_brand());
 }
 
 /// Vertical fader (FL mixer). `k` is the travel position; the bottom is
@@ -1515,7 +1519,7 @@ pub fn fader(
     let r = tip(r, format!("{} {}\n{}", k.label, shown, k.hint));
     let p = ui.painter();
     let track = Rect::from_center_size(rect.center(), vec2(4.0, rect.height() - 16.0));
-    p.rect_filled(track, 2.0, t::SUNKEN);
+    p.rect_filled(track, 2.0, t::sunken());
     let pos = k.to_pos(*value) as f32;
     // Unity mark (the default: 0 dB).
     let unity = track.bottom() - k.to_pos(k.default) as f32 * track.height();
@@ -1524,7 +1528,7 @@ pub fn fader(
             pos2(rect.left() + 2.0, unity),
             pos2(rect.left() + 8.0, unity),
         ],
-        Stroke::new(1.0_f32, t::MUTED),
+        Stroke::new(1.0_f32, t::muted()),
     );
     let y = track.bottom() - pos * track.height();
     let fill = Rect::from_min_max(pos2(track.left(), y), track.right_bottom());
@@ -1535,9 +1539,9 @@ pub fn fader(
         p,
         cap,
         3.0,
-        mix(t::CTL_TOP, t::CTL_HOVER, hover),
-        t::CTL_BOTTOM,
-        t::EDGE,
+        mix(t::ctl_top(), t::ctl_hover(), hover),
+        t::ctl_bottom(),
+        t::edge(),
         r.is_pointer_button_down_on(),
         1.0,
     );
@@ -1564,7 +1568,7 @@ mod typed_tests {
         let fmt = |pos: f64| gain_db_text(volume_gain(pos as f32));
         let k = Knob {
             label: "Volume",
-            color: t::ENC_ORANGE,
+            color: t::enc_orange(),
             min: 0.0,
             max: 1.0,
             default: volume_pos(1.0) as f64,
@@ -1587,7 +1591,7 @@ mod typed_tests {
         let pct = |v: f64| format!("{:.0}%", v * 100.0);
         let k = Knob {
             label: "Mix",
-            color: t::ENC_ORANGE,
+            color: t::enc_orange(),
             min: 0.0,
             max: 1.0,
             default: 1.0,

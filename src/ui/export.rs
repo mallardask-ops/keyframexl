@@ -518,7 +518,7 @@ impl App {
                 let label = |ui: &mut egui::Ui, text: &str| {
                     ui.add_space(4.0);
                     let r = ui.allocate_exact_size(vec2(ui.available_width(), 14.0), egui::Sense::hover()).0;
-                    kit::caps(ui.painter(), r.left_center(), Align2::LEFT_CENTER, text, 12.0, t::FAINT);
+                    kit::caps(ui.painter(), r.left_center(), Align2::LEFT_CENTER, text, 12.0, t::faint());
                 };
                 ui.add_enabled_ui(!running, |ui| {
                     label(ui, "file");
@@ -527,13 +527,13 @@ impl App {
                     let folder = path.parent().map(|p| p.display().to_string()).unwrap_or_default();
                     ui.horizontal(|ui| {
                         let shown = kit::elide(ui.painter(), &stem, t::medium(14.0), 300.0);
-                        ui.label(RichText::new(shown).font(t::medium(14.0)).color(t::TEXT)).on_hover_text(path.display().to_string());
+                        ui.label(RichText::new(shown).font(t::medium(14.0)).color(t::text())).on_hover_text(path.display().to_string());
                         if kit::tool_button(ui, "Change…", kit::Kind::Ghost, true).clicked() {
                             pick_path = true;
                         }
                     });
                     let folder = kit::elide(ui.painter(), &folder, t::sans(12.0), 400.0);
-                    ui.label(RichText::new(format!("in {folder}")).font(t::sans(12.0)).color(t::FAINT));
+                    ui.label(RichText::new(format!("in {folder}")).font(t::sans(12.0)).color(t::faint()));
                     label(ui, "source");
                     let mut items = vec![format!("Pattern “{pattern_name}”  {}", clock(len_pattern)), format!("Song  {}", clock(len_song))];
                     if let Some((a, b, secs)) = &sel {
@@ -547,7 +547,7 @@ impl App {
                         set_sel = Some(i == 2);
                     }
                     if !has_clips {
-                        ui.label(RichText::new("The playlist is empty, so Song renders one empty bar.").font(t::sans(12.0)).color(t::FAINT));
+                        ui.label(RichText::new("The playlist is empty, so Song renders one empty bar.").font(t::sans(12.0)).color(t::faint()));
                     }
                     label(ui, "tail");
                     let tails: Vec<&str> = Tail::ALL.iter().map(|x| x.label()).collect();
@@ -555,10 +555,10 @@ impl App {
                     if let Some(i) = pick {
                         prefs.tail = Tail::ALL[i];
                     }
-                    ui.label(RichText::new(prefs.tail.hint()).font(t::sans(12.0)).color(t::FAINT));
+                    ui.label(RichText::new(prefs.tail.hint()).font(t::sans(12.0)).color(t::faint()));
                     label(ui, "formats");
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("WAV").font(t::sans(13.0)).color(t::MUTED));
+                        ui.label(RichText::new("WAV").font(t::sans(13.0)).color(t::muted()));
                         let names = ["Off", "16-bit", "24-bit", "32 float"];
                         let (pick, _) = kit::chips(ui, "export-wav", &names, WAV.iter().position(|f| *f == prefs.wav).unwrap_or(0), None);
                         if let Some(i) = pick {
@@ -566,7 +566,7 @@ impl App {
                         }
                     });
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("FLAC").font(t::sans(13.0)).color(t::MUTED));
+                        ui.label(RichText::new("FLAC").font(t::sans(13.0)).color(t::muted()));
                         let names = ["Off", "16-bit", "24-bit"];
                         let (pick, _) = kit::chips(ui, "export-flac", &names, FLAC.iter().position(|f| *f == prefs.flac).unwrap_or(0), None);
                         if let Some(i) = pick {
@@ -574,7 +574,7 @@ impl App {
                         }
                     });
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("MP3").font(t::sans(13.0)).color(t::MUTED));
+                        ui.label(RichText::new("MP3").font(t::sans(13.0)).color(t::muted()));
                         if keyframexl::mp3::available() {
                             let names = ["Off", "128", "192", "320 kbps"];
                             let (pick, _) = kit::chips(ui, "export-mp3", &names, MP3.iter().position(|f| *f == prefs.mp3).unwrap_or(0), None);
@@ -582,7 +582,7 @@ impl App {
                                 prefs.mp3 = MP3[i];
                             }
                         } else {
-                            ui.label(RichText::new("Needs LAME (libmp3lame): install the lame package").font(t::sans(12.0)).color(t::FAINT));
+                            ui.label(RichText::new("Needs LAME (libmp3lame): install the lame package").font(t::sans(12.0)).color(t::faint()));
                         }
                     });
                     if prefs.mp3.is_some() && keyframexl::mp3::available() {
@@ -593,7 +593,7 @@ impl App {
                             .map(|(k, v)| format!("{k} “{}”", v.trim()))
                             .collect::<Vec<_>>();
                         let note = if tags.is_empty() { "MP3 tags: none yet · FILE → Project info (F11)".to_string() } else { format!("MP3 tags: {}", tags.join(", ")) };
-                        ui.label(RichText::new(note).font(t::sans(12.0)).color(t::FAINT));
+                        ui.label(RichText::new(note).font(t::sans(12.0)).color(t::faint()));
                     }
                     label(ui, "options");
                     ui.checkbox(&mut prefs.normalize, RichText::new("Normalize to −1 dB peak").font(t::sans(13.0)));
@@ -610,9 +610,9 @@ impl App {
                 ui.add_space(4.0);
                 let rate = self.rate();
                 let mb = bytes as f64 / 1e6 * rate as f64 / render::RATE as f64;
-                ui.label(RichText::new(format!("About {mb:.1} MB · {:.1} kHz stereo", rate as f64 / 1000.0)).font(t::sans(12.0)).color(t::FAINT));
+                ui.label(RichText::new(format!("About {mb:.1} MB · {:.1} kHz stereo", rate as f64 / 1000.0)).font(t::sans(12.0)).color(t::faint()));
                 if let Some(e) = &error {
-                    ui.label(RichText::new(e).font(t::sans(13.0)).color(t::BAD));
+                    ui.label(RichText::new(e).font(t::sans(13.0)).color(t::bad()));
                 }
                 if running {
                     ui.add(egui::ProgressBar::new(progress).desired_width(400.0).text(RichText::new(&stage).font(t::sans(12.0))));

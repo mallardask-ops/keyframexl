@@ -38,12 +38,12 @@ pub(crate) const NOTE_COLOR_NAMES: [&str; 16] = [
 /// Top, fill and edge of a note in colour group `c`.
 pub(crate) fn note_colors(c: u8) -> (egui::Color32, egui::Color32, egui::Color32) {
     let base = match c as usize % NOTE_COLOR_NAMES.len() {
-        0 => return (t::BRAND_TOP, t::BRAND_FILL, t::BRAND_EDGE),
-        1 => t::ENC_BLUE,
-        2 => t::ENC_GREEN,
-        3 => t::WAIT,
-        4 => t::ENC_ORANGE,
-        5 => t::ENC_WHITE,
+        0 => return (t::brand_top(), t::brand_fill(), t::brand_edge()),
+        1 => t::enc_blue(),
+        2 => t::enc_green(),
+        3 => t::wait(),
+        4 => t::enc_orange(),
+        5 => t::enc_white(),
         6 => t::HUE_PINK,
         7 => t::HUE_PURPLE,
         8 => t::HUE_CYAN,
@@ -637,7 +637,7 @@ impl App {
                 p.rect_filled(
                     Rect::from_min_max(pos2(keys.left(), y), pos2(keys.right(), y + g.row)),
                     0.0,
-                    t::TEXT.gamma_multiply(0.35),
+                    t::text().gamma_multiply(0.35),
                 );
             }
         }
@@ -802,11 +802,11 @@ impl App {
             let from = pos2(g.x(*from_tick), g.y_f32(*from_pitch));
             let r = Rect::from_two_pos(from, now).intersect(grid);
             if r.is_positive() {
-                p.rect_filled(r, 2.0, t::TEXT.gamma_multiply(0.06));
+                p.rect_filled(r, 2.0, t::text().gamma_multiply(0.06));
                 p.rect_stroke(
                     r,
                     2.0,
-                    Stroke::new(1.0_f32, t::TEXT),
+                    Stroke::new(1.0_f32, t::text()),
                     egui::StrokeKind::Inside,
                 );
             }
@@ -852,7 +852,7 @@ impl App {
         let c = split.center();
         p.line_segment(
             [c - vec2(16.0, 0.0), c + vec2(16.0, 0.0)],
-            Stroke::new(2.0_f32, if hot { t::TEXT } else { t::STRONG }),
+            Stroke::new(2.0_f32, if hot { t::text() } else { t::strong() }),
         );
         if lane_h <= 0.0 {
             kit::caps(
@@ -861,7 +861,7 @@ impl App {
                 Align2::LEFT_CENTER,
                 &format!("{target}  ▴"),
                 10.0,
-                if hot { t::TEXT } else { t::FAINT },
+                if hot { t::text() } else { t::faint() },
             );
         }
         let r = r.on_hover_text(if lane_h > 0.0 {
@@ -983,7 +983,7 @@ impl App {
                         ui,
                         egui::RichText::new("Root")
                             .font(t::sans(11.0))
-                            .color(t::FAINT),
+                            .color(t::faint()),
                     );
                     ui.horizontal_wrapped(|ui| {
                         ui.set_max_width(220.0);
@@ -1064,9 +1064,9 @@ impl App {
                             top,
                         );
                         let ink = if self.note_color == c as u8 {
-                            t::TEXT
+                            t::text()
                         } else {
-                            t::MUTED
+                            t::muted()
                         };
                         ui.painter().text(
                             pos2(r.left() + kit::MENU_PAD.x, r.center().y),
@@ -1076,7 +1076,7 @@ impl App {
                             ink,
                         );
                         if resp.hovered() {
-                            ui.painter().rect_filled(r, 3.0, t::HI);
+                            ui.painter().rect_filled(r, 3.0, t::hi());
                         }
                         if resp.clicked() {
                             self.set_note_color(c as u8);
@@ -1127,7 +1127,7 @@ impl App {
                 ui,
                 &kit::Knob {
                     label: "Velocity",
-                    color: t::ENC_WHITE,
+                    color: t::enc_white(),
                     min: 1.0,
                     max: 127.0,
                     default: 100.0,
@@ -1158,14 +1158,14 @@ impl App {
                     true,
                     tl.label(),
                     |p, face, ink| {
-                        tool_icon(p, face.center(), tl, if on { t::TEXT } else { ink });
+                        tool_icon(p, face.center(), tl, if on { t::text() } else { ink });
                         if on {
                             p.line_segment(
                                 [
                                     pos2(face.left() + 7.0, face.bottom() - 2.0),
                                     pos2(face.right() - 7.0, face.bottom() - 2.0),
                                 ],
-                                Stroke::new(1.5_f32, t::TEXT),
+                                Stroke::new(1.5_f32, t::text()),
                             );
                         }
                     },
@@ -1251,14 +1251,14 @@ impl App {
                     "Limit…" => "Clamps velocity and pitch into a range.",
                     _ => "",
                 };
-                ui.label(egui::RichText::new(note).font(t::sans(12.0)).color(t::FAINT));
+                ui.label(egui::RichText::new(note).font(t::sans(12.0)).color(t::faint()));
                 // 480 ticks = one beat (PPQ 480), 120 = one step.
                 let ticks = |ui: &mut Ui, v: &mut i64, max: i64| {
                     ui.add(egui::DragValue::new(v).range(0..=max).speed(5.0).custom_formatter(|x, _| format!("{:.2} steps", x / STEP as f64)).custom_parser(|s| s.trim().trim_end_matches("steps").trim().parse::<f64>().ok().map(|x| x * STEP as f64)));
                 };
                 egui::Grid::new("batch-note-grid").num_columns(2).spacing(vec2(14.0, 8.0)).show(ui, |ui| {
                     let label = |ui: &mut Ui, s: &str| {
-                        ui.label(egui::RichText::new(s).font(t::sans(13.0)).color(t::TEXT));
+                        ui.label(egui::RichText::new(s).font(t::sans(13.0)).color(t::text()));
                     };
                     match dialog.as_str() {
                         "Strum…" | "Arpeggiate…" => {
@@ -1314,7 +1314,7 @@ impl App {
                     }
                 });
                 let scope = if self.roll_sel.is_empty() { "all notes of this channel" } else { "the selected notes" };
-                ui.label(egui::RichText::new(format!("Applies to {scope}. Ctrl+Z undoes.")).font(t::sans(12.0)).color(t::FAINT));
+                ui.label(egui::RichText::new(format!("Applies to {scope}. Ctrl+Z undoes.")).font(t::sans(12.0)).color(t::faint()));
                 ui.horizontal(|ui| {
                     if kit::button(ui, "Apply", kit::Kind::Primary, true).clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         apply = true;
@@ -1402,15 +1402,15 @@ impl App {
             p.rect_filled(
                 track,
                 3.0,
-                t::SUNKEN.gamma_multiply(if lit { 1.0 } else { 0.6 }),
+                t::sunken().gamma_multiply(if lit { 1.0 } else { 0.6 }),
             );
             p.rect_filled(
                 thumb,
                 3.0,
                 if lit {
-                    t::STRONG
+                    t::strong()
                 } else {
-                    t::STRONG.gamma_multiply(0.55)
+                    t::strong().gamma_multiply(0.55)
                 },
             );
             let page = r
@@ -1543,7 +1543,7 @@ impl App {
         p.rect_filled(
             Rect::from_min_max(inner.left_top(), pos2(inner.right(), g.grid.top())),
             0.0,
-            t::SURFACE,
+            t::surface(),
         );
         kit::caps(
             p,
@@ -1551,7 +1551,7 @@ impl App {
             Align2::LEFT_CENTER,
             "bar",
             11.0,
-            t::FAINT,
+            t::faint(),
         );
         let gp = p.with_clip_rect(Rect::from_min_max(ruler.min, g.grid.max));
         // Steps that fit on screen; thin out lines when zoomed far out.
@@ -1571,16 +1571,16 @@ impl App {
                     Align2::LEFT_CENTER,
                     label,
                     t::mono(12.0),
-                    if s % 16 == 0 { t::TEXT } else { t::MUTED },
+                    if s % 16 == 0 { t::text() } else { t::muted() },
                 );
                 gp.line_segment(
                     [pos2(x, ruler.top() + 4.0), pos2(x, ruler.bottom())],
-                    Stroke::new(1.0_f32, t::STRONG),
+                    Stroke::new(1.0_f32, t::strong()),
                 );
             } else if s % every == 0 {
                 gp.line_segment(
                     [pos2(x, ruler.bottom() - 4.0), pos2(x, ruler.bottom())],
-                    Stroke::new(1.0_f32, t::LINE),
+                    Stroke::new(1.0_f32, t::line()),
                 );
             }
         }
@@ -1590,11 +1590,11 @@ impl App {
             let rr = Rect::from_min_max(pos2(g.grid.left(), y), pos2(g.grid.right(), y + g.row));
             let row_fill = match self.roll_scale {
                 // In the scale: the lighter row; outside: darker than a black-key row.
-                Some(sc) if sc.is_root(pitch) => t::ROW_ROOT,
-                Some(sc) if sc.contains(pitch) => t::ROW_WHITE,
-                Some(_) => t::ROW_OUT,
-                None if is_black(pitch) => t::ROW_BLACK,
-                None => t::ROW_WHITE,
+                Some(sc) if sc.is_root(pitch) => t::row_root(),
+                Some(sc) if sc.contains(pitch) => t::row_white(),
+                Some(_) => t::row_out(),
+                None if is_black(pitch) => t::row_black(),
+                None => t::row_white(),
             };
             p.rect_filled(rr, 0.0, row_fill);
             if pitch % 12 == 0 || pitch % 12 == 5 {
@@ -1606,15 +1606,15 @@ impl App {
                     Stroke::new(
                         1.0_f32,
                         if pitch % 12 == 0 {
-                            t::STRONG.gamma_multiply(0.6)
+                            t::strong().gamma_multiply(0.6)
                         } else {
-                            t::LINE
+                            t::line()
                         },
                     ),
                 );
             }
             let key = Rect::from_min_max(pos2(keys.left(), y), pos2(keys.right(), y + g.row));
-            p.rect_filled(key, 0.0, t::KEY_WHITE);
+            p.rect_filled(key, 0.0, t::key_white());
             if is_black(pitch) {
                 // The seam between the two white keys shows only beside the black one.
                 let black_r = key.left() + key.width() * 0.62;
@@ -1623,12 +1623,12 @@ impl App {
                         pos2(black_r, key.center().y),
                         pos2(key.right(), key.center().y),
                     ],
-                    Stroke::new(1.0_f32, t::KEY_WHITE_EDGE),
+                    Stroke::new(1.0_f32, t::key_white_edge()),
                 );
                 p.rect_filled(
                     Rect::from_min_max(key.min, pos2(black_r, key.bottom())),
                     1.0,
-                    t::KEY_BLACK,
+                    t::key_black(),
                 );
             } else if matches!(pitch % 12, 0 | 5) {
                 p.line_segment(
@@ -1636,7 +1636,7 @@ impl App {
                         pos2(key.left(), key.bottom() - 0.5),
                         pos2(key.right(), key.bottom() - 0.5),
                     ],
-                    Stroke::new(1.0_f32, t::KEY_WHITE_EDGE),
+                    Stroke::new(1.0_f32, t::key_white_edge()),
                 );
             }
             let named = match self.roll_scale {
@@ -1645,9 +1645,9 @@ impl App {
             };
             if named && g.row >= 10.0 {
                 let ink = if is_black(pitch) {
-                    t::KEY_WHITE
+                    t::key_white()
                 } else {
-                    t::KEY_INK
+                    t::key_ink()
                 };
                 p.text(
                     pos2(key.right() - 5.0, key.center().y),
@@ -1663,17 +1663,17 @@ impl App {
                 pos2(keys.right(), keys.top()),
                 pos2(keys.right(), keys.bottom()),
             ],
-            Stroke::new(1.0_f32, t::EDGE),
+            Stroke::new(1.0_f32, t::edge()),
         );
         let snap = self.snap.grid();
         for s in first..=last {
             let x = g.x(s * STEP);
             let (w, c) = if s % 16 == 0 {
-                (1.5_f32, t::STRONG)
+                (1.5_f32, t::strong())
             } else if s % 4 == 0 {
-                (1.0_f32, t::STRONG.gamma_multiply(0.7))
+                (1.0_f32, t::strong().gamma_multiply(0.7))
             } else if s % every == 0 {
-                (1.0_f32, t::LINE)
+                (1.0_f32, t::line())
             } else {
                 continue;
             };
@@ -1690,7 +1690,7 @@ impl App {
                     let x = g.x(tk);
                     gp.line_segment(
                         [pos2(x, g.grid.top()), pos2(x, g.grid.bottom())],
-                        Stroke::new(1.0_f32, t::LINE.gamma_multiply(0.5)),
+                        Stroke::new(1.0_f32, t::line().gamma_multiply(0.5)),
                     );
                 }
                 tk += snap;
@@ -1707,7 +1707,7 @@ impl App {
             if end_x >= g.grid.left() {
                 p.line_segment(
                     [pos2(end_x, ruler.top()), pos2(end_x, g.grid.bottom())],
-                    Stroke::new(1.5_f32, t::WAIT),
+                    Stroke::new(1.5_f32, t::wait()),
                 );
             }
         }
@@ -1718,17 +1718,17 @@ impl App {
             lp.rect_filled(
                 Rect::from_min_max(pos2(xa, ruler.top()), pos2(xb, ruler.top() + 5.0)),
                 0.0,
-                t::WAIT,
+                t::wait(),
             );
             lp.rect_filled(
                 Rect::from_min_max(pos2(xa, ruler.top() + 5.0), pos2(xb, g.grid.bottom())),
                 0.0,
-                t::WAIT.gamma_multiply(0.07),
+                t::wait().gamma_multiply(0.07),
             );
             for x in [xa, xb] {
                 lp.line_segment(
                     [pos2(x, ruler.top()), pos2(x, g.grid.bottom())],
-                    Stroke::new(1.0_f32, t::WAIT.gamma_multiply(0.7)),
+                    Stroke::new(1.0_f32, t::wait().gamma_multiply(0.7)),
                 );
             }
         }
@@ -1744,12 +1744,12 @@ impl App {
                         pos2(x + 5.0, ruler.top() + 6.0),
                         pos2(x, ruler.bottom() - 2.0),
                     ],
-                    t::TEXT,
+                    t::text(),
                     Stroke::NONE,
                 ));
                 p.line_segment(
                     [pos2(x, g.grid.top()), pos2(x, g.grid.bottom())],
-                    Stroke::new(1.5_f32, t::TEXT),
+                    Stroke::new(1.5_f32, t::text()),
                 );
             }
         }
@@ -1796,9 +1796,9 @@ impl App {
                 continue;
             }
             let r = g.note_rect(s.start, s.length, s.target);
-            let col = if own { t::WAIT } else { t::STRONG };
+            let col = if own { t::wait() } else { t::strong() };
             if own {
-                p.rect_filled(r, 3.0, t::WAIT_SOFT);
+                p.rect_filled(r, 3.0, t::wait_soft());
             }
             p.rect_stroke(r, 3.0, Stroke::new(1.5_f32, col), egui::StrokeKind::Inside);
             if let Some(src) = pat
@@ -1827,7 +1827,7 @@ impl App {
                     Align2::LEFT_CENTER,
                     format!("to {}", note_name(s.target)),
                     t::sans(12.0),
-                    t::TEXT,
+                    t::text(),
                 );
             }
         }
@@ -1851,8 +1851,8 @@ impl App {
                     p,
                     r,
                     4.0,
-                    kit::mix(top, t::BRAND_SOFT, soft),
-                    kit::mix(fill, t::BRAND_SOFT, soft),
+                    kit::mix(top, t::brand_soft(), soft),
+                    kit::mix(fill, t::brand_soft(), soft),
                     edge,
                     false,
                     1.0,
@@ -1862,7 +1862,7 @@ impl App {
                 p.rect_stroke(
                     r.expand(1.0),
                     4.0,
-                    Stroke::new(1.5_f32, t::TEXT),
+                    Stroke::new(1.5_f32, t::text()),
                     egui::StrokeKind::Outside,
                 );
             }
@@ -1874,11 +1874,11 @@ impl App {
                         pos2(r.left() + 2.0, r.bottom() - 2.0),
                         pos2(r.left() + 2.0 + w, r.top() + 2.0),
                     ],
-                    Stroke::new(1.5_f32, t::TEXT.gamma_multiply(0.8)),
+                    Stroke::new(1.5_f32, t::text().gamma_multiply(0.8)),
                 );
             }
             if face.width() > 34.0 && face.height() >= 12.0 {
-                let ink = if n.muted { t::MUTED } else { t::ON_BRAND };
+                let ink = if n.muted { t::muted() } else { t::on_brand() };
                 match vocal.as_ref() {
                     // A singing channel names the syllable (what the note sings), not the pitch.
                     Some(default) => {
@@ -2320,7 +2320,7 @@ impl App {
                 p.rect_stroke(
                     g.note_rect(a, b - a, *sp),
                     4.0,
-                    Stroke::new(1.5_f32, t::TEXT),
+                    Stroke::new(1.5_f32, t::text()),
                     egui::StrokeKind::Inside,
                 );
             }
@@ -2397,16 +2397,16 @@ impl App {
                         pos2(x, from.y.min(q.y) - g.row / 2.0),
                         pos2(x, from.y.max(q.y) + g.row / 2.0),
                     ],
-                    Stroke::new(1.5_f32, t::TEXT),
+                    Stroke::new(1.5_f32, t::text()),
                 );
             }
             Gesture::Zoom { from } if down => {
                 let r = Rect::from_x_y_ranges(from.x.min(q.x)..=from.x.max(q.x), g.grid.y_range());
-                p.rect_filled(r, 0.0, t::HI);
+                p.rect_filled(r, 0.0, t::hi());
                 p.rect_stroke(
                     r,
                     0.0,
-                    Stroke::new(1.0_f32, t::STRONG),
+                    Stroke::new(1.0_f32, t::strong()),
                     egui::StrokeKind::Inside,
                 );
             }
@@ -3122,7 +3122,7 @@ impl App {
         let cap = Rect::from_min_size(well.left_top() + vec2(4.0, 4.0), vec2(KEYS_W - 6.0, 20.0));
         let cr = ui.interact(cap, ui.id().with("lane-target"), Sense::click());
         if cr.hovered() {
-            p.rect_filled(cap, 4.0, t::RAISED);
+            p.rect_filled(cap, 4.0, t::raised());
         }
         kit::caps(
             p,
@@ -3130,7 +3130,7 @@ impl App {
             Align2::LEFT_CENTER,
             target.short(),
             11.0,
-            if cr.hovered() { t::TEXT } else { t::MUTED },
+            if cr.hovered() { t::text() } else { t::muted() },
         );
         let cr = cr.on_hover_text(format!(
             "{}: click for the next control, right-click for the list",
@@ -3166,7 +3166,7 @@ impl App {
                 [pos2(area.left(), y), pos2(area.right(), y)],
                 Stroke::new(
                     1.0_f32,
-                    t::LINE.gamma_multiply(if v == 0.5 && target.centred() {
+                    t::line().gamma_multiply(if v == 0.5 && target.centred() {
                         1.0
                     } else {
                         0.5
@@ -3190,10 +3190,10 @@ impl App {
             let x = g.x(n.start) + 3.0;
             let y = area.bottom() - target.get(n) * area.height();
             let on = sel.is_empty() || sel.contains(&n.id);
-            let col = if on { t::BRAND } else { t::STRONG };
+            let col = if on { t::brand() } else { t::strong() };
             lp.line_segment([pos2(x, base), pos2(x, y)], Stroke::new(2.0_f32, col));
             lp.circle_filled(pos2(x, y), 4.0, col);
-            lp.circle_filled(pos2(x, y), 1.5, t::BRAND_EDGE);
+            lp.circle_filled(pos2(x, y), 1.5, t::brand_edge());
         }
         let resp = ui.interact(area, ui.id().with("event-lane"), Sense::click_and_drag());
         let Some(pos) = resp.interact_pointer_pos() else {
@@ -3482,7 +3482,7 @@ impl App {
                 ui.label(
                     egui::RichText::new(format!("To {} · {what}", self.snap.label()))
                         .font(t::sans(13.0))
-                        .color(t::MUTED),
+                        .color(t::muted()),
                 );
                 ui.add_space(4.0);
                 let mut pct = strength * 100.0;

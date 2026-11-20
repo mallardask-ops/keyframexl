@@ -136,7 +136,7 @@ impl App {
                 ui,
                 &kit::Knob {
                     label: "Swing",
-                    color: t::ENC_GREEN,
+                    color: t::enc_green(),
                     min: 0.0,
                     max: 0.6,
                     default: 0.0,
@@ -157,9 +157,9 @@ impl App {
                     format!("Swing {:.0}%. Ctrl+Z undoes.", swing * 100.0),
                 );
             }
-            let g = kit::caps_galley(ui.painter(), &format!("{steps} steps"), 11.0, t::FAINT);
+            let g = kit::caps_galley(ui.painter(), &format!("{steps} steps"), 11.0, t::faint());
             let (r, _) = ui.allocate_exact_size(g.size() + vec2(8.0, 0.0), Sense::hover());
-            ui.painter().galley(r.min, g, t::FAINT);
+            ui.painter().galley(r.min, g, t::faint());
         });
     }
 
@@ -569,19 +569,19 @@ impl App {
             .anchor(Align2::CENTER_TOP, vec2(0.0, 140.0))
             .show(ui.ctx(), |ui| {
                 ui.spacing_mut().item_spacing = vec2(10.0, 8.0);
-                ui.label(egui::RichText::new("Shifts velocity (and a touch of timing) by random amounts. The same seed gives the same result.").font(t::sans(12.0)).color(t::FAINT));
+                ui.label(egui::RichText::new("Shifts velocity (and a touch of timing) by random amounts. The same seed gives the same result.").font(t::sans(12.0)).color(t::faint()));
                 egui::Grid::new("rack-humanize-grid").num_columns(2).spacing(vec2(14.0, 8.0)).show(ui, |ui| {
-                    ui.label(egui::RichText::new("Velocity ±").font(t::sans(13.0)).color(t::TEXT));
+                    ui.label(egui::RichText::new("Velocity ±").font(t::sans(13.0)).color(t::text()));
                     ui.add(egui::DragValue::new(amount).range(0..=64));
                     ui.end_row();
-                    ui.label(egui::RichText::new("Timing ±").font(t::sans(13.0)).color(t::TEXT));
+                    ui.label(egui::RichText::new("Timing ±").font(t::sans(13.0)).color(t::text()));
                     ui.add(egui::DragValue::new(timing).range(0..=12).custom_formatter(|x, _| format!("{x:.0} ticks")).custom_parser(|s| s.trim().trim_end_matches("ticks").trim().parse::<f64>().ok()));
                     ui.end_row();
-                    ui.label(egui::RichText::new("Seed").font(t::sans(13.0)).color(t::TEXT));
+                    ui.label(egui::RichText::new("Seed").font(t::sans(13.0)).color(t::text()));
                     ui.add(egui::DragValue::new(seed));
                     ui.end_row();
                 });
-                ui.label(egui::RichText::new(format!("Applies to the steps of {name}. Ctrl+Z undoes.")).font(t::sans(12.0)).color(t::FAINT));
+                ui.label(egui::RichText::new(format!("Applies to the steps of {name}. Ctrl+Z undoes.")).font(t::sans(12.0)).color(t::faint()));
                 ui.horizontal(|ui| {
                     if kit::button(ui, "Apply", kit::Kind::Primary, true).clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         apply = true;
@@ -723,15 +723,15 @@ impl App {
                 Align2::LEFT_CENTER,
                 &label,
                 11.0,
-                t::FAINT,
+                t::faint(),
             );
             p.rect_filled(
                 Rect::from_min_max(pos2(x, tray_top), pos2(x + tray_w, tray_bottom)),
                 0.0,
                 if beat % 2 == 0 {
-                    t::SUNKEN
+                    t::sunken()
                 } else {
-                    t::PANEL_BOTTOM
+                    t::panel_bottom()
                 },
             );
         }
@@ -739,7 +739,7 @@ impl App {
         // Step numbers: 1..=step count, 12 px mono. First step of each beat brighter.
         for i in step_range.clone() {
             let c = pos2(pad_x(i) + pad_w / 2.0, tray_top + STEP_NUM_H / 2.0 + 1.0);
-            let ink = if i % 4 == 0 { t::TEXT } else { t::MUTED };
+            let ink = if i % 4 == 0 { t::text() } else { t::muted() };
             p.text(
                 c,
                 Align2::CENTER_CENTER,
@@ -753,7 +753,7 @@ impl App {
                 pad_x(i) + pad_w / 2.0,
                 tray_top + STEP_NUM_H + LED_ROW / 2.0 + 1.0,
             );
-            kit::led(&p, c, 3.0, (playing == Some(i)).then_some(t::TEXT));
+            kit::led(&p, c, 3.0, (playing == Some(i)).then_some(t::text()));
         }
 
         let shift = ui.input(|i| i.modifiers.shift);
@@ -822,15 +822,15 @@ impl App {
                         let ly = if at == n { slot.top() } else { slot.bottom() };
                         p.line_segment(
                             [pos2(body.left() + 4.0, ly), pos2(grid_r, ly)],
-                            Stroke::new(2.5_f32, t::TEXT),
+                            Stroke::new(2.5_f32, t::text()),
                         );
-                        p.circle_filled(pos2(body.left() + 4.0, ly), 4.0, t::TEXT);
+                        p.circle_filled(pos2(body.left() + 4.0, ly), 4.0, t::text());
                     }
                     None => {
                         p.rect_stroke(
                             row_rect.expand(1.0),
                             6.0,
-                            Stroke::new(1.5_f32, t::TEXT),
+                            Stroke::new(1.5_f32, t::text()),
                             egui::StrokeKind::Outside,
                         );
                     }
@@ -930,9 +930,9 @@ impl App {
             let on = self.rack_sel.contains(&id);
             let hover = kit::hover_amount(ui, &sr);
             let face = if on {
-                t::TEXT
+                t::text()
             } else {
-                kit::mix(t::SUNKEN, t::STRONG, hover)
+                kit::mix(t::sunken(), t::strong(), hover)
             };
             p.rect_filled(sel_hit.shrink2(vec2(7.0, 2.0)), 3.0, face);
             if sr
@@ -995,7 +995,7 @@ impl App {
                 let hot = resp.hovered();
                 let well = kit::sunken(&p, rect, 8.0);
                 if hot {
-                    p.rect_filled(well, 7.0, t::RAISED.gamma_multiply(0.35));
+                    p.rect_filled(well, 7.0, t::raised().gamma_multiply(0.35));
                 }
                 self.paint_note_strip(&p, well.shrink2(vec2(4.0, 5.0)), id, &pat, hot);
                 let resp = resp.on_hover_text(format!("{name} plays notes off the step grid. Click to edit them in the piano roll, right-click to copy, paste or duplicate them."));
@@ -1374,7 +1374,7 @@ impl App {
             Align2::RIGHT_CENTER,
             &format!("vel · {name}"),
             11.0,
-            t::FAINT,
+            t::faint(),
         );
         let pat = self.pattern().clone();
         for i in 0..steps {
@@ -1386,9 +1386,9 @@ impl App {
             let y = area.bottom() - n.velocity as f32 / 127.0 * area.height();
             p.line_segment(
                 [pos2(x, area.bottom()), pos2(x, y)],
-                Stroke::new(2.0_f32, t::BRAND),
+                Stroke::new(2.0_f32, t::brand()),
             );
-            p.circle_filled(pos2(x, y), 4.0, t::BRAND);
+            p.circle_filled(pos2(x, y), 4.0, t::brand());
         }
         let r = ui.interact(area, ui.id().with("graph-editor"), Sense::click_and_drag());
         let Some(pos) = r.interact_pointer_pos() else {
@@ -1458,16 +1458,16 @@ impl App {
                 p,
                 led.center(),
                 4.5,
-                Some(if soloed { t::ENC_BLUE } else { t::OK }),
+                Some(if soloed { t::enc_blue() } else { t::ok() }),
             );
         } else {
-            p.circle_stroke(led.center(), 4.5, Stroke::new(1.5_f32, t::MUTED));
+            p.circle_stroke(led.center(), 4.5, Stroke::new(1.5_f32, t::muted()));
         }
         if hover > 0.0 {
             p.circle_stroke(
                 led.center(),
                 7.5,
-                Stroke::new(1.0_f32, t::STRONG.gamma_multiply(hover)),
+                Stroke::new(1.0_f32, t::strong().gamma_multiply(hover)),
             );
         }
         if kit::show_focus(ui, &r) {
@@ -1529,7 +1529,11 @@ impl App {
         for (k, (label, v, min, max, default, fmt, hint)) in specs.into_iter().enumerate() {
             let rect = Rect::from_center_size(pos2(x + 12.0, mid), vec2(24.0, 24.0));
             let mut val = v;
-            let color = if k == 0 { t::ENC_WHITE } else { t::ENC_ORANGE };
+            let color = if k == 0 {
+                t::enc_white()
+            } else {
+                t::enc_orange()
+            };
             let spec = kit::Knob {
                 label,
                 color,
@@ -1600,7 +1604,7 @@ impl App {
             Align2::CENTER_CENTER,
             &target,
             t::mono(12.0),
-            if audible { t::MUTED } else { t::WAIT },
+            if audible { t::muted() } else { t::wait() },
         );
         let mr = ui.interact(
             mbox,
@@ -1611,7 +1615,7 @@ impl App {
             p.rect_stroke(
                 mbox,
                 4.0,
-                Stroke::new(1.0_f32, t::STRONG),
+                Stroke::new(1.0_f32, t::strong()),
                 egui::StrokeKind::Inside,
             );
         }
@@ -1742,7 +1746,7 @@ impl App {
             p.rect_stroke(
                 rect.expand(2.0),
                 6.0,
-                Stroke::new(2.0_f32, t::TEXT),
+                Stroke::new(2.0_f32, t::text()),
                 egui::StrokeKind::Outside,
             );
         }
@@ -1754,8 +1758,8 @@ impl App {
         // only its tail rings on.
         let (play, tail) = self.channel_glow(ui, id);
         let top = kit::mix(
-            kit::mix(t::CTL_TOP, t::CTL_HOVER, hover),
-            kit::mix(t::CTL_TOP, t::OK, 0.45),
+            kit::mix(t::ctl_top(), t::ctl_hover(), hover),
+            kit::mix(t::ctl_top(), t::ok(), 0.45),
             play,
         );
         let face = kit::raised(
@@ -1763,8 +1767,8 @@ impl App {
             rect,
             5.0,
             top,
-            t::CTL_BOTTOM,
-            t::EDGE,
+            t::ctl_bottom(),
+            t::edge(),
             r.is_pointer_button_down_on(),
             1.0,
         );
@@ -1774,7 +1778,7 @@ impl App {
                 pos2(face.left() + 4.0, face.bottom() - 3.0),
                 pos2(face.right() - 4.0, face.bottom() - 1.0),
             );
-            p.rect_filled(bar, 1.0, t::OK.gamma_multiply(0.25 + 0.55 * tail));
+            p.rect_filled(bar, 1.0, t::ok().gamma_multiply(0.25 + 0.55 * tail));
         }
         let shown = kit::elide(p, name, t::medium(13.0), face.width() - 14.0);
         p.text(
@@ -1782,7 +1786,7 @@ impl App {
             Align2::LEFT_CENTER,
             shown,
             t::medium(13.0),
-            if audible { t::TEXT } else { t::FAINT },
+            if audible { t::text() } else { t::faint() },
         );
         if kit::show_focus(ui, &r) {
             kit::focus_ring(p, rect, 5.0);
@@ -1899,7 +1903,7 @@ impl App {
                 6.0,
                 kit::mix(LIT_PAD_TOP, egui::Color32::WHITE, lift * 0.5),
                 kit::mix(LIT_PAD_BOTTOM, LIT_PAD_TOP, lift),
-                t::EDGE,
+                t::edge(),
                 down,
                 kit::DEPTH,
             )
@@ -1908,9 +1912,9 @@ impl App {
                 p,
                 rect,
                 6.0,
-                t::BRAND_SOFT,
-                kit::mix(t::BRAND_SOFT, t::EDGE, 0.3),
-                t::EDGE,
+                t::brand_soft(),
+                kit::mix(t::brand_soft(), t::edge(), 0.3),
+                t::edge(),
                 down,
                 kit::DEPTH,
             )
@@ -1919,9 +1923,9 @@ impl App {
                 p,
                 rect,
                 6.0,
-                kit::mix(t::CTL_TOP, t::PANEL_TOP, 0.18),
-                t::CTL_BOTTOM,
-                t::EDGE,
+                kit::mix(t::ctl_top(), t::panel_top(), 0.18),
+                t::ctl_bottom(),
+                t::edge(),
                 down,
                 kit::DEPTH,
             )
@@ -1932,9 +1936,9 @@ impl App {
                 p,
                 rect,
                 6.0,
-                t::CTL_BOTTOM,
-                t::PANEL_BOTTOM,
-                t::EDGE,
+                t::ctl_bottom(),
+                t::panel_bottom(),
+                t::edge(),
                 down,
                 kit::DEPTH,
             )
@@ -1943,11 +1947,11 @@ impl App {
         // is big enough to hold it without overlap.
         if rect.width() >= 28.0 && rect.height() >= 28.0 {
             let legend = if vel > 0 && audible {
-                t::KEY_INK
+                t::key_ink()
             } else if current {
-                t::TEXT
+                t::text()
             } else {
-                t::MUTED
+                t::muted()
             };
             p.text(
                 face.left_top() + vec2(6.0, 4.0),
@@ -1965,9 +1969,9 @@ impl App {
                 pos2(face.right() - 4.0, face.bottom() - 3.0),
             );
             let (bg, fg) = if audible {
-                (t::BRAND_EDGE, t::BRAND_FILL)
+                (t::brand_edge(), t::brand_fill())
             } else {
-                (t::EDGE, t::BRAND)
+                (t::edge(), t::brand())
             };
             p.rect_filled(track, 1.0, bg);
             let mut fill = track;
@@ -1994,7 +1998,7 @@ impl App {
             let x = sx(b * STEP * 4);
             p.line_segment(
                 [pos2(x, area.top()), pos2(x, area.bottom())],
-                Stroke::new(1.0_f32, t::LINE),
+                Stroke::new(1.0_f32, t::line()),
             );
         }
         let notes: Vec<_> = pat.notes.iter().filter(|n| n.instrument == inst).collect();
@@ -2018,14 +2022,14 @@ impl App {
         for s in &slides {
             let y = py(s.target);
             let (a, b) = (sx(s.start), sx(s.start + s.length));
-            p.line_segment([pos2(a, y), pos2(b, y)], Stroke::new(3.0_f32, t::WAIT));
+            p.line_segment([pos2(a, y), pos2(b, y)], Stroke::new(3.0_f32, t::wait()));
             if b - a > 70.0 {
                 p.text(
                     pos2(a, y + 4.0),
                     Align2::LEFT_TOP,
                     format!("slide to {}", super::roll::note_name(s.target)),
                     t::sans(12.0),
-                    t::WAIT,
+                    t::wait(),
                 );
             }
         }
@@ -2041,7 +2045,7 @@ impl App {
                     py(n.pitch) + 2.0,
                 ),
             );
-            p.rect_filled(r, 2.0, if n.muted { t::STRONG } else { t::TEXT });
+            p.rect_filled(r, 2.0, if n.muted { t::strong() } else { t::text() });
         }
         if hot && area.height() >= 24.0 {
             let tag = "Open in piano roll  F7";
@@ -2050,11 +2054,11 @@ impl App {
                 pos2(area.right() - w, area.center().y - 13.0),
                 vec2(w, 26.0),
             );
-            p.rect_filled(r, 6.0, t::RAISED);
+            p.rect_filled(r, 6.0, t::raised());
             p.rect_stroke(
                 r,
                 6.0,
-                Stroke::new(1.0_f32, t::STRONG),
+                Stroke::new(1.0_f32, t::strong()),
                 egui::StrokeKind::Inside,
             );
             p.text(
@@ -2062,7 +2066,7 @@ impl App {
                 Align2::CENTER_CENTER,
                 tag,
                 t::sans(13.0),
-                t::TEXT,
+                t::text(),
             );
         }
     }
