@@ -34,7 +34,7 @@ mod synth;
 mod tempo_lane;
 mod updater_ui;
 mod vocal;
-mod welcome;
+pub(crate) mod welcome;
 mod workspace;
 
 pub(crate) use project::Pending;
@@ -519,13 +519,14 @@ impl App {
         }
         crate::plugins::set_dxvk(settings.plugins.dxvk);
         crate::plugins::set_wine(settings.plugins.wine.clone());
+        let tr = crate::i18n::strings(settings.general.language);
         let (audio, status) = match Audio::open(song.clone(), &settings.audio) {
             Ok(a) => (Some(a), (Tone::Quiet, String::new())),
             Err(e) => (
                 None,
                 (
                     Tone::Bad,
-                    format!("No audio output: {e}. Check PipeWire, then restart."),
+                    crate::i18n::fill(tr.status_no_audio_init, &[("err", &e.to_string())]),
                 ),
             ),
         };
@@ -537,9 +538,9 @@ impl App {
         if !capture && let Some((_, exe)) = crate::plugins::foreign_wineserver() {
             app.status = (
                 Tone::Bad,
-                format!(
-                    "Another Wine ({}) holds the Wine prefix, so Windows plugins cannot start. Settings → Plugins → Stop it.",
-                    exe.display()
+                crate::i18n::fill(
+                    tr.status_wine_conflict,
+                    &[("name", &exe.display().to_string())],
                 ),
             );
         }
@@ -1310,6 +1311,7 @@ impl App {
     }
 
     pub(crate) fn undo(&mut self) -> bool {
+        let tr = self.tr();
         self.settle_plugin_states();
         if let Some(prev) = self.history.pop() {
             self.edits += 1;
@@ -1320,15 +1322,16 @@ impl App {
             }
             self.fix_selection();
             self.publish();
-            self.say(Tone::Quiet, "Undone. Ctrl+Shift+Z redoes.");
+            self.say(Tone::Quiet, tr.status_undone);
             true
         } else {
-            self.say(Tone::Quiet, "Nothing to undo");
+            self.say(Tone::Quiet, tr.edit_nothing_undo);
             false
         }
     }
 
     pub(crate) fn redo(&mut self) -> bool {
+        let tr = self.tr();
         self.settle_plugin_states();
         if let Some(next) = self.future.pop() {
             self.edits += 1;
@@ -1339,10 +1342,10 @@ impl App {
             }
             self.fix_selection();
             self.publish();
-            self.say(Tone::Quiet, "Redone");
+            self.say(Tone::Quiet, tr.status_redone);
             true
         } else {
-            self.say(Tone::Quiet, "Nothing to redo");
+            self.say(Tone::Quiet, tr.edit_nothing_redo);
             false
         }
     }
@@ -1400,6 +1403,7 @@ impl App {
     }
 
     pub(crate) fn new_pattern(&mut self) {
+        let tr = self.tr();
         self.checkpoint();
         let id = self.song.patterns.iter().map(|p| p.id).max().unwrap_or(0) + 1;
         self.song
@@ -1413,11 +1417,15 @@ impl App {
             .insert(at.min(self.song.patterns.len()), p);
         self.selected = id;
         self.publish();
-        self.say(Tone::Quiet, format!("Pattern {id} added. Ctrl+Z undoes."));
+        self.say(
+            Tone::Quiet,
+            crate::i18n::fill(tr.status_pattern_added, &[("id", &id.to_string())]),
+        );
     }
 
     /// FL F4: the next pattern without notes after the current one, else a new one.
     pub(crate) fn next_empty_pattern(&mut self) {
+        let tr = self.tr();
         let from = self.pattern_index(self.selected);
         let empty = self
             .song
@@ -1429,9 +1437,10 @@ impl App {
         match empty {
             Some(id) => {
                 self.select_pattern(id);
+                let name = self.pattern().name.clone();
                 self.say(
                     Tone::Quiet,
-                    format!("{} is empty and selected.", self.pattern().name),
+                    crate::i18n::fill(tr.status_pattern_empty_selected, &[("name", &name)]),
                 );
             }
             None => self.new_pattern(),
@@ -1443,6 +1452,7 @@ impl App {
     }
 
     pub(crate) fn clone_pattern(&mut self) {
+        let tr = self.tr();
         self.checkpoint();
         let mut p = self.pattern().clone();
         p.id = self.song.patterns.iter().map(|p| p.id).max().unwrap_or(0) + 1;
@@ -1452,13 +1462,17 @@ impl App {
         let (id, name) = (p.id, p.name.clone());
         self.song.patterns.insert(at, p.into());
         self.select_pattern(id);
-        self.say(Tone::Quiet, format!("{name} added. Ctrl+Z undoes."));
+        self.say(
+            Tone::Quiet,
+            crate::i18n::fill(tr.status_pattern_copy_added, &[("name", &name)]),
+        );
     }
 
     /// Delete the selected pattern and its clips. The last pattern stays.
     pub(crate) fn delete_pattern(&mut self) {
+        let tr = self.tr();
         if self.song.patterns.len() < 2 {
-            self.say(Tone::Bad, "A project keeps at least one pattern.");
+            self.say(Tone::Bad, tr.status_pattern_last_stays);
             return;
         }
         self.checkpoint();
@@ -1473,7 +1487,8 @@ impl App {
         self.publish();
         self.say(
             Tone::Quiet,
-            format!("{name} deleted with {clips} clip(s). Ctrl+Z undoes."),
+            tr.pattern_deleted_clips
+                .fmt_with(tr.lang, clips, &[("name", &name)]),
         );
     }
 
@@ -1612,6 +1627,7 @@ impl App {
 
     /// Move the playhead to tick `t` of the loop (pattern or song).
     pub(crate) fn seek_tick(&mut self, t: keyframexl::sequence::Tick) {
+        let tr = self.tr();
         let frames = self.tick_frame_at(t);
         if let Some(a) = &self.audio {
             a.position.store(frames, Ordering::Relaxed);
@@ -1621,10 +1637,14 @@ impl App {
         } else {
             roll::bar_pos(t)
         };
-        self.say(Tone::Quiet, format!("Playhead at {at}."));
+        self.say(
+            Tone::Quiet,
+            crate::i18n::fill(tr.status_playhead_at, &[("pos", &at)]),
+        );
     }
 
     pub(crate) fn play_pause(&mut self) {
+        let tr = self.tr();
         let (start, end) = self.loop_bounds();
         let at = self.loop_pos();
         let g = self.settings.general.clone();
@@ -1635,7 +1655,7 @@ impl App {
         if self.waiting_input || a.count_in.load(Ordering::Relaxed) > 0 {
             a.count_in.store(0, Ordering::Relaxed);
             self.waiting_input = false;
-            self.say(Tone::Quiet, "Start cancelled.");
+            self.say(Tone::Quiet, tr.status_start_cancelled);
             return;
         }
         // With a time selection, play starts inside it (FL).
@@ -1644,10 +1664,7 @@ impl App {
         }
         if on && self.rec.on && g.wait_input {
             self.waiting_input = true;
-            self.say(
-                Tone::Wait,
-                "Waiting for input: play a note to start recording. Space cancels.",
-            );
+            self.say(Tone::Wait, tr.status_waiting_input);
             return;
         }
         if on && g.count_in && (g.count_in_always || self.rec.on) {
@@ -1656,9 +1673,9 @@ impl App {
             self.say(
                 Tone::Wait,
                 if self.rec.on {
-                    "Count-in: recording starts after one bar."
+                    tr.status_count_in_rec
                 } else {
-                    "Count-in: playback starts after one bar."
+                    tr.status_count_in_play
                 },
             );
             return;
@@ -1683,11 +1700,12 @@ impl App {
         if !self.waiting_input {
             return;
         }
+        let tr = self.tr();
         self.waiting_input = false;
         if let Some(a) = &self.audio {
             a.playing.store(true, Ordering::Relaxed);
         }
-        self.say(Tone::Quiet, "Recording from your first note.");
+        self.say(Tone::Quiet, tr.status_rec_from_first_note);
     }
 
     pub(crate) fn stop(&mut self) {
@@ -1722,6 +1740,7 @@ impl App {
     }
 
     pub(crate) fn tap(&mut self) {
+        let tr = self.tr();
         let now = std::time::Instant::now();
         self.taps
             .retain(|x| now.duration_since(*x).as_secs_f64() < 2.5);
@@ -1729,7 +1748,10 @@ impl App {
         if self.taps.len() < 3 {
             self.say(
                 Tone::Quiet,
-                format!("Tap {} of 3, on the beat", self.taps.len()),
+                crate::i18n::fill(
+                    tr.status_tap_progress,
+                    &[("n", &self.taps.len().to_string())],
+                ),
             );
             return;
         }
@@ -1747,12 +1769,10 @@ impl App {
             }
             self.set_edited_tempo(((60.0 / med).clamp(40.0, 300.0) * 10.0).round() / 10.0);
             self.publish();
+            let bpm_s = format!("{:.1}", self.edited_tempo());
             self.say(
                 Tone::Quiet,
-                format!(
-                    "Tempo {:.1} BPM from taps. Ctrl+Z undoes.",
-                    self.edited_tempo()
-                ),
+                crate::i18n::fill(tr.status_tempo_from_taps, &[("bpm", &bpm_s)]),
             );
         }
     }
@@ -1779,6 +1799,7 @@ impl App {
     }
 
     pub(crate) fn save_as(&mut self) {
+        let tr = self.tr();
         let name = self
             .path
             .as_ref()
@@ -1786,7 +1807,7 @@ impl App {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "project.kfxl".into());
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter("KeyFrameXL", &["kfxl"])
+            .add_filter(tr.dlg_filter_kfxl, &["kfxl"])
             .set_file_name(name)
             .save_file()
         {
@@ -1795,20 +1816,28 @@ impl App {
     }
 
     fn save_to(&mut self, path: std::path::PathBuf) {
+        let tr = self.tr();
         // Plugins keep their sound settings inside themselves: fetch them first.
         self.collect_plugin_states();
         match keyframexl::project_io::save(&self.song, &path) {
             Ok(()) => {
-                self.say(Tone::Done, format!("Saved {}", path.display()));
+                self.say(
+                    Tone::Done,
+                    crate::i18n::fill(tr.status_saved, &[("path", &path.display().to_string())]),
+                );
                 self.remember(&path);
                 self.path = Some(path);
                 self.saved_edits = self.edits;
             }
-            Err(e) => self.say(Tone::Bad, format!("Not saved: {e}. Choose another folder.")),
+            Err(e) => self.say(
+                Tone::Bad,
+                crate::i18n::fill(tr.status_not_saved, &[("err", &e.to_string())]),
+            ),
         }
     }
 
     pub(crate) fn new_project(&mut self) {
+        let tr = self.tr();
         self.flp_freeze = None;
         self.close_riff();
         self.unload_all_plugins();
@@ -1819,15 +1848,16 @@ impl App {
         self.path = None;
         self.saved_edits = self.edits;
         self.publish();
-        self.say(Tone::Quiet, "New project. Ctrl+Z brings the old one back.");
+        self.say(Tone::Quiet, tr.status_new_project);
         self.load_default_kit();
     }
 
     pub(crate) fn export_project_bundle(&mut self) {
+        let tr = self.tr();
         let stem = self.project_name();
         let default_name = format!("{stem}.zip");
         let Some(dest) = rfd::FileDialog::new()
-            .add_filter("KeyFrameXL Project Bundle", &["zip"])
+            .add_filter(tr.dlg_filter_bundle, &["zip"])
             .set_file_name(default_name)
             .save_file()
         else {
@@ -1837,15 +1867,21 @@ impl App {
         let opts = keyframexl::bundle::BundleOptions::default();
         match keyframexl::bundle::export_bundle(&self.song, &stem, &dest, &opts) {
             Ok(report) => {
-                let mut parts = vec![format!("Bundled {}", dest.display())];
+                let mut parts = vec![crate::i18n::fill(
+                    tr.status_bundled,
+                    &[("path", &dest.display().to_string())],
+                )];
                 if report.bundled_irs > 0 {
-                    parts.push(format!("{} IR(s)", report.bundled_irs));
+                    parts.push(tr.bundled_irs.fmt(tr.lang, report.bundled_irs));
                 }
                 if report.plugins > 0 {
-                    parts.push(format!("{} plugin ref(s)", report.plugins));
+                    parts.push(tr.bundled_plugin_refs.fmt(tr.lang, report.plugins));
                 }
                 if !report.missing_irs.is_empty() {
-                    parts.push(format!("{} missing IR(s)", report.missing_irs.len()));
+                    parts.push(
+                        tr.bundled_missing_irs
+                            .fmt(tr.lang, report.missing_irs.len()),
+                    );
                 }
                 let tone = if report.missing_irs.is_empty() {
                     Tone::Done
@@ -1854,13 +1890,17 @@ impl App {
                 };
                 self.say(tone, parts.join(" · "));
             }
-            Err(e) => self.say(Tone::Bad, format!("Bundle export failed: {e}")),
+            Err(e) => self.say(
+                Tone::Bad,
+                crate::i18n::fill(tr.status_bundle_export_failed, &[("err", &e.to_string())]),
+            ),
         }
     }
 
     pub(crate) fn import_project_bundle(&mut self) {
+        let tr = self.tr();
         let Some(zip_path) = rfd::FileDialog::new()
-            .add_filter("KeyFrameXL Project Bundle", &["zip"])
+            .add_filter(tr.dlg_filter_bundle, &["zip"])
             .pick_file()
         else {
             return;
@@ -1869,6 +1909,7 @@ impl App {
     }
 
     fn import_bundle_path(&mut self, zip_path: &std::path::Path) {
+        let tr = self.tr();
         let stem = zip_path
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
@@ -1893,25 +1934,32 @@ impl App {
                 self.publish();
                 self.remember(&imported.project_path);
                 let extra = if imported.restored_irs > 0 {
-                    format!(" ({} IR(s) restored)", imported.restored_irs)
+                    tr.bundle_restored_irs.fmt(tr.lang, imported.restored_irs)
                 } else {
                     String::new()
                 };
                 self.say(
                     Tone::Done,
-                    format!("Unpacked bundle to {}{extra}", extract_dir.display()),
+                    crate::i18n::fill(
+                        tr.status_bundle_unpacked,
+                        &[
+                            ("path", &extract_dir.display().to_string()),
+                            ("extra", &extra),
+                        ],
+                    ),
                 );
             }
-            Err(e) => self.say(Tone::Bad, format!("Cannot open bundle: {e}")),
+            Err(e) => self.say(
+                Tone::Bad,
+                crate::i18n::fill(tr.status_bundle_open_failed, &[("err", &e.to_string())]),
+            ),
         }
     }
 
     pub(crate) fn open(&mut self) {
+        let tr = self.tr();
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter(
-                "KeyFrameXL, Bundle, or FL Studio project",
-                &["kfxl", "zip", "flp"],
-            )
+            .add_filter(tr.dlg_filter_open_all, &["kfxl", "zip", "flp"])
             .pick_file()
         {
             self.open_path(&path);
@@ -1919,6 +1967,7 @@ impl App {
     }
 
     pub(crate) fn open_path(&mut self, path: &std::path::Path) {
+        let tr = self.tr();
         if path
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("flp"))
@@ -1943,19 +1992,32 @@ impl App {
                 self.path = Some(path.to_path_buf());
                 self.saved_edits = self.edits;
                 self.publish();
-                self.say(Tone::Done, format!("Opened {}", path.display()));
+                self.say(
+                    Tone::Done,
+                    crate::i18n::fill(tr.status_opened, &[("path", &path.display().to_string())]),
+                );
                 self.remember(path);
             }
             Err(e) => {
                 self.recent.retain(|p| p != path);
-                self.say(Tone::Bad, format!("Cannot open {}: {e}", path.display()));
+                self.say(
+                    Tone::Bad,
+                    crate::i18n::fill(
+                        tr.status_cannot_open,
+                        &[
+                            ("path", &path.display().to_string()),
+                            ("err", &e.to_string()),
+                        ],
+                    ),
+                );
             }
         }
     }
 
     pub(crate) fn import_flp_dialog(&mut self) {
+        let tr = self.tr();
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter("FL Studio project", &["flp"])
+            .add_filter(tr.dlg_filter_flp, &["flp"])
             .pick_file()
         {
             self.import_flp(&path);
@@ -1996,7 +2058,7 @@ impl App {
         if !self.welcome_open {
             return;
         }
-        let copy = welcome::WelcomeCopy::for_language(self.settings.general.language);
+        let tr = self.tr();
         let update_version = match &self.updater.state {
             crate::updater::CheckState::Available(info)
                 if !crate::updater::is_skipped(
@@ -2012,7 +2074,7 @@ impl App {
         let action = welcome::show_welcome(
             ctx,
             &mut self.welcome,
-            &copy,
+            tr,
             &self.recent,
             &mut self.settings.general.show_welcome,
             update_version.as_deref(),
@@ -2037,7 +2099,7 @@ impl App {
             }
             welcome::WelcomeAction::LoadTemplate(kind) => {
                 let song = welcome::build_template(kind);
-                let title = copy.template_titles[kind.index()];
+                let title = tr.template_title(kind);
                 let with_kit = matches!(
                     kind,
                     welcome::TemplateKind::EmptyBeat
@@ -2071,7 +2133,7 @@ impl App {
                 };
                 self.load_welcome_song(
                     song,
-                    format!("Started template: {title}"),
+                    crate::i18n::fill(tr.status_started_template, &[("title", title)]),
                     with_kit,
                     open_inst,
                 );
@@ -2080,7 +2142,7 @@ impl App {
                 let song = g.build();
                 self.load_welcome_song(
                     song,
-                    format!("Started template: {}", g.title()),
+                    crate::i18n::fill(tr.status_started_template, &[("title", tr.genre_title(g))]),
                     false,
                     None,
                 );
@@ -2091,7 +2153,7 @@ impl App {
                 let name = song.info.title.clone();
                 self.load_welcome_song(
                     song,
-                    format!("Loaded Tide preset: {name}"),
+                    crate::i18n::fill(tr.status_loaded_tide_preset, &[("name", &name)]),
                     false,
                     open_inst,
                 );
@@ -2102,7 +2164,7 @@ impl App {
                 let name = song.info.title.clone();
                 self.load_welcome_song(
                     song,
-                    format!("Loaded Forge recipe: {name}"),
+                    crate::i18n::fill(tr.status_loaded_forge_recipe, &[("name", &name)]),
                     false,
                     open_inst,
                 );
@@ -2114,6 +2176,7 @@ impl App {
     /// .kfxl; the .flp is never changed). The full report goes to the
     /// project's comments (Project info), a summary to the status line.
     fn import_flp(&mut self, path: &std::path::Path) {
+        let tr = self.tr();
         let bytes = std::fs::read(path).unwrap_or_default();
         match keyframexl::flp::read_flp(&bytes) {
             Ok((mut s, report)) => {
@@ -2139,7 +2202,11 @@ impl App {
                 self.start_flp_freeze(&s, &report, &bytes, &file);
                 let mut notes = lines.clone();
                 notes.extend(missing.iter().cloned());
-                s.info.comments = format!("Imported from {file}:\n{}", notes.join("\n"));
+                let notes_s = notes.join("\n");
+                s.info.comments = crate::i18n::fill(
+                    tr.flp_import_comments_header,
+                    &[("file", &file), ("notes", &notes_s)],
+                );
                 self.close_riff();
                 self.unload_all_plugins();
                 self.checkpoint();
@@ -2156,11 +2223,34 @@ impl App {
                 let gaps = if missing.is_empty() {
                     String::new()
                 } else {
-                    format!(" {} plugin(s) not found here.", missing.len())
+                    tr.flp_missing_plugins.fmt(tr.lang, missing.len())
                 };
-                self.say(Tone::Done, format!("{file}: {} · {plugins} plugin(s), {loaded} sample(s) restored.{gaps} Details in Project info; Save keeps it as a .kfxl.", lines[0]));
+                let plugins_s = tr.flp_plugins_count.fmt(tr.lang, plugins);
+                let samples_s = tr.flp_samples_restored.fmt(tr.lang, loaded);
+                self.say(
+                    Tone::Done,
+                    crate::i18n::fill(
+                        tr.status_flp_imported,
+                        &[
+                            ("file", &file),
+                            ("summary", &lines[0]),
+                            ("plugins", &plugins_s),
+                            ("samples", &samples_s),
+                            ("gaps", &gaps),
+                        ],
+                    ),
+                );
             }
-            Err(e) => self.say(Tone::Bad, format!("Cannot import {}: {e}", path.display())),
+            Err(e) => self.say(
+                Tone::Bad,
+                crate::i18n::fill(
+                    tr.status_cannot_import,
+                    &[
+                        ("path", &path.display().to_string()),
+                        ("err", &e.to_string()),
+                    ],
+                ),
+            ),
         }
     }
 
@@ -2229,6 +2319,7 @@ impl App {
         flp: &[u8],
     ) -> (usize, Vec<String>) {
         use keyframexl::sequence::{InstrumentKind, PluginRef};
+        let tr = self.tr();
         let (mut done, mut missing) = (0, Vec::new());
         // The import's placeholder plugin ids (for automation) → real ids.
         let key = keyframexl::flp::PLUGIN_KEY;
@@ -2262,9 +2353,9 @@ impl App {
                     .instrument(id)
                     .is_some_and(|i| matches!(i.kind, InstrumentKind::Synth { .. }))
                 {
-                    missing.push(format!(
-                        "{}: {} needs FL Studio VSTi for live playback",
-                        c.name, c.plugin
+                    missing.push(crate::i18n::fill(
+                        tr.flp_note_needs_vsti,
+                        &[("ch", &c.name), ("plugin", &c.plugin)],
                     ));
                 }
                 continue;
@@ -2284,9 +2375,14 @@ impl App {
                     set(song, id, plugin);
                     done += 1;
                 }
-                Err(e) => {
-                    missing.push(format!("{}: {} could not be moved ({e})", c.name, c.plugin))
-                }
+                Err(e) => missing.push(crate::i18n::fill(
+                    tr.flp_note_not_moved,
+                    &[
+                        ("ch", &c.name),
+                        ("plugin", &c.plugin),
+                        ("err", &e.to_string()),
+                    ],
+                )),
             }
         }
         // VST effects in the mixer: the import left FL's Windows path; find
@@ -2319,11 +2415,14 @@ impl App {
                         k += 1;
                     }
                     None => {
-                        missing.push(format!(
-                            "{}: effect {} {} is not installed or not scanned here (left out)",
-                            song.mixer[t].name,
-                            p.format.to_uppercase(),
-                            p.name
+                        let fmt_u = p.format.to_uppercase();
+                        missing.push(crate::i18n::fill(
+                            tr.flp_note_fx_missing,
+                            &[
+                                ("track", &song.mixer[t].name),
+                                ("fmt", &fmt_u),
+                                ("plugin", &p.name),
+                            ],
                         ));
                         song.mixer[t].fx.remove(k);
                         // Automation of later effects on this insert follows them.
@@ -2363,11 +2462,10 @@ impl App {
                     && crate::plugins::format_of(&p.path) == format
             });
             let Some(p) = found else {
-                missing.push(format!(
-                    "{}: {} {} is not installed or not scanned here (channel is silent)",
-                    c.name,
-                    format.to_uppercase(),
-                    vst.name
+                let fmt_u = format.to_uppercase();
+                missing.push(crate::i18n::fill(
+                    tr.flp_note_inst_missing,
+                    &[("ch", &c.name), ("fmt", &fmt_u), ("plugin", &vst.name)],
                 ));
                 continue;
             };
@@ -2388,8 +2486,9 @@ impl App {
             }
         }
         for name in keyframexl::flp::resolve_plugin_keys(song, &ids) {
-            missing.push(format!(
-                "{name}: automation of a plugin that was not found (left out)"
+            missing.push(crate::i18n::fill(
+                tr.flp_note_auto_missing,
+                &[("name", &name)],
             ));
         }
         (done, missing)
@@ -2514,12 +2613,13 @@ impl App {
         }
         let Some(r) = done else { return };
         self.flp_freeze = None;
+        let tr = self.tr();
         let wavs = match r {
             Ok(w) => w,
             Err(e) => {
                 self.say(
                     Tone::Bad,
-                    format!("FL Studio could not render the imported channels: {e}"),
+                    crate::i18n::fill(tr.status_fl_render_err, &[("err", &e.to_string())]),
                 );
                 return;
             }
@@ -2604,7 +2704,13 @@ impl App {
             } else {
                 Tone::Bad
             },
-            format!("FL Studio rendered {loaded}/{total} imported channels."),
+            crate::i18n::fill(
+                tr.status_fl_rendered,
+                &[
+                    ("loaded", &loaded.to_string()),
+                    ("total", &total.to_string()),
+                ],
+            ),
         );
     }
 
@@ -2635,6 +2741,7 @@ impl App {
         result: Result<keyframexl::sequence::SamplePreset, String>,
         quiet: bool,
     ) {
+        let tr = self.tr();
         match result {
             Ok(preset) => {
                 let preset = match self.flp_slices.remove(&target) {
@@ -2673,11 +2780,16 @@ impl App {
                         }
                         self.publish();
                         if !quiet {
+                            let target_name = self.instrument_name(target);
                             self.say(
                                 Tone::Done,
-                                format!(
-                                    "Loaded {name} into {}. {report}",
-                                    self.instrument_name(target)
+                                crate::i18n::fill(
+                                    tr.status_preset_loaded,
+                                    &[
+                                        ("name", &name),
+                                        ("target", &target_name),
+                                        ("report", &report),
+                                    ],
                                 ),
                             );
                         }
@@ -2686,11 +2798,17 @@ impl App {
                         if !quiet {
                             self.history.pop();
                         }
-                        self.say(Tone::Bad, format!("Not loaded: {e}"));
+                        self.say(
+                            Tone::Bad,
+                            crate::i18n::fill(tr.status_not_loaded, &[("err", e)]),
+                        );
                     }
                 }
             }
-            Err(e) => self.say(Tone::Bad, format!("Preset not loaded: {e}")),
+            Err(e) => self.say(
+                Tone::Bad,
+                crate::i18n::fill(tr.status_preset_not_loaded, &[("err", &e)]),
+            ),
         }
     }
 
@@ -2746,9 +2864,10 @@ impl App {
             self.export();
         }
         if ctrl && pressed(egui::Key::H) {
+            let tr = self.tr();
             self.stop();
             self.panic();
-            self.say(Tone::Quiet, "All sound stopped.");
+            self.say(Tone::Quiet, tr.status_all_sound_stopped);
         }
         if ctrl && !shift && !ctx.input(|i| i.modifiers.alt) && pressed(egui::Key::J) {
             self.toggle_multilink();
@@ -2835,12 +2954,16 @@ impl App {
             self.set_song_mode(!self.song_mode);
         }
         if self.focus_kind() == Some(Kind::Roll) && !ctrl && !alt {
+            let tr = self.tr();
             for tool in Tool::ALL {
                 if pressed(tool.key()) {
                     self.tool = tool;
                     self.say(
                         Tone::Quiet,
-                        format!("{} tool: {}.", tool.label(), tool.hint()),
+                        crate::i18n::fill(
+                            tr.status_tool_selected,
+                            &[("label", tr.tool_label(tool)), ("hint", tr.tool_hint(tool))],
+                        ),
                     );
                 }
             }
@@ -2877,6 +3000,7 @@ impl App {
     // ------------------------------------------------------------ shell
 
     fn status_bar(&mut self, ui: &mut egui::Ui) {
+        let tr = self.tr();
         let rect = ui.max_rect();
         let p = ui.painter();
         p.rect_filled(rect, 0.0, t::side());
@@ -2890,9 +3014,9 @@ impl App {
         let armed = self
             .midi_learn
             .map(|t| {
-                format!(
-                    "Move a knob on your controller to link {}… Esc cancels.",
-                    self.auto_label(t)
+                crate::i18n::fill(
+                    tr.status_midi_learn_prompt,
+                    &[("target", &self.auto_label(t))],
                 )
             })
             .or_else(|| self.multilink_status());
@@ -2924,7 +3048,7 @@ impl App {
                     p,
                     Pos2::new(rect.right() - PAGE, y),
                     Align2::RIGHT_CENTER,
-                    "no audio output",
+                    tr.status_no_audio_pill,
                     12.0,
                     t::bad(),
                 )
@@ -2939,10 +3063,12 @@ impl App {
         {
             let label = match &self.updater.install {
                 crate::updater::InstallState::ReadyToRestart { version, .. } => {
-                    format!("restart for v{version}")
+                    crate::i18n::fill(tr.status_update_restart_pill, &[("ver", version)])
                 }
-                _ if self.updater.is_installing() => format!("updating to v{}", info.version),
-                _ => format!("update v{}", info.version),
+                _ if self.updater.is_installing() => {
+                    crate::i18n::fill(tr.status_update_installing_pill, &[("ver", &info.version)])
+                }
+                _ => crate::i18n::fill(tr.status_update_avail_pill, &[("ver", &info.version)]),
             };
             let galley = kit::caps_galley(p, &label, 11.0, t::wait());
             let pill_w = galley.size().x + 16.0;
@@ -2953,9 +3079,9 @@ impl App {
             );
             let resp = ui
                 .interact(pill, ui.id().with("update_pill"), Sense::click())
-                .on_hover_text(format!(
-                    "KeyFrameXL v{} is available — click to view details",
-                    info.version
+                .on_hover_text(crate::i18n::fill(
+                    tr.status_update_avail_tip,
+                    &[("ver", &info.version)],
                 ));
             let fill = if resp.hovered() {
                 t::ctl_top()
@@ -2998,31 +3124,16 @@ impl App {
 
     /// One line of how-to for the current view; shown when there is no news.
     fn hint(&self) -> &'static str {
+        let tr = self.tr();
         match self.focus_kind() {
-            Some(Kind::Rack) => {
-                "Click a step · Shift+click cycles velocity · Right-click clears · Right bar selects channels · Alt+↑↓ moves · Alt+C clones · Ctrl+K velocity"
-            }
-            Some(Kind::Roll) => {
-                "Click places, drag moves · Edges resize · Shift+drag copies · Ctrl+drag selects · Right-click erases · Alt skips snap · Ctrl+wheel zooms"
-            }
-            Some(Kind::Playlist) => {
-                "Click an empty cell places the pattern · Drag moves, edges trim · Shift+drag copies · Right-click deletes · Ctrl+wheel zooms"
-            }
-            Some(Kind::Mixer) => {
-                "Click a strip to select it · Double-click a fader for 0 dB · Click an empty slot to add an effect · Ctrl+L routes selected channels"
-            }
-            Some(Kind::Instrument) => {
-                "Click the name to rename · Load a sound or drop a .dwp or sample here · Hover a zone for details"
-            }
-            Some(Kind::Riff) => {
-                "Pick a stage on the left · Throw dice for a new recipe · Play preview, then Apply full riff"
-            }
-            Some(Kind::Settings) => {
-                "Sections on the left · Changes apply and save at once · Esc closes"
-            }
-            None => {
-                "Drag a tab to dock it anywhere, or out of the dock to float it · F5 F6 F7 open windows · Alt+1..3 workspaces"
-            }
+            Some(Kind::Rack) => tr.hint_rack,
+            Some(Kind::Roll) => tr.hint_roll,
+            Some(Kind::Playlist) => tr.hint_playlist,
+            Some(Kind::Mixer) => tr.hint_mixer,
+            Some(Kind::Instrument) => tr.hint_instrument,
+            Some(Kind::Riff) => tr.hint_riff,
+            Some(Kind::Settings) => tr.hint_settings,
+            None => tr.hint_empty,
         }
     }
 
@@ -3047,6 +3158,7 @@ impl App {
         sub: &str,
         mut f: impl FnMut(&mut egui::Ui, Slot),
     ) {
+        let tr = crate::i18n::ctx_tr(ui.ctx());
         ui.horizontal(|ui| {
             ui.set_height(kit::CONTROL_H);
             ui.spacing_mut().button_padding = vec2(4.0, 2.0);
@@ -3058,7 +3170,7 @@ impl App {
                 kit::menu_style(ui);
                 f(ui, Slot::Menu);
             });
-            let r = menu.response.on_hover_text("Window menu");
+            let r = menu.response.on_hover_text(tr.win_header_menu_tip);
             let c = r.rect.center();
             let ink = if r.hovered() { t::text() } else { t::muted() };
             ui.painter().add(egui::Shape::convex_polygon(
@@ -3111,6 +3223,7 @@ impl App {
 
     /// Items every window menu ends with: float or dock, close.
     pub(crate) fn window_menu_tail(&mut self, ui: &mut egui::Ui, tab: Tab) {
+        let tr = self.tr();
         ui.separator();
         let floating = self
             .ws
@@ -3118,15 +3231,15 @@ impl App {
             .iter_all_tabs()
             .any(|(at, t)| *t == tab && at.0 != egui_dock::SurfaceIndex::main());
         if floating {
-            if ui.button("Dock").clicked() {
+            if ui.button(tr.win_dock).clicked() {
                 self.win(Cmd::Dock(tab.clone()));
                 ui.close_menu();
             }
-        } else if ui.button("Detach (float)").clicked() {
+        } else if ui.button(tr.win_detach_float).clicked() {
             self.win(Cmd::Float(tab.clone()));
             ui.close_menu();
         }
-        if ui.button("Close").clicked() {
+        if ui.button(tr.common_close).clicked() {
             self.win(Cmd::Close(tab));
             ui.close_menu();
         }
@@ -3134,23 +3247,25 @@ impl App {
 
     /// Every window closed: say so and offer the way back.
     fn empty_workspace(&mut self, ui: &mut egui::Ui, area: egui::Rect) {
+        let tr = self.tr();
         let c = area.center();
         let p = ui.painter();
         p.text(
             c - vec2(0.0, 30.0),
             Align2::CENTER_CENTER,
-            "All windows are closed",
+            tr.empty_all_closed,
             t::medium(15.0),
             t::text(),
         );
         p.text(
             c - vec2(0.0, 6.0),
             Align2::CENTER_CENTER,
-            "F5 Playlist · F6 Channel rack · F7 Piano roll",
+            tr.empty_keys_hint,
             t::sans(14.0),
             t::muted(),
         );
-        let b = egui::Rect::from_center_size(c + vec2(0.0, 34.0), vec2(170.0, kit::CONTROL_H));
+        let bw = (kit::text_width(p, tr.empty_restore_layout, t::sans(14.0)) + 32.0).max(170.0);
+        let b = egui::Rect::from_center_size(c + vec2(0.0, 34.0), vec2(bw, kit::CONTROL_H));
         let r = ui.interact(b, ui.id().with("restore-layout"), Sense::click());
         kit::paint_button(
             ui,
@@ -3158,12 +3273,12 @@ impl App {
             &r,
             kit::Kind::Normal,
             true,
-            "Restore layout",
+            tr.empty_restore_layout,
             |p, face, ink| {
                 p.text(
                     face.center(),
                     Align2::CENTER_CENTER,
-                    "Restore layout",
+                    tr.empty_restore_layout,
                     t::sans(14.0),
                     ink,
                 );
@@ -3176,6 +3291,7 @@ impl App {
 
     /// While files hover over the window, say what a drop will do.
     fn drop_overlay(&self, ctx: &egui::Context) {
+        let tr = self.tr();
         let names: Vec<String> = ctx.input(|i| {
             i.raw
                 .hovered_files
@@ -3192,13 +3308,17 @@ impl App {
             return;
         }
         let text = match names.first().map(String::as_str) {
-            Some("dwp") => format!("Drop to load the preset into {}", self.drop_target_name()),
-            Some("wav" | "flac" | "ogg") => format!("Drop to load the sample into {}", self.drop_target_name()),
-            Some("kfxl") => "Drop to open the project".to_string(),
-            Some("flp") => "Drop to import the FL Studio project".to_string(),
+            Some("dwp") => {
+                crate::i18n::fill(tr.drop_dwp_into, &[("target", &self.drop_target_name())])
+            }
+            Some("wav" | "flac" | "ogg") => {
+                crate::i18n::fill(tr.drop_sample_into, &[("target", &self.drop_target_name())])
+            }
+            Some("kfxl") => tr.drop_open_project.to_string(),
+            Some("flp") => tr.drop_import_flp.to_string(),
             // Where it lands depends on the row under the pointer at the drop.
-            Some("mid" | "midi") => "Drop on a channel row or a piano roll to add the notes there".to_string(),
-            _ => "Drop a sample (.wav .flac .ogg), a .dwp preset, a .mid file or a .kfxl / .flp project".to_string(),
+            Some("mid" | "midi") => tr.drop_midi_notes.to_string(),
+            _ => tr.drop_any_file.to_string(),
         };
         let screen = ctx.screen_rect();
         let p = ctx.layer_painter(egui::LayerId::new(

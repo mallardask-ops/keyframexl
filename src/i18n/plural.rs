@@ -67,6 +67,14 @@ impl PluralStr {
         let count = n.to_string();
         fill(self.pick(lang, n as u64), &[("n", &count)])
     }
+
+    pub fn fmt_with(&self, lang: Language, n: usize, extra: &[(&str, &str)]) -> String {
+        let count = n.to_string();
+        let mut args = Vec::with_capacity(extra.len() + 1);
+        args.push(("n", count.as_str()));
+        args.extend_from_slice(extra);
+        fill(self.pick(lang, n as u64), &args)
+    }
 }
 
 impl Language {

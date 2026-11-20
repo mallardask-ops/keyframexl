@@ -84,6 +84,7 @@ impl App {
         if !self.show_manual {
             return;
         }
+        let tr = self.tr();
         let mut open = true;
         let page_id = egui::Id::new("manual-page");
         let query_id = egui::Id::new("manual-query");
@@ -91,7 +92,8 @@ impl App {
         let mut query: String = ctx.data(|d| d.get_temp(query_id)).unwrap_or_default();
         let mut follow = None;
         let screen = ctx.screen_rect();
-        egui::Window::new("Manual")
+        egui::Window::new(tr.help_manual)
+            .id(egui::Id::new("kfxl-manual-window"))
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
@@ -106,14 +108,14 @@ impl App {
                         ui.set_width(190.0);
                         ui.add(
                             egui::TextEdit::singleline(&mut query)
-                                .hint_text("Search the manual")
+                                .hint_text(tr.manual_search_hint)
                                 .desired_width(190.0),
                         );
                         ui.add_space(4.0);
                         let hits = search(&query);
                         if hits.is_empty() {
                             ui.label(
-                                RichText::new("Nothing matches.")
+                                RichText::new(tr.manual_no_match)
                                     .font(t::sans(12.0))
                                     .color(t::faint()),
                             );
@@ -139,8 +141,8 @@ impl App {
                                 }
                                 ui.add_space(8.0);
                                 if ui
-                                    .link(RichText::new("Open online").font(t::sans(12.0)))
-                                    .on_hover_text("This chapter on GitHub")
+                                    .link(RichText::new(tr.manual_open_online).font(t::sans(12.0)))
+                                    .on_hover_text(tr.manual_open_online_tip)
                                     .clicked()
                                 {
                                     follow = Some(format!("{ONLINE}{}", CHAPTERS[page].0));
@@ -159,10 +161,11 @@ impl App {
                                 }
                                 ui.add_space(12.0);
                                 ui.horizontal(|ui| {
-                                    if page > 0 && ui.button("← Previous").clicked() {
+                                    if page > 0 && ui.button(tr.manual_prev).clicked() {
                                         page -= 1;
                                     }
-                                    if page + 1 < CHAPTERS.len() && ui.button("Next →").clicked()
+                                    if page + 1 < CHAPTERS.len()
+                                        && ui.button(tr.manual_next).clicked()
                                     {
                                         page += 1;
                                     }
@@ -176,7 +179,11 @@ impl App {
                 Some(i) => page = i,
                 None => {
                     if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
-                        self.say(super::Tone::Bad, format!("Could not open the browser: {e}"));
+                        let err = e.to_string();
+                        self.say(
+                            super::Tone::Bad,
+                            crate::i18n::fill(tr.manual_open_browser_err, &[("err", &err)]),
+                        );
                     }
                 }
             }
