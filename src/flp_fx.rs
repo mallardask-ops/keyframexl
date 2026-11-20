@@ -219,6 +219,33 @@ fn of_65536(r: f32) -> f32 {
 fn lowcut_65536(r: f32) -> f32 {
     20.0 * 50f32.powf(r / 65536.0)
 }
+/// Fruity Squeeze: the step size (1..32768 of 16-bit) as our 16→1-bit Squarize.
+fn squeeze_steps(r: f32) -> f32 {
+    r.max(1.0).log2() / 15.0 * 100.0
+}
+fn squeeze_gain(r: f32) -> f32 {
+    r / 127.0 * 100.0
+}
+/// Its filter: 50 Hz .. 33 kHz on an exponential scale.
+fn squeeze_freq(r: f32) -> f32 {
+    50.0 * (33_075.0f32 / 50.0).powf(r / 65536.0)
+}
+/// Preserve and Impact: 44101^(r/44100) − 1 samples at 44.1 kHz, as a share
+/// of our 50 ms.
+fn squeeze_time(r: f32) -> f32 {
+    let samples = 44_101f32.powf(r / 44_100.0) - 1.0;
+    samples / 44_100.0 / 0.05 * 100.0
+}
+/// Hyper Chorus values are 0..1000.
+fn chorus_ms(r: f32) -> f32 {
+    1.0 + r / 1000.0 * 29.0
+}
+fn chorus_feedback(r: f32) -> f32 {
+    r / 1000.0 * 60.0
+}
+fn chorus_hz(r: f32) -> f32 {
+    0.05 * 100f32.powf(r / 1000.0)
+}
 /// Parametric EQ (the first): 10 Hz .. 16 kHz on a curved scale (DawVert).
 fn eq1_freq(r: f32) -> f32 {
     10.0 * 1600f32.powf((r / 65536.0).max(0.0).powf(0.6))
@@ -417,6 +444,36 @@ fn table(fl: &str) -> Option<(FxKind, Option<Vec<Link>>)> {
                 .collect(),
         ),
         "spreader" => Some(vec![link(0, 1, 0.0, 10000.0, 0, spread_width)]),
+        // Version, then gain, mix, steps, filter on, filter type, resonance,
+        // frequency, pre/post, relation, impact, preserve, amount (LYNX's
+        // notes; checked against FL 2025 files).
+        "fruity squeeze" | "squeeze" => Some(vec![
+            link(0, 1, 0.0, 160.0, 6, squeeze_gain),
+            link(1, 2, 0.0, 128.0, 5, of_128),
+            link(2, 3, 1.0, 32768.0, 0, squeeze_steps),
+            link(5, 6, 0.0, 65536.0, 8, of_65536),
+            link(6, 7, 0.0, 65536.0, 7, squeeze_freq),
+            link(7, 8, 0.0, 1.0, 9, same),
+            link(8, 9, 0.0, 3.0, 3, same),
+            link(9, 10, 0.0, 44100.0, 2, squeeze_time),
+            link(10, 11, 0.0, 44100.0, 1, squeeze_time),
+            link(11, 12, 0.0, 65536.0, 4, of_65536),
+        ]),
+        // Version, then delay, feedback, rate, amount, movement, movement
+        // speed, ArachnaChor mode, low pass (Hz), high pass (Hz), dry/wet,
+        // phase difference; 0..1000 unless said.
+        "hyper chorus" => Some(vec![
+            link(0, 1, 0.0, 1000.0, 0, chorus_ms),
+            link(1, 2, 0.0, 1000.0, 1, chorus_feedback),
+            link(2, 3, 0.0, 1000.0, 3, chorus_hz),
+            link(3, 4, 0.0, 1000.0, 2, tenth),
+            link(4, 5, 0.0, 1000.0, 4, tenth),
+            link(5, 6, 0.0, 1000.0, 5, chorus_hz),
+            link(7, 8, 7140.0, 22000.0, 8, same),
+            link(8, 9, 120.0, 10900.0, 7, same),
+            link(9, 10, 0.0, 1000.0, 10, tenth),
+            link(10, 11, 0.0, 1000.0, 9, tenth),
+        ]),
         "maximus" | "fruity convolver" | "fruity convolver 2" => Some(vec![]),
         // Kept at our defaults, which are near FL's: a limiter that only
         // catches peaks.
@@ -532,11 +589,18 @@ pub(crate) fn stand_in(
         "fruity waveshaper" | "waveshaper" => notes.push(
             "WaveShaper: our Wavefolder is off — its curve is not imported yet".into(),
         ),
-        "fruity squeeze" | "squeeze" => notes.push(
-            "Fruity Squeeze: our Squeeze is off — its plugin data layout is not known yet".into(),
-        ),
+        "fruity squeeze" | "squeeze" => {
+            // Its filter switched off: ours wide open.
+            if value(data, 4) == Some(0.0) {
+                slot.params[7] = 20_000.0;
+                slot.params[8] = 0.0;
+            } else if value(data, 5).is_some_and(|t| t != 0.0) {
+                notes.push("Fruity Squeeze: its filter type is not low pass; ours is".into());
+            }
+        }
         "hyper chorus" => notes.push(
-            "Hyper Chorus: our Hyper Chorus is off — its plugin data layout is not known yet".into(),
+            "Hyper Chorus: settings carried over approximately (delay, feedback and rates on our scales)"
+                .into(),
         ),
         "fruity delay bank" => {
             let converted = delay_bank(data, &mut slot, notes);
@@ -812,13 +876,61 @@ mod tests {
     }
 
     #[test]
-    fn squeeze_and_hyper_chorus_have_kinds_but_stay_off() {
-        let (squeeze, ok, _) = stand_in("Fruity Squeeze", &[0; 40], &mut vec![]).unwrap();
-        assert_eq!(squeeze.kind, FxKind::Squeeze);
-        assert!(!ok);
-        let (hyper, ok, _) = stand_in("Hyper Chorus", &[0; 40], &mut vec![]).unwrap();
-        assert_eq!(hyper.kind, FxKind::HyperChorus);
-        assert!(!ok);
+    fn squeeze_and_hyper_chorus_carry_their_settings() {
+        // From FL 2025 files: a glitchy riser and a chorus on a bass.
+        let squeeze = data(&[0, 127, 64, 12144, 1, 0, 0, 57151, 1, 0, 0, 7500, 0]);
+        let (s, ok, _) = stand_in("Fruity Squeeze", &squeeze, &mut vec![]).unwrap();
+        assert!(ok);
+        assert_eq!(s.kind, FxKind::Squeeze);
+        assert!((s.params[0] - 90.4).abs() < 0.5, "squarize {}", s.params[0]);
+        assert!((s.params[5] - 50.0).abs() < 0.1);
+        assert!((s.params[6] - 100.0).abs() < 0.1);
+        assert!(
+            (s.params[7] - 14_400.0).abs() < 300.0,
+            "freq {}",
+            s.params[7]
+        );
+        assert_eq!(s.params[9], 1.0);
+        assert_eq!(s.params[2], 0.0, "no impact: no Puncher");
+        // Filter off: ours wide open.
+        let off = data(&[0, 127, 64, 1, 0, 0, 32768, 32768, 0, 0, 0, 7500, 0]);
+        let (s, _, _) = stand_in("Fruity Squeeze", &off, &mut vec![]).unwrap();
+        assert_eq!(s.params[7], 20_000.0);
+        assert_eq!(s.params[0], 0.0, "step 1 keeps 16 bits");
+        let chorus = data(&[2, 586, 477, 443, 456, 507, 711, 0, 22000, 1974, 900, 500, 0]);
+        let (h, ok, _) = stand_in("Hyper Chorus", &chorus, &mut vec![]).unwrap();
+        assert!(ok);
+        assert_eq!(h.kind, FxKind::HyperChorus);
+        assert!((h.params[0] - 18.0).abs() < 0.1, "delay {}", h.params[0]);
+        assert_eq!(h.params[7], 1974.0, "high pass");
+        assert_eq!(h.params[8], 20_000.0, "low pass clamped to ours");
+        assert!((h.params[10] - 90.0).abs() < 0.1, "mix");
+        assert!((h.params[9] - 50.0).abs() < 0.1, "phase");
+    }
+
+    #[test]
+    fn squeeze_without_impact_leaves_the_sound_alone() {
+        use crate::fx::FxState;
+        let mut p = FxKind::Squeeze.defaults();
+        p[0] = 0.0;
+        p[2] = 0.0;
+        p[4] = 0.0;
+        p[7] = 20_000.0;
+        let input: Vec<f32> = (0..4800)
+            .flat_map(|i| {
+                let v = (i as f32 * 0.01).sin() * 0.5;
+                [v, v]
+            })
+            .collect();
+        let mut buf = input.clone();
+        let mut st = FxState::new(FxKind::Squeeze, 48_000.0);
+        st.process(&p, &mut buf, 48_000.0, 120.0);
+        let zeros = buf
+            .iter()
+            .zip(&input)
+            .filter(|(o, i)| o.abs() < 1e-6 && i.abs() > 0.1)
+            .count();
+        assert_eq!(zeros, 0, "no punched samples");
     }
 
     #[test]

@@ -201,6 +201,7 @@ pub mod denormal;
 pub mod engine;
 pub mod flp;
 mod flp_fx;
+mod flp_gen;
 pub mod forge;
 pub mod fx;
 pub mod genres;

@@ -558,6 +558,13 @@ impl FlPluginState {
                 .into(),
         }
     }
+
+    pub fn data(&self) -> Vec<u8> {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD
+            .decode(self.state.as_bytes())
+            .unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]

@@ -54,6 +54,12 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
   - The playlist record size follows the layout event, with FL 25.2+
     88-byte records.
   - Channel stretch pitch and clip fades are kept.
+  - Without FL Studio VSTi, 3x Osc channels play on KeyFrame Tide with
+    their three oscillators, and FLEX channels on the Tide preset of the
+    same role (bass, pad, pluck…), instead of staying silent.
+  - Fruity Squeeze and Hyper Chorus keep their settings (they were
+    imported switched off).
+  - Automation of effect slot on/off and of send levels comes across.
 - **Denormals.** DSP threads flush denormals to zero: reverb and filter
   tails no longer spike the CPU in silence.
 - **Tide DC offset.** A per-voice DC blocker removes the offset of sync and

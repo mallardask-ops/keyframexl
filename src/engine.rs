@@ -2266,7 +2266,16 @@ impl Engine {
             }
             for (k, slot) in track.fx.iter().enumerate() {
                 let si = t * crate::sequence::FX_SLOTS + k;
-                if !slot.enabled {
+                let enabled = override_of(
+                    &self.auto,
+                    &self.live_params,
+                    crate::automation::Target::FxEnabled {
+                        track: t as u16,
+                        slot: k as u8,
+                    },
+                )
+                .map_or(slot.enabled, |v| v >= 0.5);
+                if !enabled {
                     // A bypassed slot forgets its smoothers: re-enabling snaps.
                     reset_fx_smoothers(
                         &mut self.fx_mix_state,
@@ -2600,15 +2609,24 @@ impl Engine {
             }
             for send in &track.sends {
                 let to = send.to as usize;
+                let level = override_of(
+                    &self.auto,
+                    &self.live_params,
+                    crate::automation::Target::SendLevel {
+                        track: t as u16,
+                        to: send.to,
+                    },
+                )
+                .unwrap_or(send.level);
                 if to > t && to < count {
                     let (a, b) = hi.split_at_mut(to - t);
                     for (d, s) in b[0][..n].iter_mut().zip(&a[0][..n]) {
-                        *d += *s * send.level;
+                        *d += *s * level;
                     }
                 } else if to > 0 && to < t {
                     // A send back to an earlier insert (it mixes after this one).
                     for (d, s) in lo[to][..n].iter_mut().zip(&hi[0][..n]) {
-                        *d += *s * send.level;
+                        *d += *s * level;
                     }
                 }
             }

@@ -60,12 +60,11 @@ impl Effect for Squeeze {
         for f in buf.as_chunks_mut::<2>().0 {
             let dry = [f[0], f[1]];
             if self.left == 0 {
-                self.punching = !self.punching;
-                self.left = if self.punching { impact } else { preserve };
+                // No impact: the Puncher is off (FL's default), not one
+                // sample in every cycle.
+                self.punching = !self.punching && impact > 0;
                 // A zero-length phase would stick; one sample keeps it moving.
-                if self.left == 0 {
-                    self.left = 1;
-                }
+                self.left = if self.punching { impact } else { preserve }.max(1);
             }
             for ch in 0..2 {
                 let mut x = dry[ch];

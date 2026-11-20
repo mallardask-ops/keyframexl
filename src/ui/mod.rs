@@ -2237,10 +2237,16 @@ impl App {
                 continue;
             }
             let Some(v) = vsti else {
-                missing.push(format!(
-                    "{}: {} needs FL Studio VSTi for live playback",
-                    c.name, c.plugin
-                ));
+                // A Tide stand-in plays it meanwhile (see the import report).
+                if !song
+                    .instrument(id)
+                    .is_some_and(|i| matches!(i.kind, InstrumentKind::Synth { .. }))
+                {
+                    missing.push(format!(
+                        "{}: {} needs FL Studio VSTi for live playback",
+                        c.name, c.plugin
+                    ));
+                }
                 continue;
             };
             match keyframexl::flp::fl_vsti_state(flp, c.index) {

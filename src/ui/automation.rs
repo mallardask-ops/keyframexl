@@ -47,6 +47,20 @@ impl App {
                     .map_or("Effect", |fx| fx.label());
                 format!("{name} mix · {}", self.mixer_name(track as usize))
             }
+            Target::FxEnabled { track, slot } => {
+                let name = self
+                    .song
+                    .mixer
+                    .get(track as usize)
+                    .and_then(|m| m.fx.get(slot as usize))
+                    .map_or("Effect", |fx| fx.label());
+                format!("{name} on · {}", self.mixer_name(track as usize))
+            }
+            Target::SendLevel { track, to } => format!(
+                "{} send to {}",
+                self.mixer_name(track as usize),
+                self.mixer_name(to as usize)
+            ),
             Target::FxParam { track, slot, param } => {
                 let slot = self
                     .song
@@ -907,7 +921,10 @@ impl App {
                 .and_then(|s| s.kind.params().get(param as usize))
                 .map(|spec| keyframexl::fx::format(spec, v))
                 .unwrap_or_else(|| format!("{v:.2}")),
-            Target::FxMix { .. } | Target::PluginParam { .. } => format!("{:.0}%", v * 100.0),
+            Target::FxEnabled { .. } => if v >= 0.5 { "On" } else { "Off" }.into(),
+            Target::FxMix { .. } | Target::SendLevel { .. } | Target::PluginParam { .. } => {
+                format!("{:.0}%", v * 100.0)
+            }
         }
     }
 }

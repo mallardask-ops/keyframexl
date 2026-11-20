@@ -30,6 +30,16 @@ pub enum Target {
         track: u16,
         slot: u8,
     },
+    /// An effect slot on (≥ 0.5) or bypassed.
+    FxEnabled {
+        track: u16,
+        slot: u8,
+    },
+    /// The level of a mixer send (0..1).
+    SendLevel {
+        track: u16,
+        to: u16,
+    },
     /// A hosted plugin's parameter (0..1, the plugin's own scale).
     PluginParam {
         plugin: u64,
@@ -84,7 +94,10 @@ impl Target {
                 .and_then(|s| s.kind.params().get(param as usize))
                 .map(|p| (p.min, p.max))
                 .unwrap_or((0.0, 1.0)),
-            Target::FxMix { .. } | Target::PluginParam { .. } => (0.0, 1.0),
+            Target::FxMix { .. }
+            | Target::FxEnabled { .. }
+            | Target::SendLevel { .. }
+            | Target::PluginParam { .. } => (0.0, 1.0),
         }
     }
 
@@ -107,6 +120,16 @@ impl Target {
                 .get(track as usize)
                 .and_then(|m| m.fx.get(slot as usize))
                 .map(|s| s.mix),
+            Target::FxEnabled { track, slot } => song
+                .mixer
+                .get(track as usize)
+                .and_then(|m| m.fx.get(slot as usize))
+                .map(|s| if s.enabled { 1.0 } else { 0.0 }),
+            Target::SendLevel { track, to } => song
+                .mixer
+                .get(track as usize)
+                .and_then(|m| m.sends.iter().find(|s| s.to == to))
+                .map(|s| s.level),
             Target::PluginParam { .. } => None,
         }
     }
@@ -135,7 +158,7 @@ impl Target {
         match *self {
             Target::MixerVolume { .. } | Target::ChannelVolume { .. } => 1.0,
             Target::MixerPan { .. } | Target::ChannelPan { .. } => 0.0,
-            Target::FxMix { .. } => 1.0,
+            Target::FxMix { .. } | Target::FxEnabled { .. } | Target::SendLevel { .. } => 1.0,
             Target::FxParam { track, slot, param } => song
                 .mixer
                 .get(track as usize)
@@ -195,6 +218,26 @@ impl Target {
                     .and_then(|m| m.fx.get_mut(slot as usize))
                 {
                     effect.mix = v;
+                    return true;
+                }
+            }
+            Target::FxEnabled { track, slot } => {
+                if let Some(effect) = song
+                    .mixer
+                    .get_mut(track as usize)
+                    .and_then(|m| m.fx.get_mut(slot as usize))
+                {
+                    effect.enabled = v >= 0.5;
+                    return true;
+                }
+            }
+            Target::SendLevel { track, to } => {
+                if let Some(send) = song
+                    .mixer
+                    .get_mut(track as usize)
+                    .and_then(|m| m.sends.iter_mut().find(|s| s.to == to))
+                {
+                    send.level = v;
                     return true;
                 }
             }

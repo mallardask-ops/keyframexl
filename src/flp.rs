@@ -933,6 +933,9 @@ pub struct FlpReport {
     pub automations: usize,
     /// Automation that could not be moved, with why.
     pub automation_notes: Vec<String>,
+    /// FL generators played by a Tide stand-in (until FL Studio VSTi takes
+    /// over), one line each.
+    pub generator_stand_ins: Vec<String>,
 }
 
 impl FlpReport {
@@ -1000,6 +1003,7 @@ impl FlpReport {
             };
             v.push(format!("{}: {what}{pitch}", c.name));
         }
+        v.extend(self.generator_stand_ins.iter().cloned());
         if self.automations > 0 {
             v.push(format!("{} automation clip(s) imported", self.automations));
         }
@@ -1442,8 +1446,19 @@ pub fn read_flp(bytes: &[u8]) -> Result<(Song, FlpReport), String> {
                 c.plugin.clone()
             };
         }
-        let kind = match c.kind {
-            ChannelKind::Sampler | ChannelKind::Generator => {
+        // FL's own generators FL Studio VSTi would play: a Tide stand-in
+        // where there is one, so the channel is not silent without it.
+        let stand_in = (c.in_fl_vsti() || c.plugin.eq_ignore_ascii_case("FLEX"))
+            .then(|| crate::flp_gen::stand_in(&c.plugin, &c.data))
+            .flatten();
+        let kind = match (c.kind, stand_in) {
+            (ChannelKind::Generator, Some((patch, line))) => {
+                report
+                    .generator_stand_ins
+                    .push(format!("{}: {line}", c.name));
+                InstrumentKind::Synth { patch }
+            }
+            (ChannelKind::Sampler | ChannelKind::Generator, _) => {
                 InstrumentKind::Sampler { preset: None }
             }
             _ => continue,
@@ -2275,6 +2290,8 @@ fn auto_points(d: &[u8]) -> Vec<(f64, f32, f32)> {
 fn event_scale(param: u16, dest: u16) -> Option<fn(i32) -> f32> {
     Some(if dest & 0x2000 != 0 && param & 0xff00 == 0x1f00 {
         match param & 0xff {
+            // The slot switch is 0 or 1, not a 0..12800 level.
+            0 => |v| v.clamp(0, 1) as f32,
             192 => |v| v as f32 / 16000.0,
             193 => |v| (v as f32 + 6400.0) / 12800.0,
             208..=210 => |v| (v as f32 + 1800.0) / 3600.0,
@@ -2478,9 +2495,32 @@ fn build_automation(
                                 None => Err(why("the insert EQ is flat here (no slot for it)")),
                             }
                         }
-                        _ => Err(why(
-                            "this mixer control (slot mix, send) is not automatable here",
-                        )),
+                        0 => match placed.get(&(insert, slot)) {
+                            Some(&(k, _)) => Ok((
+                                Target::FxEnabled {
+                                    track,
+                                    slot: k as u8,
+                                },
+                                Box::new(|u| u),
+                            )),
+                            None => Err(why("its effect slot was not imported")),
+                        },
+                        // Send levels to insert p - 64.
+                        p @ 64..=191 => {
+                            let to = p - 64;
+                            if song
+                                .mixer
+                                .get(track as usize)
+                                .is_some_and(|m| m.sends.iter().any(|s| s.to == to))
+                            {
+                                Ok((Target::SendLevel { track, to }, Box::new(|u| u)))
+                            } else if to == 0 {
+                                Err(why("the level into Master is not automatable here"))
+                            } else {
+                                Err(why("the send it moves is not routed here"))
+                            }
+                        }
+                        _ => Err(why("this mixer control is not automatable here")),
                     }
                 } else {
                     Err(why("unknown mixer control"))
@@ -3564,5 +3604,141 @@ mod tests {
         .unwrap();
         assert!(got.exists());
         assert!(resolve_path("C:\\nothing\\here.wav", pfx, None).is_none());
+    }
+}
+
+#[cfg(test)]
+mod corpus_dump {
+    /// `KFXL_FLP_DUMP="hyper chorus" cargo test --lib corpus_dump -- --ignored --nocapture`:
+    /// the plugin data of every slot or channel with that FL plugin, over every .flp under $HOME.
+    #[test]
+    #[ignore]
+    fn dump_plugin_data() {
+        let want = std::env::var("KFXL_FLP_DUMP")
+            .unwrap_or_default()
+            .to_lowercase();
+        let out = std::process::Command::new("find")
+            .args([
+                std::env::var("HOME").unwrap().as_str(),
+                "-name",
+                "*.flp",
+                "-not",
+                "-path",
+                "*/.cache/*",
+            ])
+            .output()
+            .unwrap();
+        let mut seen = 0;
+        for path in String::from_utf8_lossy(&out.stdout).lines() {
+            let Ok(bytes) = std::fs::read(path) else {
+                continue;
+            };
+            let Ok((song, _)) = super::read_flp(&bytes) else {
+                continue;
+            };
+            for i in &song.instruments {
+                if let Some(fp) = &i.fl_plugin
+                    && fp.name.to_lowercase() == want
+                    && seen < 40
+                {
+                    seen += 1;
+                    let d = fp.data();
+                    if want == "flex" {
+                        let text = |a: usize| {
+                            d.get(a..a + 1024)
+                                .map(|b| {
+                                    String::from_utf8_lossy(
+                                        &b[..b.iter().position(|&c| c == 0).unwrap_or(b.len())],
+                                    )
+                                    .into_owned()
+                                })
+                                .unwrap_or_default()
+                        };
+                        println!(
+                            "FLEX len {} pack {:?} preset {:?}",
+                            d.len(),
+                            text(0x10),
+                            text(0x411)
+                        );
+                        continue;
+                    }
+                    let ints: Vec<i32> = d
+                        .chunks_exact(4)
+                        .take(60)
+                        .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                        .collect();
+                    println!(
+                        "{} [ch {}] len {} {:?}",
+                        path.rsplit('/').next().unwrap(),
+                        i.name,
+                        d.len(),
+                        ints
+                    );
+                }
+            }
+            for m in &song.mixer {
+                for s in &m.fl_slots {
+                    if s.plugin.name.to_lowercase() == want && seen < 40 {
+                        seen += 1;
+                        let d = s.plugin.data();
+                        let ints: Vec<i32> = d
+                            .chunks_exact(4)
+                            .take(60)
+                            .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                            .collect();
+                        println!(
+                            "{} [{}] len {} {:?}",
+                            path.rsplit('/').next().unwrap(),
+                            m.name,
+                            d.len(),
+                            ints
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Mixer automation over the corpus: what became targets, what did not.
+    #[test]
+    #[ignore]
+    fn mixer_automation_over_the_corpus() {
+        let out = std::process::Command::new("find")
+            .args([
+                std::env::var("HOME").unwrap().as_str(),
+                "-name",
+                "*.flp",
+                "-not",
+                "-path",
+                "*/.cache/*",
+            ])
+            .output()
+            .unwrap();
+        let (mut enabled, mut sends) = (0, 0);
+        let mut notes = std::collections::BTreeMap::<String, usize>::new();
+        for path in String::from_utf8_lossy(&out.stdout).lines() {
+            let Ok(bytes) = std::fs::read(path) else {
+                continue;
+            };
+            let Ok((song, report)) = super::read_flp(&bytes) else {
+                continue;
+            };
+            song.validate().unwrap();
+            for p in &song.patterns {
+                match p.automation.as_ref().map(|a| a.target) {
+                    Some(crate::automation::Target::FxEnabled { .. }) => enabled += 1,
+                    Some(crate::automation::Target::SendLevel { .. }) => sends += 1,
+                    _ => {}
+                }
+            }
+            for n in &report.automation_notes {
+                let key = n.split(": ").last().unwrap_or(n).to_string();
+                *notes.entry(key).or_default() += 1;
+            }
+        }
+        println!("slot switches {enabled}, send levels {sends}");
+        for (n, c) in notes {
+            println!("{c:5}  {n}");
+        }
     }
 }
