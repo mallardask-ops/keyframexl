@@ -56,7 +56,7 @@ fn log_to_file() {
         .unwrap_or(0);
     eprintln!(
         "KeyFrameXL {} started (unix time {stamp})",
-        env!("CARGO_PKG_VERSION")
+        keyframexl::version::display()
     );
 }
 

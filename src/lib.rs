@@ -224,4 +224,5 @@ pub mod stretch;
 pub mod synth;
 mod synth_presets;
 pub mod tempo;
+pub mod version;
 pub mod vocal;

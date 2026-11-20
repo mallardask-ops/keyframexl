@@ -904,11 +904,17 @@ impl App {
                                     .color(t::brand()),
                             );
                         });
-                        ui.label(
-                            RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION")))
-                                .font(t::mono(12.0))
-                                .color(t::muted()),
-                        );
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            ui.label(
+                                RichText::new(format!("Version {}", keyframexl::version::VERSION))
+                                    .font(t::mono(12.0))
+                                    .color(t::muted()),
+                            );
+                            if keyframexl::version::is_nightly() {
+                                super::settings_ui::nightly_badge(ui);
+                            }
+                        });
                     });
                 });
                 ui.add_space(6.0);

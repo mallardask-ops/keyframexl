@@ -213,7 +213,7 @@ pub fn id3(info: &ProjectInfo) -> Vec<u8> {
     }
     frame(
         b"TSSE",
-        text(concat!("KeyFrameXL ", env!("CARGO_PKG_VERSION"), " + LAME")),
+        text(&format!("KeyFrameXL {} + LAME", crate::version::VERSION)),
     );
     let mut tag = b"ID3\x04\x00\x00".to_vec();
     tag.extend_from_slice(&syncsafe(frames.len()));
