@@ -19,11 +19,20 @@ pub const SHOWN: [&str; 8] = ["wav", "flac", "ogg", "dwp", "kfxl", "flp", "mid",
 #[derive(Clone, Debug)]
 pub struct FileDrag(pub PathBuf);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EntryKind {
+    Dir,
+    File,
+    Reading,
+    Unreadable,
+}
+
 #[derive(Clone, Debug)]
 pub struct Entry {
     pub path: PathBuf,
     pub name: String,
     pub dir: bool,
+    pub kind: EntryKind,
     pub size: u64,
     pub modified: Option<std::time::SystemTime>,
 }
@@ -34,9 +43,25 @@ impl Entry {
             path,
             name,
             dir,
+            kind: if dir { EntryKind::Dir } else { EntryKind::File },
             size: 0,
             modified: None,
         }
+    }
+
+    fn placeholder(path: PathBuf, name: String, kind: EntryKind) -> Self {
+        Self {
+            path,
+            name,
+            dir: false,
+            kind,
+            size: 0,
+            modified: None,
+        }
+    }
+
+    fn is_placeholder(&self) -> bool {
+        matches!(self.kind, EntryKind::Reading | EntryKind::Unreadable)
     }
 }
 
@@ -150,6 +175,7 @@ pub fn list(dir: &Path, sort: Sort) -> Result<Vec<Entry>, String> {
                 path,
                 name,
                 dir,
+                kind: if dir { EntryKind::Dir } else { EntryKind::File },
                 size: meta.as_ref().map(|m| m.len()).unwrap_or(0),
                 modified: meta.and_then(|m| m.modified().ok()),
             })
@@ -377,7 +403,11 @@ impl Files {
             Some(Err(e)) => {
                 out.push((
                     depth,
-                    Entry::bare(dir.join("?"), format!("Unreadable: {e}"), false),
+                    Entry::placeholder(
+                        dir.join("?"),
+                        format!("Unreadable: {e}"),
+                        EntryKind::Unreadable,
+                    ),
                     false,
                 ));
                 return;
@@ -385,7 +415,7 @@ impl Files {
             None => {
                 out.push((
                     depth,
-                    Entry::bare(dir.join("…"), "Reading…".into(), false),
+                    Entry::placeholder(dir.join("…"), "Reading…".into(), EntryKind::Reading),
                     false,
                 ));
                 return;
@@ -509,7 +539,7 @@ impl App {
                     ]
                 };
                 p.add(egui::Shape::convex_polygon(pts, t::muted(), Stroke::NONE));
-            } else if !e.name.ends_with('…') {
+            } else if !e.is_placeholder() {
                 let tag = ext(&e.path);
                 let playing = self.previewing.as_ref() == Some(&e.path);
                 kit::caps(
@@ -535,7 +565,7 @@ impl App {
                 t::sans(13.0),
                 ink,
             );
-            if e.name.ends_with('…') || e.name.starts_with("Unreadable") {
+            if e.is_placeholder() {
                 continue;
             }
             // Drag a file out (FL: drop on a channel or the rack).

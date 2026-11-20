@@ -84,7 +84,7 @@ impl App {
                         .data_mut(|d| d.insert_temp(egui::Id::new("about-open"), true));
                 }
                 ui.add_space(6.0);
-                let tr = crate::i18n::strings(self.settings.general.language);
+                let tr = self.tr();
                 let title = |s: &str| {
                     RichText::new(s)
                         .font(t::medium(12.0))
@@ -307,7 +307,7 @@ impl App {
 
     fn menu_file(&mut self, ui: &mut Ui) {
         kit::menu_style(ui);
-        let tr = crate::i18n::strings(self.settings.general.language);
+        let tr = self.tr();
         if item(ui, tr.file_new, "Ctrl+Shift+N", true, "") {
             self.request(super::Pending::New);
         }
@@ -374,7 +374,7 @@ impl App {
 
     fn menu_edit(&mut self, ui: &mut Ui) {
         kit::menu_style(ui);
-        let tr = crate::i18n::strings(self.settings.general.language);
+        let tr = self.tr();
         if item(
             ui,
             tr.edit_undo,
@@ -739,7 +739,7 @@ impl App {
 
     fn menu_help(&mut self, ui: &mut Ui) {
         kit::menu_style(ui);
-        let tr = crate::i18n::strings(self.settings.general.language);
+        let tr = self.tr();
         if item(ui, tr.help_welcome, "", true, "") {
             self.welcome_open = true;
         }

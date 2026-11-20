@@ -510,6 +510,9 @@ impl App {
         } else {
             crate::settings::Settings::load()
         };
+        if let Some(lang) = crate::i18n::Language::from_env_override() {
+            settings.general.language = lang;
+        }
         // Captures can pick the Wine build for plugins: KFXL_CAPTURE_WINE=<bin folder>.
         if capture && let Some(w) = std::env::var_os("KFXL_CAPTURE_WINE") {
             settings.plugins.wine = Some(w.into());
@@ -1166,6 +1169,10 @@ impl App {
             ));
         }
         app
+    }
+
+    pub(crate) fn tr(&self) -> &'static crate::i18n::Strings {
+        crate::i18n::strings(self.settings.general.language)
     }
 
     pub(crate) fn with_song(song: Song, audio: Option<Audio>) -> Self {
@@ -3324,6 +3331,7 @@ impl eframe::App for App {
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let frame_start = std::time::Instant::now();
+        crate::i18n::set_ctx_lang(ctx, self.settings.general.language);
         self.poll_stretch(ctx);
         // The theme switches before anything draws (the style is read per frame).
         let want = t::resolve(self.settings.general.theme);

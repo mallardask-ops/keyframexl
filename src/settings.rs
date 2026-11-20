@@ -411,7 +411,11 @@ impl Settings {
         path()
             .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|s| ron::from_str(&s).ok())
-            .unwrap_or_default()
+            .unwrap_or_else(|| {
+                let mut s = Self::default();
+                s.general.language = crate::i18n::Language::from_system();
+                s
+            })
     }
 
     pub fn save(&self) -> Result<(), String> {

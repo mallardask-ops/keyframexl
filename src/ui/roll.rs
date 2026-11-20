@@ -896,58 +896,118 @@ impl App {
     }
 
     fn roll_header(&mut self, ui: &mut Ui, sub: &str, channels: &[(u64, String)], iname: &str) {
+        #[derive(Clone, Copy, PartialEq, Eq)]
+        enum BatchNoteDialog {
+            Strum,
+            Arpeggiate,
+            Randomize,
+            Flip,
+            Limit,
+        }
+        impl BatchNoteDialog {
+            fn from_capture(name: &str) -> Option<Self> {
+                match name {
+                    "Strum" => Some(Self::Strum),
+                    "Arpeggiate" => Some(Self::Arpeggiate),
+                    "Randomize" => Some(Self::Randomize),
+                    "Flip" => Some(Self::Flip),
+                    "Limit" => Some(Self::Limit),
+                    _ => None,
+                }
+            }
+            fn title(self) -> &'static str {
+                match self {
+                    Self::Strum => "Strum…",
+                    Self::Arpeggiate => "Arpeggiate…",
+                    Self::Randomize => "Randomize…",
+                    Self::Flip => "Flip…",
+                    Self::Limit => "Limit…",
+                }
+            }
+        }
+        #[derive(Clone, Copy)]
+        enum RollAction {
+            SelectAll,
+            Deselect,
+            Copy,
+            Cut,
+            Paste,
+            Duplicate,
+            Delete,
+            QuickQuantize,
+            Quantize,
+            QuickLegato,
+            Chop,
+            Glue,
+            Batch(BatchNoteDialog),
+            RiffMachine,
+            MuteUnmute,
+            PortaToggle,
+            OctaveUp,
+            OctaveDown,
+            Lyrics,
+        }
+
         let tab = Tab::Roll {
             instrument: self.roll_inst,
         };
         let has_sel = !self.roll_sel.is_empty();
-        let mut action: Option<&str> = None;
+        let mut action: Option<RollAction> = None;
         App::panel_header(ui, sub, |ui, slot| {
             if slot == Slot::Menu {
                 ui.menu_button("Edit", |ui| {
                     kit::menu_style(ui);
-                    for (label, key, needs) in [
-                        ("Select all", "Ctrl+A", false),
-                        ("Deselect", "Ctrl+D", true),
-                        ("Copy", "Ctrl+C", true),
-                        ("Cut", "Ctrl+X", true),
-                        ("Paste", "Ctrl+V", false),
-                        ("Duplicate", "Ctrl+B", true),
-                        ("Delete", "Del", true),
+                    for (act, label, key, needs) in [
+                        (RollAction::SelectAll, "Select all", "Ctrl+A", false),
+                        (RollAction::Deselect, "Deselect", "Ctrl+D", true),
+                        (RollAction::Copy, "Copy", "Ctrl+C", true),
+                        (RollAction::Cut, "Cut", "Ctrl+X", true),
+                        (RollAction::Paste, "Paste", "Ctrl+V", false),
+                        (RollAction::Duplicate, "Duplicate", "Ctrl+B", true),
+                        (RollAction::Delete, "Delete", "Del", true),
                     ] {
                         let enabled = !needs || has_sel;
                         if ui
                             .add_enabled(enabled, egui::Button::new(label).shortcut_text(key))
                             .clicked()
                         {
-                            action = Some(label);
+                            action = Some(act);
                             ui.close_menu();
                         }
                     }
                 });
                 ui.menu_button("Tools", |ui| {
                     kit::menu_style(ui);
-                    for (label, key) in [
-                        ("Quick quantize", "Ctrl+Q"),
-                        ("Quantize…", "Alt+Q"),
-                        ("Quick legato", "Ctrl+L"),
-                        ("Chop", "Ctrl+U"),
-                        ("Glue", "Ctrl+G"),
-                        ("Strum…", ""),
-                        ("Arpeggiate…", ""),
-                        ("Riff Machine…", "Alt+E"),
-                        ("Randomize…", ""),
-                        ("Flip…", ""),
-                        ("Limit…", ""),
-                        ("Mute / unmute", ""),
-                        ("Porta on / off", ""),
-                        ("Transpose octave up", "Ctrl+↑"),
-                        ("Transpose octave down", "Ctrl+↓"),
+                    for (act, label, key) in [
+                        (RollAction::QuickQuantize, "Quick quantize", "Ctrl+Q"),
+                        (RollAction::Quantize, "Quantize…", "Alt+Q"),
+                        (RollAction::QuickLegato, "Quick legato", "Ctrl+L"),
+                        (RollAction::Chop, "Chop", "Ctrl+U"),
+                        (RollAction::Glue, "Glue", "Ctrl+G"),
+                        (RollAction::Batch(BatchNoteDialog::Strum), "Strum…", ""),
+                        (
+                            RollAction::Batch(BatchNoteDialog::Arpeggiate),
+                            "Arpeggiate…",
+                            "",
+                        ),
+                        (RollAction::RiffMachine, "Riff Machine…", "Alt+E"),
+                        (
+                            RollAction::Batch(BatchNoteDialog::Randomize),
+                            "Randomize…",
+                            "",
+                        ),
+                        (RollAction::Batch(BatchNoteDialog::Flip), "Flip…", ""),
+                        (RollAction::Batch(BatchNoteDialog::Limit), "Limit…", ""),
+                        (RollAction::MuteUnmute, "Mute / unmute", ""),
+                        (RollAction::PortaToggle, "Porta on / off", ""),
+                        (RollAction::OctaveUp, "Transpose octave up", "Ctrl+↑"),
+                        (RollAction::OctaveDown, "Transpose octave down", "Ctrl+↓"),
                     ] {
                         if ui
                             .add(egui::Button::new(label).shortcut_text(key))
                             .clicked()
                         {
-                            action = Some(label);
+                            action = Some(act);
                             ui.close_menu();
                         }
                     }
@@ -958,7 +1018,7 @@ impl App {
                             .on_hover_text("Paste words over the notes, one syllable per note")
                             .clicked()
                         {
-                            action = Some("Lyrics…");
+                            action = Some(RollAction::Lyrics);
                             ui.close_menu();
                         }
                     }
@@ -1200,47 +1260,46 @@ impl App {
             }
         });
         match action {
-            Some("Select all") => self.select_all_notes(),
-            Some("Deselect") => self.roll_sel.clear(),
-            Some("Copy") => self.copy_notes(false),
-            Some("Cut") => self.copy_notes(true),
-            Some("Paste") => self.paste_notes(),
-            Some("Duplicate") => self.duplicate_notes(),
-            Some("Lyrics…") => self.lyrics_dialog = Some(String::new()),
-            Some("Delete") => self.delete_selected_notes(),
-            Some("Quick quantize") => self.quantize_notes(),
-            Some("Quantize…") => self.open_quantize(ui.ctx()),
-            Some("Riff Machine…") => self.open_riff(self.roll_inst),
-            Some("Quick legato") => self.legato_notes(),
-            Some("Chop") => self.chop_notes(),
-            Some("Glue") => self.glue_notes(),
-            Some(label @ ("Strum…" | "Arpeggiate…" | "Randomize…" | "Flip…" | "Limit…")) =>
-            {
-                ui.ctx().data_mut(|d| {
-                    d.insert_temp(egui::Id::new("batch-note-dialog"), label.to_owned())
-                });
+            Some(RollAction::SelectAll) => self.select_all_notes(),
+            Some(RollAction::Deselect) => self.roll_sel.clear(),
+            Some(RollAction::Copy) => self.copy_notes(false),
+            Some(RollAction::Cut) => self.copy_notes(true),
+            Some(RollAction::Paste) => self.paste_notes(),
+            Some(RollAction::Duplicate) => self.duplicate_notes(),
+            Some(RollAction::Lyrics) => self.lyrics_dialog = Some(String::new()),
+            Some(RollAction::Delete) => self.delete_selected_notes(),
+            Some(RollAction::QuickQuantize) => self.quantize_notes(),
+            Some(RollAction::Quantize) => self.open_quantize(ui.ctx()),
+            Some(RollAction::RiffMachine) => self.open_riff(self.roll_inst),
+            Some(RollAction::QuickLegato) => self.legato_notes(),
+            Some(RollAction::Chop) => self.chop_notes(),
+            Some(RollAction::Glue) => self.glue_notes(),
+            Some(RollAction::Batch(dlg)) => {
+                ui.ctx()
+                    .data_mut(|d| d.insert_temp(egui::Id::new("batch-note-dialog"), dlg));
             }
-            Some("Mute / unmute") => self.mute_notes(),
-            Some("Porta on / off") => self.porta_notes(),
-            Some("Transpose octave up") => self.nudge_notes(0, 12, 0),
-            Some("Transpose octave down") => self.nudge_notes(0, -12, 0),
-            _ => {}
+            Some(RollAction::MuteUnmute) => self.mute_notes(),
+            Some(RollAction::PortaToggle) => self.porta_notes(),
+            Some(RollAction::OctaveUp) => self.nudge_notes(0, 12, 0),
+            Some(RollAction::OctaveDown) => self.nudge_notes(0, -12, 0),
+            None => {}
         }
         let dialog_id = egui::Id::new("batch-note-dialog");
         // Captures: KFXL_CAPTURE_NOTE_DIALOG=Strum (etc.) opens that dialog once.
         static CAPTURE_DIALOG: std::sync::Once = std::sync::Once::new();
-        if let Ok(name) = std::env::var("KFXL_CAPTURE_NOTE_DIALOG") {
+        if let Ok(name) = std::env::var("KFXL_CAPTURE_NOTE_DIALOG")
+            && let Some(dlg) = BatchNoteDialog::from_capture(&name)
+        {
             CAPTURE_DIALOG.call_once(|| {
-                ui.ctx()
-                    .data_mut(|d| d.insert_temp(dialog_id, format!("{name}…")))
+                ui.ctx().data_mut(|d| d.insert_temp(dialog_id, dlg));
             });
         }
-        let dialog: String = ui.ctx().data(|d| d.get_temp(dialog_id)).unwrap_or_default();
-        if !dialog.is_empty() {
+        let dialog: Option<BatchNoteDialog> = ui.ctx().data(|d| d.get_temp(dialog_id));
+        if let Some(dialog) = dialog {
             let params_id = egui::Id::new("batch-note-params");
             let mut params: (i64, i64, i64, i64, i32, u64) =
                 ui.ctx().data(|d| d.get_temp(params_id)).unwrap_or_else(|| {
-                    if dialog == "Limit…" {
+                    if dialog == BatchNoteDialog::Limit {
                         (1, 127, 0, 127, 0, 1)
                     } else {
                         (30, 10, 1, 127, 0, 1)
@@ -1249,15 +1308,14 @@ impl App {
             let mut apply = false;
             let mut open = true;
             let mut cancel = false;
-            egui::Window::new(&dialog).collapsible(false).resizable(false).open(&mut open).anchor(Align2::CENTER_TOP, vec2(0.0, 140.0)).show(ui.ctx(), |ui| {
+            egui::Window::new(dialog.title()).id(egui::Id::new("batch-note-window")).collapsible(false).resizable(false).open(&mut open).anchor(Align2::CENTER_TOP, vec2(0.0, 140.0)).show(ui.ctx(), |ui| {
                 ui.spacing_mut().item_spacing = vec2(10.0, 8.0);
-                let note = match dialog.as_str() {
-                    "Strum…" => "Spreads each chord in time, one note after another.",
-                    "Arpeggiate…" => "Turns each chord into a run of single notes over its length.",
-                    "Randomize…" => "Nudges start and velocity by random amounts. The same seed gives the same result.",
-                    "Flip…" => "Vertical mirrors pitches around the middle; horizontal reverses time.",
-                    "Limit…" => "Clamps velocity and pitch into a range.",
-                    _ => "",
+                let note = match dialog {
+                    BatchNoteDialog::Strum => "Spreads each chord in time, one note after another.",
+                    BatchNoteDialog::Arpeggiate => "Turns each chord into a run of single notes over its length.",
+                    BatchNoteDialog::Randomize => "Nudges start and velocity by random amounts. The same seed gives the same result.",
+                    BatchNoteDialog::Flip => "Vertical mirrors pitches around the middle; horizontal reverses time.",
+                    BatchNoteDialog::Limit => "Clamps velocity and pitch into a range.",
                 };
                 ui.label(egui::RichText::new(note).font(t::sans(12.0)).color(t::faint()));
                 // 480 ticks = one beat (PPQ 480), 120 = one step.
@@ -1268,22 +1326,22 @@ impl App {
                     let label = |ui: &mut Ui, s: &str| {
                         ui.label(egui::RichText::new(s).font(t::sans(13.0)).color(t::text()));
                     };
-                    match dialog.as_str() {
-                        "Strum…" | "Arpeggiate…" => {
-                            label(ui, if dialog == "Strum…" { "Delay per note" } else { "Note length" });
+                    match dialog {
+                        BatchNoteDialog::Strum | BatchNoteDialog::Arpeggiate => {
+                            label(ui, if dialog == BatchNoteDialog::Strum { "Delay per note" } else { "Note length" });
                             ticks(ui, &mut params.0, 3840);
                             ui.end_row();
                             label(ui, "Direction");
                             ui.horizontal(|ui| {
                                 ui.selectable_value(&mut params.4, 0, "Up");
                                 ui.selectable_value(&mut params.4, 1, "Down");
-                                if dialog == "Arpeggiate…" {
+                                if dialog == BatchNoteDialog::Arpeggiate {
                                     ui.selectable_value(&mut params.4, 2, "Up-Down");
                                 }
                             });
                             ui.end_row();
                         }
-                        "Randomize…" => {
+                        BatchNoteDialog::Randomize => {
                             label(ui, "Start ±");
                             ticks(ui, &mut params.0, 3840);
                             ui.end_row();
@@ -1294,7 +1352,7 @@ impl App {
                             ui.add(egui::DragValue::new(&mut params.5));
                             ui.end_row();
                         }
-                        "Flip…" => {
+                        BatchNoteDialog::Flip => {
                             label(ui, "Flip");
                             ui.horizontal(|ui| {
                                 ui.selectable_value(&mut params.4, 0, "Vertical");
@@ -1302,7 +1360,7 @@ impl App {
                             });
                             ui.end_row();
                         }
-                        "Limit…" => {
+                        BatchNoteDialog::Limit => {
                             label(ui, "Velocity");
                             ui.horizontal(|ui| {
                                 ui.add(egui::DragValue::new(&mut params.0).range(1..=127));
@@ -1318,7 +1376,6 @@ impl App {
                             });
                             ui.end_row();
                         }
-                        _ => {}
                     }
                 });
                 let scope = if self.roll_sel.is_empty() { "all notes of this channel" } else { "the selected notes" };
@@ -1341,18 +1398,20 @@ impl App {
                 let mut notes = self.target_notes();
                 if !notes.is_empty() {
                     self.checkpoint();
-                    match dialog.as_str() {
-                        "Strum…" => note_ops::strum(&mut notes, params.0, params.4 == 1),
-                        "Randomize…" => {
+                    match dialog {
+                        BatchNoteDialog::Strum => {
+                            note_ops::strum(&mut notes, params.0, params.4 == 1)
+                        }
+                        BatchNoteDialog::Randomize => {
                             note_ops::randomize(&mut notes, params.1 as u8, params.0, params.5)
                         }
-                        "Flip…" => note_ops::flip(&mut notes, params.4 == 0),
-                        "Limit…" => note_ops::limit(
+                        BatchNoteDialog::Flip => note_ops::flip(&mut notes, params.4 == 0),
+                        BatchNoteDialog::Limit => note_ops::limit(
                             &mut notes,
                             (params.0 as u8, params.1 as u8),
                             (params.2 as u8, params.3 as u8),
                         ),
-                        "Arpeggiate…" => {
+                        BatchNoteDialog::Arpeggiate => {
                             let direction = match params.4 {
                                 1 => ArpDirection::Down,
                                 2 => ArpDirection::UpDown,
@@ -1372,14 +1431,16 @@ impl App {
                             }
                             notes.clear();
                         }
-                        _ => {}
                     }
                     self.put_notes(&notes);
                     self.fit_pattern();
                     self.publish();
                     self.say(
                         Tone::Quiet,
-                        format!("{} applied. Ctrl+Z undoes.", dialog.trim_end_matches('…')),
+                        format!(
+                            "{} applied. Ctrl+Z undoes.",
+                            dialog.title().trim_end_matches('…')
+                        ),
                     );
                 } else {
                     self.say(Tone::Quiet, "No notes here to change.");
@@ -1388,7 +1449,7 @@ impl App {
             }
             if !open {
                 ui.ctx().data_mut(|d| {
-                    d.remove::<String>(dialog_id);
+                    d.remove::<BatchNoteDialog>(dialog_id);
                     d.remove::<(i64, i64, i64, i64, i32, u64)>(params_id);
                 });
             }
