@@ -901,7 +901,14 @@ fn right_column(
     let items: Vec<(usize, &str)> = names
         .iter()
         .enumerate()
-        .filter(|(_, n)| q.is_empty() || n.to_lowercase().contains(&q))
+        .filter(|(i, n)| {
+            q.is_empty()
+                || n.to_lowercase().contains(&q)
+                || (state.tab == WelcomeTab::Tide
+                    && SynthPatch::CATEGORIES
+                        .get(*i)
+                        .is_some_and(|c| c.to_lowercase().contains(&q)))
+        })
         .map(|(i, n)| (i, *n))
         .collect();
     let picked = egui::ScrollArea::vertical()
@@ -1118,7 +1125,7 @@ mod tests {
 
     #[test]
     fn every_tide_preset_starts_a_valid_project() {
-        assert_eq!(SynthPatch::PRESETS.len(), 18);
+        assert_eq!(SynthPatch::PRESETS.len(), 105);
         for i in 0..SynthPatch::PRESETS.len() {
             let song = build_tide_preset_song(i);
             assert_eq!(song.validate(), Ok(()), "preset {i}");

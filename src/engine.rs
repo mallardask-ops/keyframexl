@@ -468,14 +468,20 @@ impl Voice {
         let k = 2.0 - p.resonance * 1.95;
         let amp =
             p.amp_env.value(self.t, self.gate) * self.vel as f64 / 100.0 * 0.3 * self.kill_gain();
+        // One-pole high-pass at ~8 Hz.
+        let pole = 1.0 - std::f64::consts::TAU * 8.0 / rate;
         for (ch, sample) in out.iter_mut().enumerate() {
             let (low, band, high) =
                 self.filter[0][ch].tick(*sample + sub * p.sub + noise * p.noise, g, k);
-            *sample = match p.filter {
+            let x = match p.filter {
                 Filter::LowPass => low,
                 Filter::HighPass => high,
                 Filter::BandPass => band,
-            } * amp;
+            };
+            let [x1, y1] = self.tide.dc[ch];
+            let y = x - x1 + pole * y1;
+            self.tide.dc[ch] = [x, y];
+            *sample = y * amp;
         }
         out[0] *= 1.0 - self.pan.max(0.0);
         out[1] *= 1.0 + self.pan.min(0.0);
@@ -1076,6 +1082,10 @@ struct TideCache {
     warp_exp: [f64; 2],
     cut_key: f64,
     g: f64,
+    /// DC blocker (previous input, previous output) per channel: sync and
+    /// pulse warps are lopsided waves, and their offset would eat headroom
+    /// and click at note on and off.
+    dc: [[f64; 2]; 2],
 }
 
 impl Default for TideCache {
@@ -1093,6 +1103,7 @@ impl Default for TideCache {
             warp_exp: [1.0; 2],
             cut_key: f64::NAN,
             g: 0.0,
+            dc: [[0.0; 2]; 2],
         }
     }
 }

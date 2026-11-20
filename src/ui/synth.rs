@@ -1798,15 +1798,16 @@ impl App {
             .copied()
             .chain(user.iter().map(|(_, u)| u.name.as_str()))
             .collect();
-        let patch_of = |i: usize| {
-            if i < SynthPatch::PRESETS.len() {
-                SynthPatch::factory(i)
+        let factory = SynthPatch::factory_all();
+        let patch_of = |i: usize| -> &SynthPatch {
+            if i < factory.len() {
+                &factory[i]
             } else {
-                user[i - SynthPatch::PRESETS.len()].1.patch.clone()
+                &user[i - factory.len()].1.patch
             }
         };
         let n = names.len();
-        let now = (0..n).find(|&i| *p == patch_of(i));
+        let now = (0..n).find(|&i| p == patch_of(i));
         let mut idx = now
             .or_else(|| ui.ctx().data(|d| d.get_temp::<usize>(key)))
             .unwrap_or(0)
@@ -1941,17 +1942,41 @@ impl App {
                     };
                     egui::ComboBox::from_id_salt(("tide-presets", id))
                         .width(156.0)
+                        .height(460.0)
                         .selected_text(shown)
                         .show_ui(ui, |ui| {
                             kit::menu_style(ui);
-                            for (i, name) in names.iter().enumerate() {
+                            let head = |ui: &mut Ui, text: &str| {
+                                ui.label(
+                                    egui::RichText::new(text)
+                                        .font(t::sans(12.0))
+                                        .color(t::FAINT),
+                                );
+                            };
+                            // Factory presets by category, then the saved ones.
+                            for cat in SynthPatch::CATEGORY_ORDER {
+                                let mut first = true;
+                                for (i, name) in names
+                                    .iter()
+                                    .enumerate()
+                                    .take(SynthPatch::PRESETS.len())
+                                    .filter(|(i, _)| SynthPatch::CATEGORIES[*i] == cat)
+                                {
+                                    if first && cat != "Init" {
+                                        head(ui, cat);
+                                    }
+                                    first = false;
+                                    if ui.selectable_label(Some(i) == now, *name).clicked() {
+                                        pick = Some(i);
+                                    }
+                                }
+                            }
+                            for (i, name) in
+                                names.iter().enumerate().skip(SynthPatch::PRESETS.len())
+                            {
                                 if i == SynthPatch::PRESETS.len() {
                                     ui.separator();
-                                    ui.label(
-                                        egui::RichText::new("Saved")
-                                            .font(t::sans(12.0))
-                                            .color(t::FAINT),
-                                    );
+                                    head(ui, "Saved");
                                 }
                                 if ui.selectable_label(Some(i) == now, *name).clicked() {
                                     pick = Some(i);
@@ -2013,7 +2038,7 @@ impl App {
 
         if let Some(i) = pick {
             idx = i;
-            *p = patch_of(i);
+            *p = patch_of(i).clone();
             ed.started = true;
             ed.changed = true;
         }

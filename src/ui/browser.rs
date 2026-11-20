@@ -758,7 +758,8 @@ impl App {
             .iter()
             .copied()
             .enumerate()
-            .filter(|(_, n)| matches(q, n))
+            // A category name finds its presets too ("bass", "pad").
+            .filter(|(i, n)| matches(q, n) || matches(q, SynthPatch::CATEGORIES[*i]))
             .collect();
         let saved: Vec<&(PathBuf, keyframexl::preset::SynthPreset)> =
             user.iter().filter(|(_, u)| matches(q, &u.name)).collect();
@@ -822,8 +823,19 @@ impl App {
                         }
                     });
                 };
-            for (i, name) in &factory {
-                row(ui, name, &|| SynthPatch::factory(*i), None);
+            for cat in SynthPatch::CATEGORY_ORDER {
+                let mut first = true;
+                for (i, name) in factory
+                    .iter()
+                    .filter(|(i, _)| SynthPatch::CATEGORIES[*i] == cat)
+                {
+                    if first && cat != "Init" {
+                        ui.label(RichText::new(cat).font(t::sans(11.5)).color(t::FAINT));
+                    }
+                    first = false;
+                    let key = format!("factory:{}", name.to_lowercase().replace(' ', "-"));
+                    row(ui, name, &|| SynthPatch::factory(*i), Some(key));
+                }
             }
             if !saved.is_empty() {
                 ui.label(RichText::new("Saved").font(t::sans(11.5)).color(t::FAINT));

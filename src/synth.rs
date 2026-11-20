@@ -503,7 +503,9 @@ impl SynthPatch {
     pub fn routes_to(&self, target: ModTarget) -> impl Iterator<Item = &ModRoute> {
         self.mods.iter().filter(move |r| r.target == target)
     }
-    pub const PRESETS: [&'static str; 18] = [
+    /// Factory preset names; 0..18 are the original set (the Welcome screen and
+    /// tests refer to them by index), the rest come from `synth_presets`.
+    pub const PRESETS: [&'static str; 105] = [
         "Init",
         "Soft Pad",
         "Pluck",
@@ -522,9 +524,122 @@ impl SynthPatch {
         "Drive Organ",
         "Spectral Organ",
         "Hollow Choir",
+        "Pure Sub",
+        "808 Boom",
+        "Reese",
+        "Acid 303",
+        "FM Growl",
+        "Pluck Bass",
+        "Organ Bass",
+        "Funk Square",
+        "Click Sub",
+        "Saw Lead",
+        "Supersaw",
+        "Sync Lead",
+        "Square Lead",
+        "Brass Lead",
+        "Portamento Solo",
+        "Fifth Lead",
+        "PWM Lead",
+        "Screamer",
+        "Bell Lead",
+        "Warm Analog",
+        "String Machine",
+        "PWM Pad",
+        "Glass Pad",
+        "Choir Pad",
+        "Dark Drone",
+        "Air Layer",
+        "Shimmer Pad",
+        "Sweep Pad",
+        "Lo-fi Tape",
+        "Full Organ",
+        "E-Piano",
+        "Clav",
+        "Harpsichord",
+        "Rhodes Warm",
+        "Wurli",
+        "Toy Piano",
+        "Glass Pluck",
+        "Koto",
+        "Marimba",
+        "Trance Pluck",
+        "Muted Pluck",
+        "Bell Pluck",
+        "House Stab",
+        "Tubular",
+        "Glass Bell",
+        "FM Bell",
+        "Church Bell",
+        "Music Box",
+        "Cowbell",
+        "Handbell",
+        "Celesta",
+        "Arp Pluck",
+        "Arp Square",
+        "Arp Bell",
+        "Arp Bass",
+        "Arp Stab",
+        "Arp Chiptune",
+        "Arp Marimba",
+        "Arp Acid",
+        "Arp Organ",
+        "Riser",
+        "Downlifter",
+        "Laser",
+        "Wind",
+        "Siren",
+        "Robot",
+        "Noise Sweep",
+        "Alien Vowel",
+        "Impact",
+        "Synth Kick 909",
+        "Synth Kick 808",
+        "Synth Snare",
+        "Synth Clap",
+        "Synth Closed Hat",
+        "Synth Open Hat",
+        "Synth Tom",
+        "Synth Rim",
+        "Synth Cowbell",
+        "NES Square",
+        "Pulse Wave",
+        "Triangle Bass",
+        "Noise Snare",
+        "Chip Arp",
+        "Game Over",
+        "Coin",
+        "Boss Bass",
+        "SID Lead",
     ];
+    /// The category of each factory preset (one per preset, by role in a mix).
+    pub const CATEGORIES: [&'static str; 105] = [
+        "Init", "Pad", "Pluck", "Bass", "Lead", "Keys", "Bass", "Bell", "Pad", "Pluck", "Bass",
+        "Keys", "Bass", "Lead", "Bell", "Keys", "Keys", "Pad", "Bass", "Bass", "Bass", "Bass",
+        "Bass", "Bass", "Bass", "Bass", "Bass", "Lead", "Lead", "Lead", "Lead", "Lead", "Lead",
+        "Lead", "Lead", "Lead", "Lead", "Pad", "Pad", "Pad", "Pad", "Pad", "Pad", "Pad", "Pad",
+        "Pad", "Pad", "Keys", "Keys", "Keys", "Keys", "Keys", "Keys", "Keys", "Pluck", "Pluck",
+        "Pluck", "Pluck", "Pluck", "Pluck", "Pluck", "Bell", "Bell", "Bell", "Bell", "Bell",
+        "Bell", "Bell", "Bell", "Arp", "Arp", "Arp", "Arp", "Arp", "Arp", "Arp", "Arp", "Arp",
+        "FX", "FX", "FX", "FX", "FX", "FX", "FX", "FX", "FX", "Drum", "Drum", "Drum", "Drum",
+        "Drum", "Drum", "Drum", "Drum", "Drum", "Chiptune", "Chiptune", "Chiptune", "Chiptune",
+        "Chiptune", "Chiptune", "Chiptune", "Chiptune", "Chiptune",
+    ];
+    /// Category order in menus.
+    pub const CATEGORY_ORDER: [&'static str; 11] = [
+        "Init", "Bass", "Lead", "Pad", "Keys", "Pluck", "Bell", "Arp", "FX", "Drum", "Chiptune",
+    ];
+    /// Every factory preset, built once (menus compare patches every frame).
+    pub fn factory_all() -> &'static [SynthPatch] {
+        static ALL: std::sync::OnceLock<Vec<SynthPatch>> = std::sync::OnceLock::new();
+        ALL.get_or_init(|| (0..Self::PRESETS.len()).map(Self::factory).collect())
+    }
+
     pub fn factory(index: usize) -> Self {
         use crate::fx::FxKind;
+        if (18..Self::PRESETS.len()).contains(&index) {
+            return crate::synth_presets::extra(index - 18);
+        }
         let mut p = Self::default();
         match index {
             1 => {
@@ -687,9 +802,10 @@ impl SynthPatch {
                 // Even partials over a soft pad, the tilt breathing with LFO 1.
                 p.table = Table::Vowel;
                 p.position = 0.4;
-                p.level = 0.5;
+                p.level = 0.4;
                 p.spectral = Spectral {
-                    level: 0.8,
+                    // A chord of it stays under full scale.
+                    level: 0.5,
                     coarse: 12.0,
                     partials: 24,
                     tilt: -0.2,
