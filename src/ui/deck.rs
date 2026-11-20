@@ -806,20 +806,13 @@ impl App {
         let enabled = self.audio.is_some();
         let size = vec2(48.0, 40.0);
         let name = if playing { "Pause" } else { "Play" };
-        let r = kit::button_sized(
-            ui,
-            size,
-            kit::Kind::Primary,
-            enabled,
-            name,
-            |p, face, ink| {
-                if playing {
-                    kit::icon_pause(p, face.center(), 14.0, ink);
-                } else {
-                    kit::icon_play(p, face.center() + vec2(1.0, 0.0), 16.0, ink);
-                }
-            },
-        );
+        let r = kit::button_sized(ui, size, kit::Kind::Brand, enabled, name, |p, face, ink| {
+            if playing {
+                kit::icon_pause(p, face.center(), 14.0, ink);
+            } else {
+                kit::icon_play(p, face.center() + vec2(1.0, 0.0), 16.0, ink);
+            }
+        });
         if kit::bar_hint(
             r,
             if playing {

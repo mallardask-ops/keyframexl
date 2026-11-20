@@ -311,13 +311,15 @@ pub fn caps_fit(
 #[derive(Clone, Copy, PartialEq)]
 pub enum Kind {
     Primary,
+    /// The transport Play/Pause key: brand face, white ink.
+    Brand,
     Normal,
     Ghost,
 }
 
 /// Kit button: 34px, raised, Sans 14 (Primary: Medium, brand face, white ink).
 pub fn button(ui: &mut Ui, label: &str, kind: Kind, enabled: bool) -> Response {
-    let font = if kind == Kind::Primary {
+    let font = if matches!(kind, Kind::Primary | Kind::Brand) {
         t::medium(14.0)
     } else {
         t::sans(14.0)
@@ -380,7 +382,7 @@ pub fn paint_button(
         (control(p, rect, RADIUS, 0.0, false), t::FAINT)
     } else {
         match kind {
-            Kind::Primary if name == "Play" || name == "Pause" => (
+            Kind::Brand => (
                 raised(
                     p,
                     rect,

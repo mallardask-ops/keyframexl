@@ -497,6 +497,14 @@ impl App {
         }
     }
 
+    /// Whether insert `i` carries a real name, not its default (stored names
+    /// from FL imports and older files may spell the English default).
+    pub(crate) fn has_custom_mixer_name(&self, i: usize) -> bool {
+        self.song.mixer.get(i).is_some_and(|m| {
+            !m.name.is_empty() && m.name != format!("Insert {i}") && !(i == 0 && m.name == "Master")
+        })
+    }
+
     /// FL Ctrl+L: route the rack's selected channels to insert `to`.
     pub(crate) fn route_selected_channels(&mut self, to: u16) {
         let sel = self.rack_sel.clone();
@@ -670,7 +678,7 @@ impl App {
             );
             // A default name repeats the number, so only a real name is printed ("Inse…" says nothing).
             let full = self.mixer_name(i);
-            let named = !(full == format!("Insert {i}") || (i == 0 && full == "Master"));
+            let named = self.has_custom_mixer_name(i);
             if named {
                 let name = kit::elide(p, &full, t::sans(12.0), r.width() - 28.0);
                 p.text(
