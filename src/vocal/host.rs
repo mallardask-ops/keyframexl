@@ -101,8 +101,18 @@ fn map_of(
         if e.phrase.data.is_empty() || s.notes.is_empty() {
             continue;
         }
-        m.starts.insert(s.notes[0].id, e.phrase.clone());
-        m.members.extend(s.notes.iter().skip(1).map(|n| n.id));
+        let placed = if s.song { &mut m.song } else { &mut m.pattern };
+        placed
+            .starts
+            .insert((s.notes[0].id, s.ticks[0]), e.phrase.clone());
+        placed.members.extend(
+            s.notes
+                .iter()
+                .zip(&s.ticks)
+                .skip(1)
+                .map(|(n, &t)| (n.id, t)),
+        );
+        m.max_lead = m.max_lead.max(e.phrase.lead);
     }
     m
 }
@@ -168,6 +178,10 @@ impl Host {
             // Position matters too: a moved phrase needs a new map entry.
             h = (h ^ s.key).wrapping_mul(0x100_0000_01b3);
             h = (h ^ s.notes[0].id).wrapping_mul(0x100_0000_01b3);
+            h = (h ^ s.song as u64).wrapping_mul(0x100_0000_01b3);
+            for &t in &s.ticks {
+                h = (h ^ t as u64).wrapping_mul(0x100_0000_01b3);
+            }
             h = (h ^ s.notes.len() as u64).wrapping_mul(0x100_0000_01b3);
             for n in &s.notes {
                 h = (h ^ n.id).wrapping_mul(0x100_0000_01b3);

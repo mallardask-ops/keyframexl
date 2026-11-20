@@ -56,10 +56,16 @@ Lyrics are stored in `Pattern.lyrics` keyed by note ID, so copying notes, duplic
 
 ---
 
+## Timing and clips
+
+In song mode every Playlist clip gets its own phrases, timed through the song
+tempo map exactly as the engine times the notes (swing included); a tempo
+change inside a phrase renders it again. A clip sings the notes that start
+inside it (a clip cut mid-phrase starts singing at its first note) and its end
+cuts the phrase. Pattern mode plays each pattern as a loop at the song tempo.
+
 ## Known Limitations
 
-- **Static phrase tempo:** Phrase timing uses the song tempo and swing, but mid-phrase tempo changes in the tempo automation lane do not dynamically time-stretch an active phrase.
-- **Clip offset trimming:** A Playlist clip whose start offset cuts off the beginning of a vocal phrase will skip singing that phrase.
 - **Pitch slides & UTAU pitch curves:** Piano-roll slide notes and per-note UTAU `PBS`/`PBW` pitch-bend curves are not yet supported; pitch transitions use a cosine curve controlled by `GLIDE`.
 - **UTAU flags & external resamplers:** UTAU flags (`g`, `B`, `H`, …) and external resampler binaries are not supported — synthesis always uses the built-in WORLD engine.
 - **Live key preview:** Audition buffers are capped at 2.5 seconds per note and use the single default syllable.

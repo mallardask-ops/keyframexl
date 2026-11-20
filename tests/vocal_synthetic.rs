@@ -130,7 +130,7 @@ fn a_missing_syllable_is_reported_not_fatal() {
         &[("a", 60, 0, 4), ("ke", 62, 4, 4)],
     );
     let (map, msgs) = host::render_all(&song, 48_000);
-    assert!(!map.starts.is_empty(), "the sung part still plays");
+    assert!(!map.is_empty(), "the sung part still plays");
     // "ke" is not in the bank (け): it is listed, not silently dropped.
     assert!(msgs.iter().any(|m| m.contains("け")), "{msgs:?}");
 }
@@ -139,7 +139,7 @@ fn a_missing_syllable_is_reported_not_fatal() {
 fn a_missing_bank_is_an_error_message_and_silence() {
     let song = song_with("/nonexistent/bank", &[("a", 60, 0, 4)]);
     let (map, msgs) = host::render_all(&song, 48_000);
-    assert!(map.starts.is_empty());
+    assert!(map.is_empty());
     assert!(!msgs.is_empty());
 }
 
@@ -298,4 +298,105 @@ fn a_held_key_sings_with_the_transport_stopped() {
     e.live_on(&song, 1, 10, 62, 100);
     // The audio thread renders a stopped transport only while the engine is busy.
     assert!(e.busy(), "a sounding vocal key must keep the engine busy");
+}
+
+fn clip(start: i64, offset: i64, length: i64) -> keyframexl::sequence::Clip {
+    keyframexl::sequence::Clip {
+        pattern: 1,
+        start,
+        track: 0,
+        offset,
+        length: Some(length),
+        muted: false,
+    }
+}
+
+fn song_specs(song: &Song) -> Vec<plan::Spec> {
+    plan::plan(song, 48_000)
+        .into_iter()
+        .filter(|s| s.song)
+        .collect()
+}
+
+#[test]
+fn a_clip_cut_inside_a_phrase_sings_its_later_notes() {
+    let dir = bank();
+    // One legato phrase a + ka; the clip (at bar 2, 2 s) cuts the `a` away.
+    let mut song = song_with(
+        &dir.path().to_string_lossy(),
+        &[("a", 60, 0, 4), ("ka", 64, 4, 4)],
+    );
+    song.clips = vec![clip(BAR, 4 * STEP, 4 * STEP)];
+    let specs = song_specs(&song);
+    assert_eq!(specs.len(), 1);
+    assert_eq!(specs[0].ticks, vec![BAR], "the phrase starts at the clip");
+    assert_eq!(specs[0].notes.len(), 1);
+    let audio = keyframexl::engine::render(&song, 1, true, 48_000);
+    let mono: Vec<f32> = audio.iter().map(|f| (f[0] + f[1]) * 0.5).collect();
+    let first = mono
+        .iter()
+        .position(|v| v.abs() > 0.01)
+        .expect("the cut clip sings");
+    let clip_at = 2 * 48_000;
+    assert!(
+        first + 48_000 / 10 > clip_at && first <= clip_at,
+        "first sound at {first}, clip at {clip_at}"
+    );
+}
+
+#[test]
+fn a_clip_end_cuts_the_phrase() {
+    let dir = bank();
+    let mut song = song_with(&dir.path().to_string_lossy(), &[("a", 60, 0, 16)]);
+    song.clips = vec![clip(0, 0, 8 * STEP)];
+    let specs = song_specs(&song);
+    assert_eq!(specs.len(), 1);
+    assert!(
+        (specs[0].notes[0].end - 1.0).abs() < 1e-9,
+        "{:?}",
+        specs[0].notes[0]
+    );
+    // Pattern mode keeps the whole note.
+    let pat: Vec<_> = plan::plan(&song, 48_000)
+        .into_iter()
+        .filter(|s| !s.song)
+        .collect();
+    assert!((pat[0].notes[0].end - 2.0).abs() < 1e-9);
+}
+
+#[test]
+fn notes_inside_a_phrase_follow_the_tempo_map() {
+    use keyframexl::tempo::{TempoMap, TempoPoint, TempoShape, TempoTable};
+    let dir = bank();
+    let mut song = song_with(
+        &dir.path().to_string_lossy(),
+        &[("a", 60, 0, 4), ("ka", 64, 4, 4)],
+    );
+    song.clips = vec![clip(0, 0, BAR)];
+    let flat = song_specs(&song);
+    assert!((flat[0].notes[1].start - 0.5).abs() < 1e-9);
+    // 120 → 60 bpm across the first note: the second starts later than 0.5 s.
+    song.tempo_map = TempoMap {
+        points: vec![
+            TempoPoint {
+                tick: 0,
+                bpm: 120.0,
+                shape: TempoShape::Linear,
+            },
+            TempoPoint {
+                tick: 4 * STEP,
+                bpm: 60.0,
+                shape: TempoShape::Step,
+            },
+        ],
+    };
+    let mapped = song_specs(&song);
+    let table = TempoTable::build(&song.tempo_map, song.tempo, 48_000);
+    let want = table.frames_at(4 * STEP) / 48_000.0;
+    assert!(want > 0.6, "{want}");
+    assert!((mapped[0].notes[1].start - want).abs() < 1e-9);
+    assert_ne!(
+        mapped[0].key, flat[0].key,
+        "a tempo change renders the phrase again"
+    );
 }

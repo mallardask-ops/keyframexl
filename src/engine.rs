@@ -1262,6 +1262,8 @@ pub struct Engine {
     pub live_lyric: std::sync::Arc<std::sync::atomic::AtomicU64>,
     phrases: Vec<PhraseVoice>,
     hit_skip: usize,
+    /// The transport mode of the hits being triggered (which vocal placements apply).
+    vocal_song_mode: bool,
     /// Sampler channels with program effects (see `SamplerFx`).
     sampler_fx: Vec<SamplerFx>,
     /// Round robin: (channel, trigger group, notes counted, last zone played).
@@ -1357,6 +1359,7 @@ impl Engine {
             live_lyric: Default::default(),
             phrases: Vec::with_capacity(MAX_PHRASES),
             hit_skip: 0,
+            vocal_song_mode: false,
             sampler_fx: (0..MAX_SAMPLER_FX)
                 .map(|_| SamplerFx {
                     inst: None,
@@ -2665,6 +2668,7 @@ impl Engine {
 
     fn collect_hits(&mut self, song: &Song, pattern: u64, song_mode: bool, from: u64, to: u64) {
         self.hits.clear();
+        self.vocal_song_mode = song_mode;
         // `window`: the pattern ticks this pass plays. A clip may cut its
         // pattern, or run longer than it: then the pattern repeats (FL).
         // `start`: the clip's playlist tick (song mode), for the tempo map.
@@ -2682,27 +2686,30 @@ impl Engine {
                 if n.muted || song.instrument(n.instrument).is_none_or(|i| i.muted) {
                     continue;
                 }
-                // A vocal phrase starts at its first note, early by the syllable's preutterance;
-                // the notes after it are inside the phrase's audio.
-                let mut lead = 0usize;
-                if matches!(
+                let sings = matches!(
                     song.instrument(n.instrument).map(|i| &i.kind),
                     Some(InstrumentKind::Vocal { .. })
-                ) {
-                    if vocal.members.contains(&n.id) {
-                        continue;
-                    }
-                    match vocal.starts.get(&n.id) {
-                        Some(ph) => lead = ph.lead,
-                        None => continue,
-                    }
-                }
+                );
                 for k in first..=last {
                     let t = n.start + k * plen;
                     if t < window.0 || t >= window.1 {
                         continue;
                     }
                     let local = t - window.0;
+                    // A vocal phrase starts at its first note, early by the syllable's
+                    // preutterance; the notes after it are inside the phrase's audio.
+                    let mut lead = 0usize;
+                    if sings {
+                        let key = (n.id, start + local);
+                        let placed = vocal.placed(song_mode);
+                        if placed.members.contains(&key) {
+                            continue;
+                        }
+                        match placed.starts.get(&key) {
+                            Some(ph) => lead = ph.lead,
+                            None => continue,
+                        }
+                    }
                     let at = match &e.tempo {
                         // With tempo changes a clip's notes follow the map, not the clip's first tempo.
                         Some(table) => {
@@ -2741,7 +2748,8 @@ impl Engine {
                     let offset = self.clip_frame(song, c.start);
                     let window = (c.offset, c.offset + song.clip_len(c));
                     let span = self.clip_frame(song, window.1 - window.0);
-                    if offset < to && offset + span > from {
+                    // A phrase may start before its clip by its preutterance.
+                    if offset < to + vocal.max_lead as u64 && offset + span > from {
                         add(&mut hits, offset, c.start, pi, p, self, window);
                     }
                 }
@@ -2950,6 +2958,7 @@ impl Engine {
             InstrumentKind::Vocal { .. } => {
                 // Sequenced notes only: a phrase is rendered ahead from the score.
                 let vm = self.vocal.load();
+                let key = (n.id, score.map_or(0, |(_, t)| t));
                 if note_id & LIVE != 0 {
                     // A held key: the channel's default lyric on that pitch, from just before its consonant ends.
                     let want = self.live_lyric.load(std::sync::atomic::Ordering::Relaxed);
@@ -2977,10 +2986,10 @@ impl Engine {
                         n.pitch,
                         self.hit_clock,
                         self.block_at,
-                        vm.starts.contains_key(&n.id)
+                        vm.placed(self.vocal_song_mode).starts.contains_key(&key)
                     );
                 }
-                if let Some(ph) = vm.starts.get(&n.id)
+                if let Some(ph) = vm.placed(self.vocal_song_mode).starts.get(&key)
                     && self.phrases.len() < MAX_PHRASES
                 {
                     self.phrases.push(PhraseVoice {

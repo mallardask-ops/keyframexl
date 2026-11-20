@@ -170,8 +170,8 @@ fn looping_playback_starts_each_phrase_on_time() {
     let (map, msgs) = keyframexl::vocal::host::render_all(&song, 48_000);
     println!(
         "phrases {} members {} msgs {:?}",
-        map.starts.len(),
-        map.members.len(),
+        map.song.starts.len() + map.pattern.starts.len(),
+        map.song.members.len() + map.pattern.members.len(),
         msgs
     );
     for s in keyframexl::vocal::plan::plan(&song, 48_000) {

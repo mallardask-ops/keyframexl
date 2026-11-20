@@ -140,12 +140,25 @@ pub struct Phrase {
     pub data: Vec<f32>,
 }
 
-/// What the engine plays: phrases by the id of their first note, and the ids
-/// of the notes they cover (those start nothing of their own).
+/// Phrases placed in one transport mode, keyed by (note id, tick) as the
+/// engine's hits carry them: the playlist tick in song mode, the pattern tick
+/// in pattern mode. A pattern in two clips is two placements.
+#[derive(Default)]
+pub struct Placed {
+    /// Phrases by their first note.
+    pub starts: HashMap<(u64, crate::sequence::Tick), Arc<Phrase>>,
+    /// The notes phrases cover after their first (those start nothing).
+    pub members: HashSet<(u64, crate::sequence::Tick)>,
+}
+
+/// What the engine plays.
 #[derive(Default)]
 pub struct VocalMap {
-    pub starts: HashMap<u64, Arc<Phrase>>,
-    pub members: HashSet<u64>,
+    pub song: Placed,
+    pub pattern: Placed,
+    /// The longest `lead` of any placed phrase: a clip's first phrase may
+    /// start this many frames before the clip.
+    pub max_lead: usize,
     /// A held key's note: the channel's default lyric at each pitch of the
     /// keyboard range, by (channel, pitch).
     /// (channel, pitch, lyric hash); hash 0 is the channel's default lyric.
@@ -168,6 +181,10 @@ pub const PREVIEW_LEN: f64 = 2.5;
 
 impl VocalMap {
     pub fn is_empty(&self) -> bool {
-        self.starts.is_empty()
+        self.song.starts.is_empty() && self.pattern.starts.is_empty()
+    }
+
+    pub fn placed(&self, song_mode: bool) -> &Placed {
+        if song_mode { &self.song } else { &self.pattern }
     }
 }

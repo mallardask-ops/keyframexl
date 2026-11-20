@@ -1,7 +1,8 @@
 //! The song's vocal notes grouped into phrases.
 
 use super::{Params, RNote};
-use crate::sequence::{InstrumentKind, Song, seconds_per_step, steps, swing_offset};
+use crate::sequence::{InstrumentKind, Pattern, Song, Tick, seconds_per_step, steps, swing_offset};
+use crate::tempo::TempoTable;
 use std::hash::Hasher;
 
 /// One phrase to render, with what it depends on hashed into `key`.
@@ -12,6 +13,11 @@ pub struct Spec {
     pub params: Params,
     pub notes: Vec<RNote>,
     pub key: u64,
+    /// Song mode (placed by a playlist clip) or pattern mode.
+    pub song: bool,
+    /// Each note's tick as the engine's hit sees it: the playlist tick in
+    /// song mode, the pattern tick in pattern mode.
+    pub ticks: Vec<Tick>,
 }
 
 struct Fnv(u64);
@@ -33,10 +39,40 @@ fn hash_f(h: &mut Fnv, v: f64) {
 /// Phrases are cut where a rest is longer than this (seconds).
 pub const GAP: f64 = 0.03;
 
+/// Where a pattern plays: the pattern ticks `window` heard from playlist tick
+/// `start`, timed like the engine times the notes there.
+struct Place<'a> {
+    window: (Tick, Tick),
+    start: Tick,
+    /// Song mode: notes are cut at the clip's end.
+    song: bool,
+    table: Option<&'a TempoTable>,
+}
+
+impl Place<'_> {
+    /// Seconds from the place's first audible tick to pattern tick `t`, the
+    /// engine's way (`Engine::collect_hits`): through the tempo map when there
+    /// is one, swing included.
+    fn secs(&self, song: &Song, rate: u32, t: Tick) -> f64 {
+        let swing = song.swing.clamp(0.0, 0.6);
+        let local = t - self.window.0;
+        match self.table {
+            Some(table) => {
+                let sps = seconds_per_step(table.bpm_at(self.start + local));
+                (table.frames_at(self.start + local) - table.frames_at(self.start)) / rate as f64
+                    + swing_offset(local, sps, swing)
+            }
+            None => {
+                let sps = seconds_per_step(song.tempo);
+                steps(local) * sps + swing_offset(local, sps, swing)
+            }
+        }
+    }
+}
+
 pub fn plan(song: &Song, rate: u32) -> Vec<Spec> {
-    let sps = seconds_per_step(song.tempo);
-    let swing = song.swing.clamp(0.0, 0.6);
-    let time = |t: crate::sequence::Tick| steps(t) * sps + swing_offset(t, sps, swing);
+    let table =
+        (!song.tempo_map.is_empty()).then(|| TempoTable::build(&song.tempo_map, song.tempo, rate));
     let mut out = Vec::new();
     for inst in &song.instruments {
         let InstrumentKind::Vocal { voice } = &inst.kind else {
@@ -45,88 +81,146 @@ pub fn plan(song: &Song, rate: u32) -> Vec<Spec> {
         if inst.muted {
             continue;
         }
-        for pat in &song.patterns {
-            let mut notes: Vec<&crate::sequence::Note> = pat
-                .notes
-                .iter()
-                .filter(|n| n.instrument == inst.id && !n.muted && pat.automation.is_none())
-                .collect();
-            notes.sort_by_key(|n| (n.start, n.id));
-            // One voice: a note ends where the next begins.
-            let mut r: Vec<RNote> = Vec::new();
-            for (i, n) in notes.iter().enumerate() {
-                if let Some(prev) = i.checked_sub(1).map(|j| notes[j])
-                    && prev.start == n.start
-                {
-                    continue;
-                }
-                let end_tick = notes
-                    .iter()
-                    .skip(i + 1)
-                    .find(|m| m.start > n.start)
-                    .map(|m| m.start.min(n.end()))
-                    .unwrap_or(n.end());
-                r.push(RNote {
-                    id: n.id,
-                    start: time(n.start),
-                    end: time(end_tick),
-                    pitch: n.pitch as f64 + n.fine as f64 / 100.0,
-                    velocity: n.velocity,
-                    lyric: pat
-                        .lyrics
-                        .get(&n.id)
-                        .cloned()
-                        .unwrap_or_else(|| voice.default_lyric.clone()),
-                    vibrato: (n.mod_x as f64 * 2.0).clamp(0.0, 2.0),
-                    gender: ((n.mod_y as f64 - 0.5) * 2.0).clamp(-1.0, 1.0),
-                });
-            }
-            let mut start = 0;
-            for i in 1..=r.len() {
-                if i == r.len() || r[i].start - r[i - 1].end > GAP {
-                    let notes = r[start..i].to_vec();
-                    start = i;
-                    if notes.is_empty() {
-                        continue;
-                    }
-                    let mut h = Fnv(0xcbf2_9ce4_8422_2325);
-                    h.write(voice.bank.as_bytes());
-                    h.write(&rate.to_le_bytes());
-                    let p = &voice.params;
-                    for v in [
-                        p.vibrato_depth,
-                        p.vibrato_rate,
-                        p.vibrato_delay,
-                        p.vibrato_fade,
-                        p.transition,
-                        p.gender,
-                        p.breath,
-                    ] {
-                        hash_f(&mut h, v);
-                    }
-                    // Times relative to the first note: moving a phrase as a whole renders nothing again.
-                    let base = notes[0].start;
-                    for n in &notes {
-                        hash_f(&mut h, n.start - base);
-                        hash_f(&mut h, n.end - base);
-                        hash_f(&mut h, n.pitch);
-                        h.write(&[n.velocity]);
-                        h.write(n.lyric.as_bytes());
-                        hash_f(&mut h, n.vibrato);
-                        hash_f(&mut h, n.gender);
-                    }
-                    out.push(Spec {
-                        inst: inst.id,
-                        bank: voice.bank.clone(),
-                        params: p.clone(),
-                        notes,
-                        key: h.finish(),
-                    });
-                }
-            }
+        let sings = |p: &Pattern| {
+            p.automation.is_none() && p.notes.iter().any(|n| n.instrument == inst.id && !n.muted)
+        };
+        // Pattern mode: every pattern as a loop, no tempo map (as the engine).
+        for pat in song.patterns.iter().filter(|p| sings(p)) {
+            let place = Place {
+                window: (0, pat.length),
+                start: 0,
+                song: false,
+                table: None,
+            };
+            phrases(song, rate, inst.id, voice, pat, &place, &mut out);
+        }
+        // Song mode: each clip, timed where it sits.
+        for c in song
+            .clips
+            .iter()
+            .filter(|c| !c.muted && !song.track_muted(c.track))
+        {
+            let Some(pat) = song.pattern(c.pattern).filter(|p| sings(p)) else {
+                continue;
+            };
+            let place = Place {
+                window: (c.offset, c.offset + song.clip_len(c)),
+                start: c.start,
+                song: true,
+                table: table.as_ref(),
+            };
+            phrases(song, rate, inst.id, voice, pat, &place, &mut out);
         }
     }
     out
+}
+
+fn phrases(
+    song: &Song,
+    rate: u32,
+    inst: u64,
+    voice: &super::Voice,
+    pat: &Pattern,
+    place: &Place,
+    out: &mut Vec<Spec>,
+) {
+    let (w0, w1) = place.window;
+    let plen = pat.length.max(1);
+    // Every note start the place plays (a long clip repeats its pattern), the
+    // engine's rule: a note sounds when its start falls inside the window.
+    let mut hits: Vec<(Tick, &crate::sequence::Note)> = Vec::new();
+    for n in pat
+        .notes
+        .iter()
+        .filter(|n| n.instrument == inst && !n.muted)
+    {
+        for k in w0.div_euclid(plen)..=(w1 - 1).div_euclid(plen) {
+            let t = n.start + k * plen;
+            if (w0..w1).contains(&t) {
+                hits.push((t, n));
+            }
+        }
+    }
+    hits.sort_by_key(|(t, n)| (*t, n.id));
+    // One voice: a note ends where the next begins.
+    let mut r: Vec<RNote> = Vec::new();
+    let mut ticks: Vec<Tick> = Vec::new();
+    for (i, &(t, n)) in hits.iter().enumerate() {
+        if i > 0 && hits[i - 1].0 == t {
+            continue;
+        }
+        let mut end = hits
+            .iter()
+            .skip(i + 1)
+            .find(|(m, _)| *m > t)
+            .map(|(m, _)| (*m).min(t + n.length))
+            .unwrap_or(t + n.length);
+        if place.song {
+            end = end.min(w1);
+        }
+        r.push(RNote {
+            id: n.id,
+            start: place.secs(song, rate, t),
+            end: place.secs(song, rate, end),
+            pitch: n.pitch as f64 + n.fine as f64 / 100.0,
+            velocity: n.velocity,
+            lyric: pat
+                .lyrics
+                .get(&n.id)
+                .cloned()
+                .unwrap_or_else(|| voice.default_lyric.clone()),
+            vibrato: (n.mod_x as f64 * 2.0).clamp(0.0, 2.0),
+            gender: ((n.mod_y as f64 - 0.5) * 2.0).clamp(-1.0, 1.0),
+        });
+        ticks.push(place.start + (t - w0));
+    }
+    let mut start = 0;
+    for i in 1..=r.len() {
+        if i == r.len() || r[i].start - r[i - 1].end > GAP {
+            let notes = r[start..i].to_vec();
+            let note_ticks = ticks[start..i].to_vec();
+            start = i;
+            if notes.is_empty() {
+                continue;
+            }
+            let mut h = Fnv(0xcbf2_9ce4_8422_2325);
+            h.write(voice.bank.as_bytes());
+            h.write(&rate.to_le_bytes());
+            let p = &voice.params;
+            for v in [
+                p.vibrato_depth,
+                p.vibrato_rate,
+                p.vibrato_delay,
+                p.vibrato_fade,
+                p.transition,
+                p.gender,
+                p.breath,
+            ] {
+                hash_f(&mut h, v);
+            }
+            // Times relative to the first note: moving a phrase as a whole
+            // renders nothing again; a tempo change inside it does.
+            let base = notes[0].start;
+            for n in &notes {
+                hash_f(&mut h, n.start - base);
+                hash_f(&mut h, n.end - base);
+                hash_f(&mut h, n.pitch);
+                h.write(&[n.velocity]);
+                h.write(n.lyric.as_bytes());
+                hash_f(&mut h, n.vibrato);
+                hash_f(&mut h, n.gender);
+            }
+            out.push(Spec {
+                inst,
+                bank: voice.bank.clone(),
+                params: p.clone(),
+                notes,
+                key: h.finish(),
+                song: place.song,
+                ticks: note_ticks,
+            });
+        }
+    }
 }
 
 /// One preview per key for every singing channel: the default lyric held on that pitch.
@@ -177,6 +271,8 @@ pub fn previews(song: &Song, rate: u32) -> Vec<(u64, u8, u64, Spec)> {
                     params: p.clone(),
                     notes: vec![note],
                     key: h.finish(),
+                    song: false,
+                    ticks: vec![0],
                 },
             ));
         }
@@ -231,6 +327,8 @@ pub fn previews(song: &Song, rate: u32) -> Vec<(u64, u8, u64, Spec)> {
                         params: p.clone(),
                         notes: vec![note],
                         key: h.finish(),
+                        song: false,
+                        ticks: vec![0],
                     },
                 ));
             }
