@@ -23,6 +23,12 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 - **Demo song** (*Help → Demo song*, `keyframexl write-demo`,
   `render-demo-song`): 32 bars using every part of the program, with a
   vocal on a synthetic CC0 voice the program writes itself.
+- **User manual** (*Help → Manual*): 13 chapters built into the program,
+  with search; it works offline. The same pages are in `docs/manual/`.
+  The old menu item opened a file that did not exist.
+- The `F1` list is grouped and complete (`F8`, `Ctrl+Shift+M`, `Alt+E`,
+  `Alt+C`, `Alt+↑/↓`, `Ctrl+K` were missing); the manual's shortcut page is
+  generated from the same list.
 - New README screenshots, all taken from the demo song
   (`scripts/ux/shots.sh`).
 

@@ -161,6 +161,7 @@ vendor/          Patched local dependencies (cpal, egui_dock, vst3-host, winit)
 
 ## Documentation
 
+- [User manual](docs/manual/README.md) (also *Help → Manual* in the program)
 - [Forge — Game SFX Designer](docs/forge.md)
 - [Vocal — UTAU Singing Channels](docs/vocal.md)
 - [UI Rules & Component Reference](docs/ui-rules.md)

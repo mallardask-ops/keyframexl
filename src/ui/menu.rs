@@ -567,7 +567,7 @@ impl App {
             if item(
                 ui,
                 "Larger",
-                "Ctrl++",
+                "Ctrl+=",
                 z < UI_SCALE_MAX - 0.001,
                 "Largest size",
             ) {
@@ -741,16 +741,7 @@ impl App {
             self.show_shortcuts = true;
         }
         if item(ui, "Manual", "", true, "") {
-            let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            let manual = root.join("docs/manual.md");
-            let page = if manual.exists() {
-                manual
-            } else {
-                root.join("README.md")
-            };
-            if let Err(e) = std::process::Command::new("xdg-open").arg(&page).spawn() {
-                self.say(Tone::Bad, format!("Could not open {}: {e}", page.display()));
-            }
+            self.show_manual = true;
         }
         if item(ui, tr.help_check_updates, "", true, "") {
             self.check_for_updates(ui.ctx());
@@ -814,73 +805,47 @@ impl App {
                 );
                 ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
                 let want = filter.to_lowercase();
-                let rows: [(&str, &str); 39] = [
-                    ("Space", "Play / stop"),
-                    ("Ctrl+Space", "Pause in place"),
-                    ("L", "Pattern / song mode"),
-                    ("R", "Record audio, MIDI, and automation"),
-                    (
-                        "F5 · F6 · F7 · F9",
-                        "Playlist · Channel rack · Piano roll · Mixer",
-                    ),
-                    ("Alt+F8", "Show / hide the browser"),
-                    ("F12", "Close all windows"),
-                    ("Alt+1 · 2 · 3", "Workspaces"),
-                    ("Ctrl+Z · Ctrl+Y", "Undo · redo"),
-                    ("Ctrl+Shift+N · Ctrl+O · Ctrl+S", "New · open · save"),
-                    ("Ctrl+N", "Save new version (name_2, name_3 …)"),
-                    ("Ctrl+Shift+S", "Save as"),
-                    ("Ctrl+R", "Export wave file"),
-                    ("F2", "Rename the pattern"),
-                    ("F4", "Next empty pattern"),
-                    ("F11", "Project info"),
-                    ("Ctrl+Alt+← · →", "Previous · next song marker"),
-                    ("Ctrl+1 … 0", "Mute channel 1 … 10"),
-                    ("Ctrl+Shift+1 … 0", "Solo channel 1 … 10"),
-                    ("Ctrl+Shift+Ins", "New pattern"),
-                    ("P B D T", "Piano roll: draw · paint · delete · mute"),
-                    ("C E Z S", "Piano roll: slice · select · zoom · slide"),
-                    (
-                        "Ctrl+Q · Alt+Q",
-                        "Piano roll: quick quantize · quantize dialog",
-                    ),
-                    ("Ctrl+L", "Piano roll: quick legato · Rack: route to mixer"),
-                    ("Ctrl+U · Ctrl+G", "Piano roll: chop · glue"),
-                    ("Alt+V", "Piano roll: ghost notes"),
-                    ("Ctrl+B", "Piano roll: duplicate notes"),
-                    ("Ctrl+K", "Rack: graph editor"),
-                    ("Alt (drag)", "Skip snap"),
-                    ("Shift (knob)", "Fine adjust"),
-                    ("Double-click knob", "Reset"),
-                    ("Right-click knob", "Type, copy, paste value"),
-                    ("Ctrl+J", "Multilink to controllers"),
-                    ("Ctrl+H", "Stop all sound (MIDI panic)"),
-                    ("F10", "MIDI settings"),
-                    ("Ctrl+M", "Metronome"),
-                    ("Ctrl+T", "Typing keyboard to piano"),
-                    ("Ctrl+= · Ctrl+- · Ctrl+0", "Interface size"),
-                    ("F1", "This list"),
-                ];
+                if ui.button("Full manual").clicked() {
+                    self.show_manual = true;
+                }
                 egui::ScrollArea::vertical()
-                    .max_height(max_h - 60.0)
+                    .max_height(max_h - 90.0)
                     .show(ui, |ui| {
-                        egui::Grid::new("keys")
-                            .num_columns(2)
-                            .spacing(vec2(24.0, 4.0))
-                            .striped(true)
-                            .show(ui, |ui| {
-                                for (k, what) in rows.iter().filter(|(k, w)| {
+                        for g in super::shortcuts::GROUPS {
+                            let rows: Vec<_> = g
+                                .rows
+                                .iter()
+                                .filter(|(k, w)| {
                                     want.is_empty()
                                         || k.to_lowercase().contains(&want)
                                         || w.to_lowercase().contains(&want)
-                                }) {
-                                    ui.label(RichText::new(*k).font(t::mono(12.0)).color(t::TEXT));
-                                    ui.label(
-                                        RichText::new(*what).font(t::sans(13.0)).color(t::MUTED),
-                                    );
-                                    ui.end_row();
-                                }
-                            });
+                                        || g.title.to_lowercase().contains(&want)
+                                })
+                                .collect();
+                            if rows.is_empty() {
+                                continue;
+                            }
+                            ui.add_space(6.0);
+                            ui.label(RichText::new(g.title).font(t::medium(13.0)).color(t::TEXT));
+                            egui::Grid::new(("keys", g.title))
+                                .num_columns(2)
+                                .min_col_width(170.0)
+                                .spacing(vec2(24.0, 4.0))
+                                .striped(true)
+                                .show(ui, |ui| {
+                                    for (k, what) in rows {
+                                        ui.label(
+                                            RichText::new(*k).font(t::mono(12.0)).color(t::TEXT),
+                                        );
+                                        ui.label(
+                                            RichText::new(*what)
+                                                .font(t::sans(13.0))
+                                                .color(t::MUTED),
+                                        );
+                                        ui.end_row();
+                                    }
+                                });
+                        }
                     });
             });
         self.show_shortcuts = open;

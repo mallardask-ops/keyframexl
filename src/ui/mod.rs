@@ -13,6 +13,7 @@ mod fx_views;
 mod instrument;
 mod kit;
 mod library;
+mod manual;
 mod markdown;
 mod menu;
 mod midi_io;
@@ -28,6 +29,7 @@ mod roll;
 mod sampler;
 mod script;
 mod settings_ui;
+mod shortcuts;
 mod synth;
 mod tempo_lane;
 mod updater_ui;
@@ -302,6 +304,8 @@ pub struct App {
     /// Pattern rename in progress (F2): (pattern, text).
     renaming: Option<(u64, String)>,
     show_shortcuts: bool,
+    /// HELP → Manual window.
+    show_manual: bool,
     /// A New/Open/Quit waiting on "Save changes?".
     pub(crate) pending: Option<Pending>,
     /// The close was confirmed (or nothing was unsaved).
@@ -944,6 +948,16 @@ impl App {
         if capture && std::env::var("KFXL_CAPTURE_WELCOME").as_deref() == Ok("genres") {
             app.welcome.tab = welcome::WelcomeTab::Genres;
         }
+        // KFXL_CAPTURE_MANUAL=N opens the manual on chapter N; KFXL_CAPTURE_SHORTCUTS=1 the F1 list.
+        if capture && let Ok(n) = std::env::var("KFXL_CAPTURE_MANUAL") {
+            app.show_manual = true;
+            let n: usize = n.parse().unwrap_or(0);
+            cc.egui_ctx
+                .data_mut(|d| d.insert_temp(egui::Id::new("manual-page"), n));
+        }
+        if capture && std::env::var_os("KFXL_CAPTURE_SHORTCUTS").is_some() {
+            app.show_shortcuts = true;
+        }
         // Live checks: KFXL_CAPTURE_MIDI_IN=1 listens to MIDI keyboards,
         // KFXL_CAPTURE_PLUGINS=1 starts the plugin host and scan.
         if capture && std::env::var_os("KFXL_CAPTURE_MIDI_IN").is_some() {
@@ -1212,6 +1226,7 @@ impl App {
             saved_edits: 0,
             renaming: None,
             show_shortcuts: false,
+            show_manual: false,
             pending: None,
             quit_ok: false,
             relaunch: None,
@@ -3385,6 +3400,7 @@ impl eframe::App for App {
                 self.sync_tool_tabs();
             });
         self.shortcuts_window(ctx);
+        self.manual_window(ctx);
         self.rename_window(ctx);
         self.export_window(ctx);
         self.fx_windows_ui(ctx);
