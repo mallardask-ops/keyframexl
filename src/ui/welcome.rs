@@ -346,6 +346,7 @@ pub fn build_forge_recipe_song(recipe_idx: usize) -> Song {
 pub enum WelcomeTab {
     #[default]
     Templates,
+    Genres,
     Tide,
     Forge,
 }
@@ -368,6 +369,7 @@ pub enum WelcomeAction {
     LoadTemplate(TemplateKind),
     LoadTidePreset(usize),
     LoadForgeRecipe(usize),
+    LoadGenre(keyframexl::genres::Genre),
     Close,
 }
 
@@ -856,33 +858,72 @@ fn right_column(
     rui.spacing_mut().item_spacing = vec2(GAP, GAP);
 
     let tide_label = format!("{} ({})", copy.tab_tide, SynthPatch::PRESETS.len());
-    let tabs = [copy.tab_templates, tide_label.as_str(), copy.tab_forge];
+    let tabs = [
+        copy.tab_templates,
+        "Genres",
+        tide_label.as_str(),
+        copy.tab_forge,
+    ];
     let selected = match state.tab {
         WelcomeTab::Templates => 0,
-        WelcomeTab::Tide => 1,
-        WelcomeTab::Forge => 2,
+        WelcomeTab::Genres => 1,
+        WelcomeTab::Tide => 2,
+        WelcomeTab::Forge => 3,
     };
     let (clicked, _) = kit::chips(&mut rui, "welcome-tabs", &tabs, selected, None);
     if let Some(i) = clicked {
-        let next = [WelcomeTab::Templates, WelcomeTab::Tide, WelcomeTab::Forge][i];
+        let next = [
+            WelcomeTab::Templates,
+            WelcomeTab::Genres,
+            WelcomeTab::Tide,
+            WelcomeTab::Forge,
+        ][i];
         if next != state.tab {
             state.tab = next;
             state.query.clear();
         }
     }
 
-    if state.tab == WelcomeTab::Templates {
+    if matches!(state.tab, WelcomeTab::Templates | WelcomeTab::Genres) {
+        let genres = state.tab == WelcomeTab::Genres;
         egui::ScrollArea::vertical()
             .id_salt("welcome-templates")
             .auto_shrink([false, false])
             .show(&mut rui, |ui| {
                 ui.spacing_mut().item_spacing = vec2(GAP, GAP);
                 let w = ((ui.available_width() - GAP) / 2.0).floor() - 2.0;
-                for pair in TemplateKind::ALL.chunks(2) {
+                if !genres {
+                    for pair in TemplateKind::ALL.chunks(2) {
+                        ui.horizontal(|ui| {
+                            for kind in pair {
+                                if template_card(ui, *kind, copy, w) {
+                                    action.get_or_insert(WelcomeAction::LoadTemplate(*kind));
+                                }
+                            }
+                        });
+                    }
+                    return;
+                }
+                // Genre starters: a groove, chords and a mix, ready to play.
+                let colors = [
+                    t::WAIT,
+                    t::BRAND,
+                    t::ENC_BLUE,
+                    t::ENC_ORANGE,
+                    t::ENC_GREEN,
+                    t::ENC_WHITE,
+                    t::ENC_BLUE,
+                ];
+                for pair in keyframexl::genres::Genre::ALL.chunks(2) {
                     ui.horizontal(|ui| {
-                        for kind in pair {
-                            if template_card(ui, *kind, copy, w) {
-                                action.get_or_insert(WelcomeAction::LoadTemplate(*kind));
+                        for g in pair {
+                            let song_tag = format!("{:.0} BPM", g.tempo());
+                            let accent = colors[keyframexl::genres::Genre::ALL
+                                .iter()
+                                .position(|x| x == g)
+                                .unwrap_or(0)];
+                            if card(ui, g.title(), g.blurb(), &song_tag, accent, w) {
+                                action.get_or_insert(WelcomeAction::LoadGenre(*g));
                             }
                         }
                     });
@@ -969,7 +1010,18 @@ fn search_field(ui: &mut Ui, query: &mut String, copy: &WelcomeCopy) {
 
 fn template_card(ui: &mut Ui, kind: TemplateKind, copy: &WelcomeCopy, w: f32) -> bool {
     let i = kind.index();
-    let title = copy.template_titles[i];
+    card(
+        ui,
+        copy.template_titles[i],
+        copy.template_descs[i],
+        kind.tag(),
+        kind.accent(),
+        w,
+    )
+}
+
+/// A Welcome card: stripe, title, description, a caps tag at the bottom.
+fn card(ui: &mut Ui, title: &str, desc: &str, tag: &str, accent: egui::Color32, w: f32) -> bool {
     let (rect, r) = ui.allocate_exact_size(vec2(w, CARD_H), Sense::click());
     r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, title));
     let hover = kit::hover_amount(ui, &r);
@@ -981,7 +1033,7 @@ fn template_card(ui: &mut Ui, kind: TemplateKind, copy: &WelcomeCopy, w: f32) ->
         pos2(face.left() + 8.0, face.top() + 10.0),
         pos2(face.left() + 12.0, face.bottom() - 10.0),
     );
-    p.rect_filled(stripe, 2.0, kind.accent());
+    p.rect_filled(stripe, 2.0, accent);
     let x = face.left() + 24.0;
     let text_w = face.right() - x - 12.0;
     let dy = if down { 1.0 } else { 0.0 };
@@ -992,18 +1044,13 @@ fn template_card(ui: &mut Ui, kind: TemplateKind, copy: &WelcomeCopy, w: f32) ->
         t::medium(14.0),
         t::TEXT,
     );
-    let desc = p.layout(
-        copy.template_descs[i].to_string(),
-        t::sans(12.0),
-        t::MUTED,
-        text_w,
-    );
+    let desc = p.layout(desc.to_string(), t::sans(12.0), t::MUTED, text_w);
     p.galley(pos2(x, face.top() + 34.0 + dy), desc, t::MUTED);
     kit::caps(
         p,
         pos2(x, face.bottom() - 10.0 + dy),
         Align2::LEFT_BOTTOM,
-        kind.tag(),
+        tag,
         12.0,
         t::FAINT,
     );

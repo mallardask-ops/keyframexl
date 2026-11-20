@@ -891,6 +891,10 @@ impl App {
         }
         app.welcome_open = (!capture && !opened_cli && app.settings.general.show_welcome)
             || (capture && std::env::var_os("KFXL_CAPTURE_WELCOME").is_some());
+        // KFXL_CAPTURE_WELCOME=genres opens it on the Genres tab.
+        if capture && std::env::var("KFXL_CAPTURE_WELCOME").as_deref() == Ok("genres") {
+            app.welcome.tab = welcome::WelcomeTab::Genres;
+        }
         // Live checks: KFXL_CAPTURE_MIDI_IN=1 listens to MIDI keyboards,
         // KFXL_CAPTURE_PLUGINS=1 starts the plugin host and scan.
         if capture && std::env::var_os("KFXL_CAPTURE_MIDI_IN").is_some() {
@@ -1978,6 +1982,15 @@ impl App {
                     format!("Started template: {title}"),
                     with_kit,
                     open_inst,
+                );
+            }
+            welcome::WelcomeAction::LoadGenre(g) => {
+                let song = g.build();
+                self.load_welcome_song(
+                    song,
+                    format!("Started template: {}", g.title()),
+                    false,
+                    None,
                 );
             }
             welcome::WelcomeAction::LoadTidePreset(idx) => {

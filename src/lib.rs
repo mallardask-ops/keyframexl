@@ -202,6 +202,7 @@ pub mod flp;
 mod flp_fx;
 pub mod forge;
 pub mod fx;
+pub mod genres;
 pub mod kits;
 pub mod legacy;
 pub mod link;
