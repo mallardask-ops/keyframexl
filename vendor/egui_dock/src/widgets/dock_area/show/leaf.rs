@@ -1437,7 +1437,18 @@ impl<Tab> DockArea<'_, Tab> {
                             true
                         }
                     }
-                    _ => unreachable!("collections of nodes can't be dragged (yet)"),
+                    // A tab group dragged by its grip: every tab must be allowed
+                    // in a window (as in `show_drag_drop_overlay`).
+                    TreeComponent::Node(d_surf, d_node) => {
+                        if let Node::Leaf { tabs, .. } = &mut self.dock_state[d_surf][d_node] {
+                            surface_index == SurfaceIndex::main()
+                                || tabs.iter_mut().all(|t| tab_viewer.allowed_in_windows(t))
+                        } else {
+                            true
+                        }
+                    }
+                    // A floating window dragged whole.
+                    TreeComponent::Surface(_) => true,
                 },
                 _ => true,
             };

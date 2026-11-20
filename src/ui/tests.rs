@@ -1777,3 +1777,58 @@ fn a_new_project_gets_the_built_in_drums_and_kits_add_as_channels() {
     app.undo();
     assert_eq!(app.song.instruments.len(), before);
 }
+
+/// A tab group dragged by its grip (the left edge of its tab bar) over another
+/// panel: egui_dock hit `unreachable!` on the hover check and closed the app.
+#[test]
+fn dragging_a_tab_group_by_its_grip_does_not_crash() {
+    struct Viewer;
+    impl egui_dock::TabViewer for Viewer {
+        type Tab = u8;
+        fn title(&mut self, tab: &mut u8) -> egui::WidgetText {
+            format!("Tab {tab}").into()
+        }
+        fn ui(&mut self, ui: &mut egui::Ui, tab: &mut u8) {
+            ui.label(format!("{tab}"));
+        }
+    }
+    let mut dock = egui_dock::DockState::new(vec![1u8, 2]);
+    dock.main_surface_mut()
+        .split_right(egui_dock::NodeIndex::root(), 0.5, vec![3]);
+    let ctx = egui::Context::default();
+    let frame = |dock: &mut egui_dock::DockState<u8>, events: Vec<Event>| {
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                // As the app shows its dock: no collapse buttons left of the grip.
+                egui_dock::DockArea::new(dock)
+                    .show_leaf_collapse_buttons(false)
+                    .show_leaf_close_all_buttons(false)
+                    .show_inside(ui, &mut Viewer);
+            });
+        });
+    };
+    frame(&mut dock, vec![]);
+    // The grip sits at the left of the first leaf's tab bar.
+    let leaf = dock.main_surface()[egui_dock::NodeIndex::root().left()]
+        .rect()
+        .expect("laid out");
+    let grip = leaf.left_top() + vec2(9.0, 12.0);
+    let over = pos2(600.0, 300.0);
+    frame(
+        &mut dock,
+        vec![Event::PointerMoved(grip), button(grip, true, true)],
+    );
+    for k in 1..=10 {
+        let p = grip + (over - grip) * (k as f32 / 10.0);
+        frame(&mut dock, vec![Event::PointerMoved(p)]);
+    }
+    frame(&mut dock, vec![button(over, true, false)]);
+    frame(&mut dock, vec![]);
+    let tabs: usize = dock.iter_all_tabs().count();
+    assert_eq!(tabs, 3, "no tab lost");
+}
