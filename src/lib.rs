@@ -196,6 +196,7 @@ mod project_tests {
 
 pub mod automation;
 pub mod bundle;
+pub mod denormal;
 pub mod engine;
 pub mod flp;
 mod flp_fx;

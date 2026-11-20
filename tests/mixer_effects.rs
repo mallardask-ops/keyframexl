@@ -65,3 +65,35 @@ fn pan_preserves_mono_source_power_and_gate_rejects_low_level_noise() {
     gate.process(&params, &mut signal, 48000., 120.);
     assert!(signal.last().unwrap() > &0.199);
 }
+
+/// Reverb tails decay into subnormals; with FTZ the silent tail must cost no
+/// more than the loud part (without it the tail ran several times slower).
+#[test]
+fn reverb_tail_never_goes_subnormal() {
+    std::thread::spawn(|| {
+        let run = |ftz: bool| {
+            if ftz {
+                keyframexl::denormal::flush_to_zero();
+            }
+            let slot = FxSlot::new(FxKind::Reverb);
+            let mut fx = FxState::new(FxKind::Reverb, 48000.);
+            let mut buf = vec![0.0f32; 512];
+            buf[0] = 1.0;
+            let mut subnormal_blocks = 0;
+            for _ in 0..4000 {
+                fx.process(&slot.params, &mut buf, 48000., 120.);
+                if buf.iter().any(|v| v.is_subnormal()) {
+                    subnormal_blocks += 1;
+                }
+                buf.fill(0.0);
+            }
+            subnormal_blocks
+        };
+        let without = run(false);
+        let with = run(true);
+        eprintln!("subnormal blocks: without FTZ {without}, with {with}");
+        assert_eq!(with, 0);
+    })
+    .join()
+    .unwrap();
+}

@@ -1660,6 +1660,7 @@ impl Engine {
         out: &mut [f32],
         looping: bool,
     ) -> u64 {
+        crate::denormal::flush_to_zero();
         out.fill(0.0);
         let frames = out.len() / 2;
         self.prepare_buses(song.mixer.len().max(1), frames);
@@ -2827,6 +2828,7 @@ impl Engine {
 
     /// Render only what sounds (live notes, ringing tails) with the transport stopped.
     pub fn process_live(&mut self, song: &Song, out: &mut [f32]) {
+        crate::denormal::flush_to_zero();
         out.fill(0.0);
         self.auto.clear();
         let frames = out.len() / 2;

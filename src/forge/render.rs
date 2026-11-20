@@ -27,6 +27,7 @@ const BLOCK: usize = 512;
 const TEMPO: f32 = 120.0;
 
 pub fn render(p: &ForgePatch) -> Rendered {
+    crate::denormal::flush_to_zero();
     let m = p.macros;
     let size = m.size - 0.5;
     let base = LayerCtx {

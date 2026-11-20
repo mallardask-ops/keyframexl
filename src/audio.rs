@@ -863,6 +863,7 @@ impl Audio {
                 &config,
                 move |data: &mut [f32], _| {
                     tick.fetch_add(1, Ordering::Relaxed);
+                    keyframexl::denormal::flush_to_zero();
                     // Newest song first, even while stopped, so Play starts current.
                     fx_rx.drain(&mut engine);
                     while let Ok(cmd) = tap_cmd_rx.pop() {
