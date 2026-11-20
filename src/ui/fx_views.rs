@@ -1037,7 +1037,7 @@ fn face_dial(
         p.line_segment(
             [center + ray * r, center + ray * (r + 3.0)],
             Stroke::new(
-                2.0,
+                2.0_f32,
                 if on { color } else { Color32::from_gray(55) },
             ),
         );

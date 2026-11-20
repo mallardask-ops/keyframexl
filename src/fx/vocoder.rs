@@ -138,7 +138,7 @@ mod tests {
     fn a_silent_modulator_closes_the_bands() {
         let input = saw(220.0, 4800);
         let key = vec![0.0f32; input.len()];
-        let mut p = FxKind::Vocoder.defaults();
+        let p = FxKind::Vocoder.defaults();
         let mut st = FxState::new(FxKind::Vocoder, RATE);
         let mut buf = input.clone();
         for (b, k) in buf.chunks_mut(1024).zip(key.chunks(1024)) {
@@ -151,7 +151,7 @@ mod tests {
     fn a_modulator_opens_the_matching_band() {
         let input = saw(220.0, 9600);
         let key = sine(1000.0, 9600);
-        let mut p = FxKind::Vocoder.defaults();
+        let p = FxKind::Vocoder.defaults();
         let mut st = FxState::new(FxKind::Vocoder, RATE);
         let mut buf = input.clone();
         for (b, k) in buf.chunks_mut(1024).zip(key.chunks(1024)) {

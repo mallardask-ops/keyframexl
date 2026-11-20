@@ -540,7 +540,7 @@ fn reopening_closed_playlist_uses_focused_main_pane() {
     // Open Mixer as a tab beside Rack (not root/Playlist), focus it, close Playlist.
     app.win(Cmd::Show(Tab::Mixer));
     app.apply_win_cmds(area);
-    let (ms, mn, _) = app.ws.dock().find_tab(&Tab::Mixer).unwrap();
+    let (ms, _, _) = app.ws.dock().find_tab(&Tab::Mixer).unwrap();
     app.win(Cmd::Close(Tab::Playlist));
     app.apply_win_cmds(area);
     assert!(app.ws.dock().find_tab(&Tab::Playlist).is_none());

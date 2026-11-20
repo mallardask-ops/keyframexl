@@ -43,8 +43,6 @@ pub fn cached(path: &Path) -> Option<Arc<Ir>> {
 
 /// The longest IR the convolution accepts, in seconds.
 const MAX_IR_S: f32 = 0.6;
-/// Frames per FFT block; longer engine blocks are split.
-const CHUNK: usize = 512;
 const MAX_PRE_S: f32 = 0.2;
 
 fn resample(taps: &[f32], from: f32, to: f32) -> Vec<f32> {

@@ -19,10 +19,6 @@ pub const CURRENT_VERSION: &str = match option_env!("KFXL_BUILD_VERSION") {
     None => env!("CARGO_PKG_VERSION"),
 };
 
-/// Whether this binary is a nightly build.
-pub fn is_nightly_build() -> bool {
-    CURRENT_VERSION.contains("-nightly")
-}
 /// Automatic background checks run at most once every 24 hours.
 pub const AUTO_CHECK_INTERVAL_SECS: u64 = 24 * 60 * 60;
 

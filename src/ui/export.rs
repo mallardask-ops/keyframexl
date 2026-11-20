@@ -198,7 +198,9 @@ impl App {
 
     /// Start rendering on a worker thread.
     pub(crate) fn start_export(&mut self) {
-        let Some(d) = &self.export else { return };
+        if self.export.is_none() {
+            return;
+        }
         if let Some(error) = self.song.instruments.iter().filter(|i| !i.muted)
             .filter_map(|i| i.plugin().map(|p| (i, p)))
             .filter(|(_, p)| crate::fl_native::slot(&p.path).is_some())
