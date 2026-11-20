@@ -21,8 +21,9 @@ This document tracks what has already been built in KeyFrameXL and what remains 
   - *Zone:* Semi `±36`, Fine `±50`, Key Tracking `±100%`, Gain, Pan, Velocity range, Amp DAHDSR, Loop modes (`Disabled`, `Forward`, `One Shot`, `Sustained`, `Bounce`), Reverse, Start offset, Mute group, **Round-robin trigger groups** (`Normal` / `Cycle` / `Random` / `AvoidPrevious`), and **per-voice FX** (Ringmod, Decimator, Quantizer, 4-stage Phaser).
   - *Filters & Modulation:* Dual TPT SVF filters (`Off`, `LP`, `HP`, `BP`, `Notch`, `Allpass`, Serial/Parallel), `ENV 1/2`, `LFO 1/2` (8 waveforms, Rate, Attack, Phase, Sync/Free Run), and a 16-slot Modulation Matrix.
   - *Native DirectWave `.dwp` Reader (`src/dwp.rs`):* Reads `DwPr` binary presets directly (v36/v37/v38, embedded FLAC & planar PCM monoliths, external WAV/FLAC/OGG, dual filters, `ENV 1/2`, `LFO 1/2`, Program LFOs, and full 16-slot modulation matrix) with zero external tools required, plus ConvertWithMoss fallback for non-`DwPr` files (see [dwp-validation.md](dwp-validation.md)).
-- **KeyFrame Tide (`src/synth.rs`)** — native polyphonic synthesizer with 18 factory presets.
-- **Forge (`src/forge/`)** — 6-layer procedural game SFX designer with recipes, project game styles, macros, deterministic mutations, channel bouncing, and batch WAV/OGG export (see [forge.md](forge.md)).
+- **KeyFrame Tide (`src/synth.rs`, `src/synth_presets.rs`)** — native polyphonic synthesizer with 105 factory presets in ten categories, each checked by a render test (silence, clipping, DC, subnormals, determinism).
+- **Forge (`src/forge/`)** — 6-layer procedural game SFX designer with 51 recipes in ten categories, each made at its category's level, project game styles, macros, deterministic mutations, channel bouncing, and batch stereo/mono WAV/OGG export (see [forge.md](forge.md)).
+- **Built-in drum kits (`src/kits.rs`)** — KFX Core (808/909-style) and KFX Chip, synthesised from Forge recipes; new projects start on Core.
 - **Vocal (`src/vocal/`)** — UTAU singing voice channels using an embedded WORLD vocoder, per-note lyrics in the Piano Roll, and background phrase rendering/caching (see [vocal.md](vocal.md)).
 
 ### Mixer, Effects & Plugin Hosting
@@ -35,8 +36,8 @@ This document tracks what has already been built in KeyFrameXL and what remains 
 - **Unified Parameter Automation (`src/automation.rs`, `src/ui/automation.rs`, `src/engine.rs`)** — `TOOLS → Last tweaked` actions (*Create automation clip*, *Link to controller…*, *Copy/Paste value*, *Reset to default*), live automation recording during `Record + Play` with Ramer–Douglas–Peucker point thinning and single-step undo, and click-free 5 ms per-sample/per-block parameter smoothing in the audio engine.
 - **FL Studio Interop (`src/flp.rs`, `src/flp_fx.rs`, `src/fl_link.rs`, `src/flp_freeze.rs`)** — `.flp` project importer plus experimental FL Link and channel freezing helpers.
 - **Project I/O, Packaging & Audio Export (`src/project_io.rs`, `src/bundle.rs`, `src/render.rs`, `src/ui/export.rs`)** — self-contained `.kfxl` projects (Save, Save As, Recent files, unsaved-change guard, autosave recovery), **Project bundle (`.zip`, "Collect all & save")** export & import with external IR packaging, plugin/voicebank inventory (`manifest.json` + `README.txt`), and multi-format rendering to **WAV** (16/24-bit, 32-bit float), **FLAC** (16/24-bit), and **MP3** (128/192/320 kbps).
-- **Deck Monitor & Update Checker (`src/ui/deck.rs`, `src/updater.rs`, `src/ui/updater_ui.rs`)** — optional recessed Master **Oscilloscope / Spectrum** monitor in the top transport deck (`VIEW → Deck monitor`), and a non-intrusive, zero-telemetry GitHub Releases/Tags **Update Checker** (`HELP → Check for updates…`, daily rate-limited background check with `KFXL_NO_UPDATE_CHECK=1` opt-out and skip-version support).
-- **Welcome Screen, Localization & Release CI (`src/ui/welcome.rs`, `src/i18n.rs`, `.github/workflows/`)** — FL-style startup hub (`HELP → Welcome screen…`, toggleable in `Settings → General`) with Recent projects, 6 starter templates, searchable KeyFrame Tide & Forge preset launchers, and quick actions; live **English / Ukrainian** UI localization (`Settings → General → Language`, Cyrillic-ready bundled IBM Plex Sans); and automated Ubuntu Linux GitHub Actions CI (`ci.yml`) + tagged `keyframexl-linux-x86_64.tar.gz` release publishing (`release.yml`).
+- **Deck Monitor & Self-Updater (`src/ui/deck.rs`, `src/updater.rs`, `src/ui/updater_ui.rs`)** — optional recessed Master **Oscilloscope / Spectrum** monitor in the top transport deck (`VIEW → Deck monitor`), and a zero-telemetry GitHub Releases updater (`HELP → Check for updates…`) that downloads, SHA-256-verifies and installs a release in place, then restarts; it follows nightly builds (a prerelease for every push to `main`) or stable releases only.
+- **Welcome Screen, Localization & Release CI (`src/ui/welcome.rs`, `src/i18n.rs`, `.github/workflows/`)** — FL-style startup hub (`HELP → Welcome screen…`, toggleable in `Settings → General`) with Recent projects, 6 starter templates, 7 genre starters (lo-fi, trap, house, synthwave, chiptune, DnB, ambient), a 32-bar demo song (`HELP → Demo song`), searchable KeyFrame Tide & Forge preset launchers, and quick actions; live **English / Ukrainian** UI localization (`Settings → General → Language`, Cyrillic-ready bundled IBM Plex Sans); and automated Ubuntu Linux GitHub Actions CI (`ci.yml`) + tagged `keyframexl-linux-x86_64.tar.gz` release publishing (`release.yml`).
 
 ---
 
@@ -44,18 +45,21 @@ This document tracks what has already been built in KeyFrameXL and what remains 
 
 ### Audio Backend & Realtime Polish
 - **Native PipeWire streams** — move from the PipeWire-ALSA bridge (`cpal 0.15` + `PIPEWIRE_LATENCY` tuning) to direct native PipeWire (`cpal 0.18+` or `pipewire-rs`) graph nodes.
-- **Lock-free sequence edit streaming** — extend the `rtrb` live parameter queue to stream pattern note/clip mutations without snapshotting `Song`.
+- **Per-note edit streaming** — song snapshots already share unchanged patterns (an edit copies one pattern); a note overlay queue would make frame-by-frame note edits free as well.
 
 ### Sampler & DirectWave Fidelity
 - **Time Stretch / Beat Sync / Tick Slice** — tempo-synced granular/phase-vocoder sample stretching and slice playback modes.
 
 ### Workflow & UI Polish
-- **Vocal engine upgrades** — dynamic mid-phrase tempo-map stretching, clip-offset vocal slicing, and per-note pitch-bend curves.
+- **Vocal pitch curves** — per-note portamento, vibrato and pitch points (UTAU Mode2 / OpenUtau style) with a lane in the Piano Roll.
+- **FL Studio import** — FL native generators (3x Osc, Sytrus) and the remaining effects mapped to built-ins; slot enable/send automation.
+- **FL Link** — a status UI for the FL Studio bridge (connect, latency, reconnect).
+- **Full Ukrainian translation** — every window, status line and hint.
 - **UI polish** — optional Light theme and toolbar/deck customization.
 
 ---
 
 ## Explicitly Out of Scope
 
-- **Windows & macOS support** — KeyFrameXL targets Linux exclusively (ALSA/PipeWire, X11/XCB plugin embedding, UNIX IPC, Wine/yabridge).
+- **Windows & macOS support** — deferred, not refused: [porting.md](porting.md) lists what a port needs (audio backends, plugin GUI embedding, IPC, packaging).
 - **Online / account ecosystems** — no cloud sync, built-in store, news feeds, or DRM/licensing dialogs.
