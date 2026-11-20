@@ -108,7 +108,7 @@ impl Effect for Reverb {
         let wet_gain = if room_model { 2.0 } else { 3.0 };
         let (wet, dry) = (p[4] / 100.0 * wet_gain, p[5] / 100.0);
         let (w1, w2) = (wet * (width / 2.0 + 0.5), wet * ((1.0 - width) / 2.0));
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             let mut early = [0.0; 2];
             let x = if room_model {
                 let len = room_input.len();

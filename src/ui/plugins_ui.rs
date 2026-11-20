@@ -251,20 +251,17 @@ impl App {
             if stale {
                 self.unload_plugin(r.id);
             }
-            if !self.plugins.live.contains_key(&r.id) {
-                self.plugins.live.insert(
-                    r.id,
-                    Live {
-                        path: r.path.clone(),
-                        proc: None,
-                        name: r.name.clone(),
-                        gui: false,
-                        editor: false,
-                        error: None,
-                        show_when_loaded: false,
-                        outs: 0,
-                    },
-                );
+            if let std::collections::hash_map::Entry::Vacant(e) = self.plugins.live.entry(r.id) {
+                e.insert(Live {
+                    path: r.path.clone(),
+                    proc: None,
+                    name: r.name.clone(),
+                    gui: false,
+                    editor: false,
+                    error: None,
+                    show_when_loaded: false,
+                    outs: 0,
+                });
                 if crate::fl_link::is_link(std::path::Path::new(&r.path))
                     && let Err(e) = crate::fl_link::ensure_relay()
                 {
@@ -734,10 +731,9 @@ impl App {
             .live
             .get(&id)
             .is_some_and(|l| l.proc.is_none() && l.error.is_none())
+            && let Some(l) = self.plugins.live.get_mut(&id)
         {
-            if let Some(l) = self.plugins.live.get_mut(&id) {
-                l.show_when_loaded = true;
-            }
+            l.show_when_loaded = true;
         }
         if let Some(ch) = self
             .song
@@ -1574,9 +1570,7 @@ impl App {
                         *slot = fresh;
                     } else {
                         self.plugins.list.push(fresh);
-                        self.plugins
-                            .list
-                            .sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                        self.plugins.list.sort_by_key(|a| a.name.to_lowercase());
                     }
                     single_done = true;
                 }
@@ -2128,20 +2122,6 @@ impl App {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn value_text_is_tidied() {
-        assert_eq!(tidy_value("0.0000000"), "0");
-        assert_eq!(tidy_value("-6.0200001 dB"), "-6.02 dB");
-        assert_eq!(tidy_value("1.5000000"), "1.5");
-        assert_eq!(tidy_value("Off"), "Off");
-        assert_eq!(tidy_value("440 Hz"), "440 Hz");
-    }
-}
-
 /// The FL Studio live link channel: FL runs on its own (FLEX works only
 /// there); this shows whether the pieces are up and starts FL.
 fn fl_link_panel(ui: &mut egui::Ui) {
@@ -2210,4 +2190,18 @@ fn fl_link_panel(ui: &mut egui::Ui) {
             .font(t::sans(12.0))
             .color(t::FAINT),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn value_text_is_tidied() {
+        assert_eq!(tidy_value("0.0000000"), "0");
+        assert_eq!(tidy_value("-6.0200001 dB"), "-6.02 dB");
+        assert_eq!(tidy_value("1.5000000"), "1.5");
+        assert_eq!(tidy_value("Off"), "Off");
+        assert_eq!(tidy_value("440 Hz"), "440 Hz");
+    }
 }

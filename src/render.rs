@@ -379,7 +379,12 @@ pub fn render_range(
         left -= n;
     }
     out.drain(..(lag * 2).min(out.len()));
-    let mut frames: Vec<[f32; 2]> = out.chunks_exact(2).map(|c| [c[0], c[1]]).collect();
+    let mut frames: Vec<[f32; 2]> = out
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| [c[0], c[1]])
+        .collect();
     if tail == Tail::Wrap && frames.len() > length as usize {
         let ring = frames.split_off(length as usize);
         for (i, f) in ring.iter().enumerate() {

@@ -230,7 +230,7 @@ fn synth_note(patch: &crate::synth::SynthPatch, key: u8, frames: usize) -> Vec<[
         }
         block.fill(0.0);
         engine.process_live(&song, &mut block);
-        out.extend(block.chunks_exact(2).map(|f| [f[0], f[1]]));
+        out.extend(block.as_chunks::<2>().0.iter().map(|f| [f[0], f[1]]));
     }
     out.truncate(frames);
     out

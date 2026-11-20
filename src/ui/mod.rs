@@ -719,39 +719,39 @@ impl App {
             }
             if kind == Some("--capture-instrument") {
                 let id = app.default_roll();
-                if std::env::var_os("KFXL_CAPTURE_SYNTH").is_some() {
-                    if let Some(inst) = app.song.instruments.iter_mut().find(|i| i.id == id) {
-                        // KFXL_CAPTURE_SYNTH=N shows factory preset N.
-                        let preset = std::env::var("KFXL_CAPTURE_SYNTH")
-                            .ok()
-                            .and_then(|v| v.parse().ok())
-                            .unwrap_or(0);
-                        let mut patch = keyframexl::synth::SynthPatch::factory(preset);
-                        // KFXL_CAPTURE_CURVES=1: bent envelope segments.
-                        if std::env::var_os("KFXL_CAPTURE_CURVES").is_some() {
-                            patch.amp_env = keyframexl::sampler::Adsr {
-                                attack: 0.3,
-                                decay: 0.6,
-                                sustain: 0.4,
-                                release: 0.8,
-                                attack_curve: 0.7,
-                                decay_curve: 0.8,
-                                release_curve: 0.6,
-                                ..Default::default()
-                            };
-                            patch.filter_env = keyframexl::sampler::Adsr {
-                                attack: 0.5,
-                                decay: 0.4,
-                                sustain: 0.6,
-                                release: 0.5,
-                                attack_curve: -0.7,
-                                release_curve: -0.6,
-                                ..Default::default()
-                            };
-                        }
-                        inst.kind = keyframexl::sequence::InstrumentKind::Synth { patch };
-                        inst.name = "KeyFrame Tide".into();
+                if std::env::var_os("KFXL_CAPTURE_SYNTH").is_some()
+                    && let Some(inst) = app.song.instruments.iter_mut().find(|i| i.id == id)
+                {
+                    // KFXL_CAPTURE_SYNTH=N shows factory preset N.
+                    let preset = std::env::var("KFXL_CAPTURE_SYNTH")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(0);
+                    let mut patch = keyframexl::synth::SynthPatch::factory(preset);
+                    // KFXL_CAPTURE_CURVES=1: bent envelope segments.
+                    if std::env::var_os("KFXL_CAPTURE_CURVES").is_some() {
+                        patch.amp_env = keyframexl::sampler::Adsr {
+                            attack: 0.3,
+                            decay: 0.6,
+                            sustain: 0.4,
+                            release: 0.8,
+                            attack_curve: 0.7,
+                            decay_curve: 0.8,
+                            release_curve: 0.6,
+                            ..Default::default()
+                        };
+                        patch.filter_env = keyframexl::sampler::Adsr {
+                            attack: 0.5,
+                            decay: 0.4,
+                            sustain: 0.6,
+                            release: 0.5,
+                            attack_curve: -0.7,
+                            release_curve: -0.6,
+                            ..Default::default()
+                        };
                     }
+                    inst.kind = keyframexl::sequence::InstrumentKind::Synth { patch };
+                    inst.name = "KeyFrame Tide".into();
                 }
                 // KFXL_CAPTURE_FORGE=N shows a Forge channel on recipe N.
                 if let Some(n) = std::env::var("KFXL_CAPTURE_FORGE")
@@ -2787,7 +2787,7 @@ impl App {
             .or_else(|| self.multilink_status());
         let (tone, text): (Tone, &String) = match &armed {
             Some(line) => (Tone::Wait, line),
-            None => (self.status.0.clone(), &self.status.1),
+            None => (self.status.0, &self.status.1),
         };
         let ink = match tone {
             Tone::Quiet => t::MUTED,

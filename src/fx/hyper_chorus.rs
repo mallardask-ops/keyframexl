@@ -72,7 +72,7 @@ impl Effect for HyperChorus {
             .set(Shape::Lowpass, p[8].min(rate * 0.45), 0.707, 0.0, rate);
         let norm = std::f32::consts::SQRT_2 / lines as f32;
         let n = self.ring.len();
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             let dry = [f[0], f[1]];
             let (mut wl, mut wr) = (0.0f32, 0.0f32);
             for i in 0..lines {

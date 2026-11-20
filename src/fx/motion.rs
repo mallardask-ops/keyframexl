@@ -31,7 +31,7 @@ impl Effect for Tremolo {
     fn process(&mut self, p: &[f32], buf: &mut [f32], ctx: &Ctx) {
         let step = p[0] / ctx.rate;
         let shape = 1. + 12. * p[2] * 0.01;
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             let osc = self.0.next(step);
             let wave = osc * shape / (1. + (shape - 1.) * osc.abs());
             let gain = 1. - p[1] * 0.005 * (1. - wave);
@@ -45,7 +45,7 @@ pub struct AutoPan(Oscillator);
 impl Effect for AutoPan {
     fn process(&mut self, p: &[f32], buf: &mut [f32], ctx: &Ctx) {
         let step = p[0] / ctx.rate;
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             let pan = self.0.next(step) * p[1] * 0.01;
             f[0] *= (1. - pan).sqrt();
             f[1] *= (1. + pan).sqrt();
@@ -57,7 +57,7 @@ pub struct RingMod(Oscillator);
 impl Effect for RingMod {
     fn process(&mut self, p: &[f32], buf: &mut [f32], ctx: &Ctx) {
         let step = p[0] / ctx.rate;
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             let gain = 1. + p[1] * 0.01 * (self.0.next(step) - 1.);
             f[0] *= gain;
             f[1] *= gain;
@@ -73,7 +73,7 @@ pub struct Phaser {
 impl Effect for Phaser {
     fn process(&mut self, p: &[f32], buf: &mut [f32], ctx: &Ctx) {
         let step = p[0] / ctx.rate;
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             let sweep = self.osc.next(step) * p[1] * 0.01;
             let hz = 760. * (2.2 * sweep).exp2();
             let g = (PI * (hz / ctx.rate).min(0.45)).tan();

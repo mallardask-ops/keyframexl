@@ -572,7 +572,7 @@ const DRUM_NAMES: [&str; 3] = ["Kick (MIDI)", "Snare (MIDI)", "Hat (MIDI)"];
 fn drum_voice(key: u8) -> usize {
     match key {
         35 | 36 => 0,
-        37 | 38 | 39 | 40 => 1,
+        37..=40 => 1,
         42 | 44 | 46 | 49 | 51 | 52 | 53 | 55 | 57 | 59 => 2,
         _ => {
             let d36 = (36i16 - key as i16).abs();
@@ -738,10 +738,8 @@ pub fn import_smf(
                             tname = decode_name(b);
                         }
                     }
-                    MetaMessage::InstrumentName(b) => {
-                        if iname.is_none() {
-                            iname = decode_name(b);
-                        }
+                    MetaMessage::InstrumentName(b) if iname.is_none() => {
+                        iname = decode_name(b);
                     }
                     _ => {}
                 },
@@ -1205,10 +1203,9 @@ mod tests {
                     message: MidiMessage::NoteOn { key, vel },
                     ..
                 } = e.kind
+                    && vel.as_int() > 0
                 {
-                    if vel.as_int() > 0 {
-                        ons.push((abs, key.as_int()));
-                    }
+                    ons.push((abs, key.as_int()));
                 }
             }
         }

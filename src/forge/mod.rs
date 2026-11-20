@@ -602,7 +602,7 @@ pub fn user_sounds_in(dir: &std::path::Path) -> Vec<ForgePatch> {
             p
         })
         .collect();
-    v.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    v.sort_by_key(|a| a.name.to_lowercase());
     v
 }
 
@@ -742,7 +742,7 @@ mod tests {
             while out.len() < want.len() + 4800 {
                 block.fill(0.0);
                 e.process_live(&song, &mut block);
-                out.extend(block.chunks_exact(2).map(|f| [f[0], f[1]]));
+                out.extend(block.as_chunks::<2>().0.iter().map(|f| [f[0], f[1]]));
             }
             out
         };

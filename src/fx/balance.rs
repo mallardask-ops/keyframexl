@@ -17,7 +17,7 @@ impl Effect for Balance {
         // A balance control: the centre keeps both sides, the far ends mute one.
         let l = gain * if pan < 0.0 { 1.0 } else { 1.0 - pan };
         let r = gain * if pan > 0.0 { 1.0 } else { 1.0 + pan };
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             f[0] *= l;
             f[1] *= r;
         }

@@ -155,7 +155,7 @@ fn copying_a_note_copies_its_lyric_and_ids_stay_unique() {
     // A deleted note's lyric keeps its id taken, so a new note cannot inherit it by accident.
     song.patterns[0].notes.retain(|n| n.id != copy);
     let fresh = song.add_note(1, Note::new(10, 8 * STEP, STEP, 60, 100));
-    assert!(song.patterns[0].lyrics.get(&fresh).is_none());
+    assert!(!song.patterns[0].lyrics.contains_key(&fresh));
 }
 
 fn run(song: &Song, map: &std::sync::Arc<keyframexl::vocal::VocalMap>, block: usize) -> Vec<f32> {
@@ -216,13 +216,12 @@ fn a_clicked_note_sings_its_own_syllable_not_the_default() {
     let h = host::Host::new();
     h.update(&song, 48_000);
     let t0 = std::time::Instant::now();
-    while h
+    while !h
         .map
         .load()
         .previews
-        .get(&(10, 60, lyric_hash("ka")))
-        .is_none()
-        || h.map.load().previews.get(&(10, 60, 0)).is_none()
+        .contains_key(&(10, 60, lyric_hash("ka")))
+        || !h.map.load().previews.contains_key(&(10, 60, 0))
     {
         assert!(
             t0.elapsed().as_secs() < 30,
@@ -286,7 +285,7 @@ fn a_held_key_sings_with_the_transport_stopped() {
     let h = host::Host::new();
     h.update(&song, 48_000);
     let t0 = std::time::Instant::now();
-    while h.map.load().previews.get(&(10, 62, 0)).is_none() {
+    while !h.map.load().previews.contains_key(&(10, 62, 0)) {
         assert!(t0.elapsed().as_secs() < 30);
         std::thread::sleep(std::time::Duration::from_millis(20));
     }

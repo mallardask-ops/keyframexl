@@ -397,7 +397,7 @@ pub fn render_phrase(
             };
             sp[row + b] = v.exp();
             let a = apv[b].clamp(0.0, 1.0);
-            ap[row + b] = (a + (1.0 - a) * p.breath as f64 * 0.7).clamp(0.0, 0.999_999);
+            ap[row + b] = (a + (1.0 - a) * p.breath * 0.7).clamp(0.0, 0.999_999);
         }
         if voiced >= 0.5 {
             // WORLD wants a sane pitch: notes far outside a voice's range stay inside it.

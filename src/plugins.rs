@@ -739,7 +739,7 @@ pub fn rescan_one(path: &Path) -> Scanned {
     } else {
         cache.push(s.clone());
     }
-    cache.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    cache.sort_by_key(|a| a.name.to_lowercase());
     save_cache(&cache);
     s
 }
@@ -892,7 +892,7 @@ pub fn scan(extra: &[PathBuf], force: bool, progress: impl Fn(usize, usize, &str
     if let Some(link) = fl_link_entry() {
         out.push(link);
     }
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by_key(|a| a.name.to_lowercase());
     save_cache(&out);
     out
 }
@@ -1470,7 +1470,7 @@ fn fill_bus(bus: &mut [Vec<f32>], src: &[f32]) {
             .zip(src.chunks_exact(2))
             .for_each(|(m, f)| *m = (f[0] + f[1]) * 0.5),
         [l, r, rest @ ..] => {
-            for (i, f) in src.chunks_exact(2).enumerate() {
+            for (i, f) in src.as_chunks::<2>().0.iter().enumerate() {
                 l[i] = f[0];
                 r[i] = f[1];
             }
@@ -1486,7 +1486,7 @@ fn read_pair(bus: &[Vec<f32>], l: usize, r: usize, dst: &mut [f32]) {
         dst.fill(0.0);
         return;
     };
-    for (i, f) in dst.chunks_exact_mut(2).enumerate() {
+    for (i, f) in dst.as_chunks_mut::<2>().0.iter_mut().enumerate() {
         f[0] = lc[i];
         f[1] = rc[i];
     }
@@ -1668,11 +1668,10 @@ impl Vst2Proc {
         stride: usize,
         t: &Transport,
     ) -> usize {
-        let pairs = if stride == 0 {
-            0
-        } else {
-            self.extra.min(extra.len() / stride)
-        };
+        let pairs = extra
+            .len()
+            .checked_div(stride)
+            .map_or(0, |n| self.extra.min(n));
         // Opening the editor can take seconds under Wine while it holds the
         // plugin: the block plays silence instead of stalling the audio (the
         // bridge would take a stall for a hang and close the plugin).
@@ -1696,7 +1695,12 @@ impl Vst2Proc {
             }
             plugin.flush_midi();
             if !self.inputs.is_empty() {
-                for (i, f) in io[done * 2..(done + n) * 2].chunks_exact(2).enumerate() {
+                for (i, f) in io[done * 2..(done + n) * 2]
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .enumerate()
+                {
                     self.inputs[0][i] = f[0];
                     self.inputs[1][i] = f[1];
                 }
@@ -1704,7 +1708,12 @@ impl Vst2Proc {
             if self.inputs.len() == 4 {
                 match key {
                     Some(key) => {
-                        for (i, f) in key[done * 2..(done + n) * 2].chunks_exact(2).enumerate() {
+                        for (i, f) in key[done * 2..(done + n) * 2]
+                            .as_chunks::<2>()
+                            .0
+                            .iter()
+                            .enumerate()
+                        {
                             self.inputs[2][i] = f[0];
                             self.inputs[3][i] = f[1];
                         }
@@ -1720,7 +1729,12 @@ impl Vst2Proc {
                 n,
             ) {
                 let mono = plugin.info().2 < 2;
-                for (i, f) in io[done * 2..(done + n) * 2].chunks_exact_mut(2).enumerate() {
+                for (i, f) in io[done * 2..(done + n) * 2]
+                    .as_chunks_mut::<2>()
+                    .0
+                    .iter_mut()
+                    .enumerate()
+                {
                     f[0] = self.outputs[0][i];
                     f[1] = if mono {
                         self.outputs[0][i]
@@ -1731,7 +1745,7 @@ impl Vst2Proc {
                 for k in 0..pairs {
                     let (l, r) = (&self.outputs[2 + 2 * k], &self.outputs[3 + 2 * k]);
                     let lane = &mut extra[k * stride + done * 2..k * stride + (done + n) * 2];
-                    for (i, f) in lane.chunks_exact_mut(2).enumerate() {
+                    for (i, f) in lane.as_chunks_mut::<2>().0.iter_mut().enumerate() {
                         f[0] = l[i];
                         f[1] = r[i];
                     }
@@ -2184,7 +2198,7 @@ fn v2_restore(p: &mut Vst2Plugin, state: &[u8]) -> Result<(), String> {
         }
         p.set_chunk(false, chunk);
     } else if let Some(values) = state.strip_prefix(V2_PARAMS) {
-        for (i, v) in values.chunks_exact(4).enumerate() {
+        for (i, v) in values.as_chunks::<4>().0.iter().enumerate() {
             p.set_parameter(i as i32, f32::from_le_bytes([v[0], v[1], v[2], v[3]]));
         }
     } else if !state.is_empty() {

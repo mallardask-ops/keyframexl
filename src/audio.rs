@@ -46,7 +46,7 @@ impl PreviewPlayer {
         let Some(clip) = &self.clip else { return };
         let step = clip.rate as f64 / rate as f64;
         let n = clip.frames.len();
-        for f in data.chunks_exact_mut(2) {
+        for f in data.as_chunks_mut::<2>().0 {
             let i = self.pos as usize;
             if i + 1 >= n {
                 done.store(true, Ordering::Relaxed);
@@ -123,7 +123,7 @@ impl Metronome {
             }
         };
         let shaped = map.is_some() || !meters.is_empty();
-        for (i, f) in data.chunks_exact_mut(2).enumerate() {
+        for (i, f) in data.as_chunks_mut::<2>().0.iter_mut().enumerate() {
             let pos = match wrap {
                 Some((w, to)) if i >= w => to + (i - w) as u64,
                 _ => at + i as u64,
@@ -751,7 +751,7 @@ impl Audio {
                 48_000,
             ),
         };
-        let buffer = pick_buffer(cfg.buffer, &range.buffer_size());
+        let buffer = pick_buffer(cfg.buffer, range.buffer_size());
         let mut config = range.with_sample_rate(cpal::SampleRate(rate)).config();
         if let Some(b) = buffer {
             config.buffer_size = cpal::BufferSize::Fixed(b);
@@ -1436,7 +1436,7 @@ mod metronome_tests {
         while at < frames {
             let mut block = vec![0.0f32; 512];
             m.run(&mut block, at, None, 120.0, map, meters, 48_000);
-            for (i, f) in block.chunks_exact(2).enumerate() {
+            for (i, f) in block.as_chunks::<2>().0.iter().enumerate() {
                 // A click is a sine from phase 0: its first sample is 0, so it began one frame earlier.
                 if f[0] != 0.0 && prev == 0.0 {
                     out.push(at + i as u64 - 1);
@@ -1534,7 +1534,9 @@ mod metronome_tests {
             let mut block = vec![0.0f32; 2 * 600];
             m.run(&mut block, at - 100, None, 120.0, None, &meters, 48_000);
             let s: Vec<f32> = block
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .skip(101)
                 .take(400)
                 .map(|f| f[0])

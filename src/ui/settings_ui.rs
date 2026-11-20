@@ -1393,17 +1393,16 @@ fn general_page(ui: &mut egui::Ui, s: &mut Settings, checking_updates: bool) -> 
             {
                 check_now = true;
             }
-            if let Some(ver) = s.general.skipped_version.clone() {
-                if kit::tool_button(
+            if let Some(ver) = s.general.skipped_version.clone()
+                && kit::tool_button(
                     ui,
                     &format!("Clear skipped (v{ver})"),
                     kit::Kind::Ghost,
                     true,
                 )
                 .clicked()
-                {
-                    s.general.skipped_version = None;
-                }
+            {
+                s.general.skipped_version = None;
             }
         });
     });

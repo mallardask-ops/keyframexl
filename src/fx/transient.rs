@@ -50,7 +50,7 @@ impl Effect for Transient {
         let smooth = coef(2.0, rate);
         let attack = p[0] / 100.0;
         let sustain = p[1] / 100.0;
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             let x = (f[0] + f[1]) * 0.5;
             let a = x.abs();
             self.fast += (a - self.fast) * if a > self.fast { fa } else { fr };

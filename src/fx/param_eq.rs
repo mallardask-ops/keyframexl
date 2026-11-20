@@ -63,7 +63,7 @@ impl Effect for ParamEq {
             if p[b * 3 + 1] == 0.0 {
                 continue;
             }
-            for f in buf.chunks_exact_mut(2) {
+            for f in buf.as_chunks_mut::<2>().0 {
                 f[0] = band.tick(0, f[0]);
                 f[1] = band.tick(1, f[1]);
             }
@@ -86,7 +86,13 @@ mod tests {
             .collect()
     }
     fn rms(v: &[f32], ch: usize) -> f32 {
-        let s: Vec<f32> = v.chunks_exact(2).skip(2000).map(|f| f[ch]).collect();
+        let s: Vec<f32> = v
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .skip(2000)
+            .map(|f| f[ch])
+            .collect();
         (s.iter().map(|x| x * x).sum::<f32>() / s.len() as f32).sqrt()
     }
     fn run(kind: FxKind, p: &[f32], buf: Vec<f32>) -> Vec<f32> {

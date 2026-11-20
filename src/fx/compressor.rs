@@ -37,7 +37,7 @@ impl Compressor {
         let rel = (-1.0 / (p[3] * 0.001 * rate)).exp();
         let makeup = db(p[4]);
         let mut least = 1.0f32;
-        for (i, f) in buf.chunks_exact_mut(2).enumerate() {
+        for (i, f) in buf.as_chunks_mut::<2>().0.iter_mut().enumerate() {
             let d = match key {
                 Some(k) => [
                     k.get(2 * i).copied().unwrap_or(0.0),

@@ -81,7 +81,7 @@ impl Effect for Multiband {
         let (atk, rel) = (coef(p[6], ctx.rate), coef(p[7], ctx.rate));
         let out = db(p[8]);
         let gain_coef = coef(5.0, ctx.rate);
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             let x = [f[0], f[1]];
             let mut low = x;
             for b in &mut self.low {

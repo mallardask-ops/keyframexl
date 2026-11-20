@@ -38,7 +38,7 @@ impl Effect for MidSide {
         } else {
             0.0
         };
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             let mid = (f[0] + f[1]) * 0.5;
             let mut side = (f[0] - f[1]) * 0.5 * width;
             if coef > 0.0 {
@@ -89,7 +89,7 @@ mod tests {
     fn width_zero_folds_the_signal_to_mono() {
         let input = antiphase(200.0, 4800);
         let out = run(|p| p[0] = 0.0, &input);
-        for f in out.chunks_exact(2) {
+        for f in out.as_chunks::<2>().0 {
             assert!((f[0] - f[1]).abs() < 1e-6);
         }
     }
@@ -108,11 +108,11 @@ mod tests {
     #[test]
     fn solo_mid_leaves_one_centre_signal() {
         let mut input = antiphase(200.0, 4800);
-        for (i, f) in input.chunks_exact_mut(2).enumerate() {
+        for (i, f) in input.as_chunks_mut::<2>().0.iter_mut().enumerate() {
             f[1] += (i as f32 * 0.01).sin() * 0.1;
         }
         let out = run(|p| p[4] = 1.0, &input);
-        for f in out.chunks_exact(2) {
+        for f in out.as_chunks::<2>().0 {
             assert!((f[0] - f[1]).abs() < 1e-6);
         }
     }

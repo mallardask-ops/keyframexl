@@ -56,7 +56,7 @@ impl Effect for Drive {
         tone.set(p[1], rate * 2.0);
         let post = db(p[2]);
         let mix = p[3] / 100.0;
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             let up_l = self.os.up(0, f[0]);
             let up_r = self.os.up(1, f[1]);
             let mut wet = [[0.0f32; 2]; 2];

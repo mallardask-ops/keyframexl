@@ -286,7 +286,7 @@ fn syllables(text: &str) -> Vec<String> {
             && last != "ー"
         {
             // きゃ: the small kana joins the one before it.
-            if !last.ends_with(|x| is_small(x)) || matches!(h, 'ゃ' | 'ゅ' | 'ょ') {
+            if !last.ends_with(is_small) || matches!(h, 'ゃ' | 'ゅ' | 'ょ') {
                 last.push(h);
                 continue;
             }
@@ -385,7 +385,7 @@ mod tests {
     fn cyrillic_gets_a_sung_approximation() {
         let v = sing("привіт");
         assert!(!v.is_empty());
-        assert!(v.iter().all(|s| s.chars().all(|c| is_kana(c))), "{v:?}");
+        assert!(v.iter().all(|s| s.chars().all(is_kana)), "{v:?}");
     }
 
     #[test]

@@ -1173,7 +1173,7 @@ mod tests {
         let ctx = egui::Context::default();
         t::setup(&ctx);
         let here = std::env::current_dir().unwrap().join("Cargo.toml");
-        let populated = vec![
+        let populated = [
             here,
             PathBuf::from("/nonexistent/folder/lost song.kfxl"),
             dirs::home_dir().unwrap_or_default().join("beat.kfxl"),

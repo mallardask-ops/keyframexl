@@ -165,8 +165,8 @@ fn registry_sections(reg: &str, root: &str) -> String {
     let mut keep = false;
     let mut duplicate = false;
     for line in reg.lines() {
-        if line.starts_with('[') {
-            keep = line[1..].starts_with(root);
+        if let Some(rest) = line.strip_prefix('[') {
+            keep = rest.starts_with(root);
             let name = line.split(']').next().unwrap_or_default();
             duplicate = keep
                 && name.contains("\\\\MIDI input\\\\")
@@ -673,7 +673,7 @@ fn capture(rate: u32, s: &Shared, out: &mut rtrb::Producer<f32>) {
             };
             carry.extend_from_slice(&buf[..n]);
             let whole = carry.len() / 4 * 4;
-            for b in carry[..whole].chunks_exact(4) {
+            for b in carry[..whole].as_chunks::<4>().0 {
                 // A full ring means the engine is not pulling (stopped): drop.
                 let _ = out.push(f32::from_le_bytes([b[0], b[1], b[2], b[3]]));
             }
@@ -755,7 +755,9 @@ impl Processor for FlLink {
         }
         // Round trip: the first loud sample after a note sent into silence.
         let loud = io
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .position(|f| f[0].abs().max(f[1].abs()) > 1e-3);
         match (loud, self.pending) {
             (Some(i), Some(sent)) => {

@@ -32,7 +32,7 @@ impl Effect for Filter {
         let (a2, a3) = (g * a1, g * g * a1);
         let mode = p[0].round() as usize;
         let mix = p[3] / 100.0;
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             for (ch, s) in f.iter_mut().enumerate() {
                 let [ic1, ic2] = &mut svf[ch];
                 let v3 = *s - *ic2;

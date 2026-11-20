@@ -152,7 +152,7 @@ impl Processor for Lane {
         {
             skip.commit_all();
         }
-        for frame in io.chunks_exact_mut(2) {
+        for frame in io.as_chunks_mut::<2>().0 {
             frame.copy_from_slice(&self.audio.pop().unwrap_or([0.0; 2]));
         }
     }
@@ -471,7 +471,7 @@ fn run(
         scope.spawn(|| {
             while input.read_exact(&mut block).is_ok() {
                 for frame in block.chunks_exact(frame_size) {
-                    for (pair, w) in frame.chunks_exact(8).zip(&mut writers) {
+                    for (pair, w) in frame.as_chunks::<8>().0.iter().zip(&mut writers) {
                         let _ = w.push([
                             f32::from_le_bytes(pair[..4].try_into().unwrap()),
                             f32::from_le_bytes(pair[4..].try_into().unwrap()),

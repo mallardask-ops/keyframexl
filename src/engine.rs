@@ -986,7 +986,7 @@ impl ProgFxDsp {
         let k = 1.0 + drive * 8.0;
         let norm = k.tanh();
         let cho_inc = 0.65 / self.rate;
-        for frame in buf.chunks_exact_mut(2) {
+        for frame in buf.as_chunks_mut::<2>().0 {
             let mut dry = [frame[0], frame[1]];
             if drive > 0.0 {
                 for x in dry.iter_mut() {
@@ -2094,7 +2094,7 @@ impl Engine {
             let outs = inst.plugin().map(|p| p.outs.as_slice()).unwrap_or(&[]);
             if g == target {
                 let add = |d: &mut [f32], s: &[f32]| {
-                    for (d, s) in d.chunks_exact_mut(2).zip(s.chunks_exact(2)) {
+                    for (d, s) in d.as_chunks_mut::<2>().0.iter_mut().zip(s.chunks_exact(2)) {
                         d[0] += (s[0] as f64 * g[0]) as f32;
                         d[1] += (s[1] as f64 * g[1]) as f32;
                     }
@@ -2323,7 +2323,12 @@ impl Engine {
                             // snap threshold), once per frame for both sides.
                             let (mut cur, to) = (mix as f64, mix_target as f64);
                             let alpha = smooth_alpha(rate as f64);
-                            for (w, d) in bus.chunks_exact_mut(2).zip(dry.chunks_exact(2)) {
+                            for (w, d) in bus
+                                .as_chunks_mut::<2>()
+                                .0
+                                .iter_mut()
+                                .zip(dry.chunks_exact(2))
+                            {
                                 cur += (to - cur) * alpha;
                                 if (to - cur).abs() < 1e-6 {
                                     cur = to;
@@ -2447,7 +2452,12 @@ impl Engine {
                         // threshold), once per frame for both sides.
                         let (mut cur, to) = (mix as f64, mix_target as f64);
                         let alpha = smooth_alpha(rate as f64);
-                        for (w, d) in bus.chunks_exact_mut(2).zip(dry.chunks_exact(2)) {
+                        for (w, d) in bus
+                            .as_chunks_mut::<2>()
+                            .0
+                            .iter_mut()
+                            .zip(dry.chunks_exact(2))
+                        {
                             cur += (to - cur) * alpha;
                             if (to - cur).abs() < 1e-6 {
                                 cur = to;
@@ -2486,7 +2496,7 @@ impl Engine {
             // Stereo separation (FL: the SEP knob), skipped at 0.
             if track.sep != 0.0 {
                 let width = 1.0 + track.sep;
-                for f in bus.chunks_exact_mut(2) {
+                for f in bus.as_chunks_mut::<2>().0 {
                     let (m, s) = ((f[0] + f[1]) * 0.5, (f[0] - f[1]) * 0.5 * width);
                     f[0] = m + s;
                     f[1] = m - s;
@@ -2499,7 +2509,7 @@ impl Engine {
             let mut end = start;
             if start != [1.0; 2] || target != [1.0; 2] {
                 if start == target {
-                    for f in bus.chunks_exact_mut(2) {
+                    for f in bus.as_chunks_mut::<2>().0 {
                         f[0] *= start[0];
                         f[1] *= start[1];
                     }
@@ -2509,7 +2519,7 @@ impl Engine {
                     let mut cur = [start[0] as f64, start[1] as f64];
                     let to = [target[0] as f64, target[1] as f64];
                     let alpha = smooth_alpha(self.rate);
-                    for f in bus.chunks_exact_mut(2) {
+                    for f in bus.as_chunks_mut::<2>().0 {
                         cur[0] += (to[0] - cur[0]) * alpha;
                         cur[1] += (to[1] - cur[1]) * alpha;
                         if (to[0] - cur[0]).abs() < 1e-6 {
@@ -2529,7 +2539,7 @@ impl Engine {
             if self.scope.track.load(std::sync::atomic::Ordering::Relaxed) == t {
                 use std::sync::atomic::Ordering::Relaxed;
                 let mut at = self.scope.pos.load(Relaxed);
-                for f in bus.chunks_exact(2) {
+                for f in bus.as_chunks::<2>().0 {
                     self.scope.ring[at].store(((f[0] + f[1]) * 0.5).to_bits(), Relaxed);
                     at = (at + 1) % SCOPE_LEN;
                 }
@@ -2544,14 +2554,14 @@ impl Engine {
             {
                 use std::sync::atomic::Ordering::Relaxed;
                 let mut at = self.master_scope.pos.load(Relaxed);
-                for f in bus.chunks_exact(2) {
+                for f in bus.as_chunks::<2>().0 {
                     self.master_scope.ring[at].store(((f[0] + f[1]) * 0.5).to_bits(), Relaxed);
                     at = (at + 1) % SCOPE_LEN;
                 }
                 self.master_scope.pos.store(at, Relaxed);
             }
             for tap in self.taps.iter_mut().filter(|tap| tap.track == t) {
-                for f in bus.chunks_exact(2) {
+                for f in bus.as_chunks::<2>().0 {
                     if tap.tx.push([f[0], f[1]]).is_err() {
                         tap.dropped += 1;
                     }
@@ -3032,11 +3042,10 @@ impl Engine {
                     .iter()
                     .find(|(i, _)| *i == n.instrument)
                     .map(|x| x.1)
+                    && (patch.glide > 0.0 || n.porta)
                 {
-                    if patch.glide > 0.0 || n.porta {
-                        v.glide_from = last as f64 - n.pitch as f64;
-                        v.glide_time = if patch.glide > 0.0 { patch.glide } else { sps };
-                    }
+                    v.glide_from = last as f64 - n.pitch as f64;
+                    v.glide_time = if patch.glide > 0.0 { patch.glide } else { sps };
                 }
                 self.remember_key(n.instrument, n.pitch);
                 self.push(v);
@@ -3301,7 +3310,7 @@ impl Engine {
             let mut gain = pv.gain_state.unwrap_or(target);
             let out = &mut self.buses[bus][at * 2..(at + frames) * 2];
             let data = &pv.phrase.data;
-            for frame in out.chunks_exact_mut(2) {
+            for frame in out.as_chunks_mut::<2>().0 {
                 let Some(&s) = data.get(pv.pos) else { break };
                 let mut s = s as f64;
                 if let Some((total, left)) = &mut pv.fade {
@@ -3410,7 +3419,7 @@ impl Engine {
                 .unwrap_or([1.0; 2]);
             // A fresh voice starts at the channel's gains, not gliding to them.
             let mut gain = v.gain_state.unwrap_or(target);
-            for frame in out.chunks_exact_mut(2) {
+            for frame in out.as_chunks_mut::<2>().0 {
                 if v.done {
                     break;
                 }
@@ -3542,7 +3551,11 @@ pub fn render(song: &Song, pattern: u64, song_mode: bool, rate: u32) -> Vec<[f32
         out.extend_from_slice(slice);
         pos += n;
     }
-    out.chunks_exact(2).map(|c| [c[0], c[1]]).collect()
+    out.as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| [c[0], c[1]])
+        .collect()
 }
 
 /// Insert `t`'s buffer to process, and insert `key`'s to listen to (not `t` itself).
@@ -3825,7 +3838,7 @@ mod tests {
         while out.len() < RATE as usize {
             block.fill(0.0);
             e.process_live(&song, &mut block);
-            out.extend(block.chunks_exact(2).map(|f| f[0]));
+            out.extend(block.as_chunks::<2>().0.iter().map(|f| f[0]));
         }
         out
     }
@@ -3923,7 +3936,7 @@ mod tests {
         let mut block = vec![0.0f32; 1024];
         while out.len() < RATE as usize / 2 {
             e.process_live(&song, &mut block);
-            out.extend(block.chunks_exact(2).map(|f| f[0]));
+            out.extend(block.as_chunks::<2>().0.iter().map(|f| f[0]));
         }
         out
     }
@@ -4127,7 +4140,7 @@ mod tests {
                 }
                 block.fill(0.0);
                 e.process_live(&song, &mut block);
-                out.extend(block.chunks_exact(2).map(|f| f[0]));
+                out.extend(block.as_chunks::<2>().0.iter().map(|f| f[0]));
             }
             out
         };
@@ -4656,7 +4669,7 @@ mod tests {
         let mut pos = 0;
         while out.len() < frames {
             pos = e.process(song, 1, song_mode, pos, &mut buf, true);
-            out.extend(buf.chunks_exact(2).map(|f| [f[0], f[1]]));
+            out.extend(buf.as_chunks::<2>().0.iter().map(|f| [f[0], f[1]]));
         }
         out.truncate(frames);
         out
@@ -5551,7 +5564,7 @@ mod mixer_tests {
         let mut at = 0;
         for _ in 0..20 {
             at = e.process(&s, 1, false, at, &mut out, true);
-            heard.extend(out.chunks_exact(2).map(|f| [f[0], f[1]]));
+            heard.extend(out.as_chunks::<2>().0.iter().map(|f| [f[0], f[1]]));
         }
         let taken: Vec<[f32; 2]> = std::iter::from_fn(|| master.pop().ok()).collect();
         assert_eq!(
@@ -5760,7 +5773,7 @@ mod plugin_tests {
 
     impl crate::plugin::Processor for Lag {
         fn process(&mut self, _: &[PluginEvent], io: &mut [f32], _: &crate::plugin::Transport) {
-            for f in io.chunks_exact_mut(2) {
+            for f in io.as_chunks_mut::<2>().0 {
                 let mut x = [f[0], f[1]];
                 if let Some(v) = self.impulse.take() {
                     x = [v, v];

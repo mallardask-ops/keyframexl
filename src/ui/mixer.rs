@@ -5,7 +5,7 @@
 //! Strips are adaptive: tall strips (≥ 300 px) show, top to bottom, number,
 //! name, lamp (mute), pan, fader with meter, route to Master; short strips
 //! (< 300 px, the mixer docked as a tab) put number + name on one line, lamp
-//! + arm next to the pan knob on the next 20 px line, hide SEP (its knob
+//! and arm next to the pan knob on the next 20 px line, hide SEP (its knob
 //! lives in the inspector) and give the fader everything down to the route
 //! button. Click a strip to select it. Channels choose their insert
 //! in the channel rack (the box left of the name).
@@ -1708,7 +1708,7 @@ impl App {
             }
             let title = format!("{} — {}", slot.kind.label(), self.mixer_name(track));
             let eq = slot.kind == FxKind::ParamEq;
-            let rows = (slot.kind.params().len() + 2) / 3;
+            let rows = slot.kind.params().len().div_ceil(3);
             let tall = rows > 3 || matches!(slot.kind, FxKind::Eq | FxKind::StereoShaper);
             let size = if eq {
                 vec2(720.0, 640.0)
@@ -1981,12 +1981,10 @@ impl App {
                 keep.push((track, k));
             }
         }
-        if !scoped {
-            if let Some(a) = &self.audio {
-                a.scope
-                    .track
-                    .store(usize::MAX, std::sync::atomic::Ordering::Relaxed);
-            }
+        if !scoped && let Some(a) = &self.audio {
+            a.scope
+                .track
+                .store(usize::MAX, std::sync::atomic::Ordering::Relaxed);
         }
         // Windows opened meanwhile (double-click inside a window) stay too.
         keep.extend(std::mem::take(&mut self.fx_windows));

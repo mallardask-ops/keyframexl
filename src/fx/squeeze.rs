@@ -57,7 +57,7 @@ impl Effect for Squeeze {
         let pre = p[9] >= 0.5;
         let mix = p[5] / 100.0;
         let gain = p[6] / 100.0;
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             let dry = [f[0], f[1]];
             if self.left == 0 {
                 self.punching = !self.punching;

@@ -40,7 +40,7 @@ impl Effect for Chorus {
         let inc = p[2] / rate;
         let mix = p[3] / 100.0;
         let n = line.len();
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             line[*i] = [f[0], f[1]];
             let mut wet = [0.0f32; 2];
             for (ch, w) in wet.iter_mut().enumerate() {

@@ -364,10 +364,10 @@ impl App {
                     if let Some(j) = next {
                         pick = Some(self.song.patterns[j].id);
                     }
-                } else if step < 0 {
-                    if let Some(j) = prev {
-                        pick = Some(self.song.patterns[j].id);
-                    }
+                } else if step < 0
+                    && let Some(j) = prev
+                {
+                    pick = Some(self.song.patterns[j].id);
                 }
             }
         }

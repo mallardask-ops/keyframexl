@@ -62,7 +62,7 @@ impl Effect for Bloom {
             smooth(profile.release_ms),
             smooth(5.0),
         );
-        for frame in buf.chunks_exact_mut(2) {
+        for frame in buf.as_chunks_mut::<2>().0 {
             let mut bands = [[0.0; 2]; 3];
             for ch in 0..2 {
                 self.bass[ch] += low * (frame[ch] - self.bass[ch]);
@@ -126,7 +126,9 @@ mod tests {
         for i in 0..4 {
             let wet = render(100.0, i as f32);
             assert!(
-                wet.chunks_exact(2)
+                wet.as_chunks::<2>()
+                    .0
+                    .iter()
                     .all(|f| f[0] == -f[1] && f[0].abs() <= 1.0)
             );
             for other in &outputs {

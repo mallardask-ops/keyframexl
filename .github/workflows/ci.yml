@@ -34,11 +34,16 @@ jobs:
             libglib2.0-dev
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: cargo check
-        run: cargo check --all-targets
+      - name: cargo fmt
+        run: cargo fmt --check
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: cargo test (lib)
         run: cargo test --lib

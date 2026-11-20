@@ -203,7 +203,8 @@ fn find(d: &DockState<Tab>, tab: &Tab) -> Option<(SurfaceIndex, NodeIndex, TabIn
 fn strip_transient(d: &mut DockState<Tab>) {
     let gone: Vec<Tab> = d
         .iter_all_tabs()
-        .filter_map(|(_, t)| matches!(t, Tab::Riff | Tab::Settings).then(|| t.clone()))
+        .filter(|&(_, t)| matches!(t, Tab::Riff | Tab::Settings))
+        .map(|(_, t)| t.clone())
         .collect();
     for t in gone {
         if let Some(at) = find(d, &t) {

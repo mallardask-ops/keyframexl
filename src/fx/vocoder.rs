@@ -69,7 +69,12 @@ impl Effect for Vocoder {
         let bands = (p[0].round() as usize).clamp(1, BANDS);
         let (atk, rel) = (coef(p[1], ctx.rate), coef(p[2], ctx.rate));
         let level = db(p[3]);
-        for (frame, k) in buf.chunks_exact_mut(2).zip(key.chunks_exact(2)) {
+        for (frame, k) in buf
+            .as_chunks_mut::<2>()
+            .0
+            .iter_mut()
+            .zip(key.chunks_exact(2))
+        {
             let m = (k[0] + k[1]) * 0.5;
             let mut out = [0.0f32; 2];
             for i in 0..bands {

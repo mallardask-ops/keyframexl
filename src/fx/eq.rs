@@ -42,7 +42,7 @@ impl Effect for Eq {
             last.extend_from_slice(p);
         }
         let active = [p[1] != 0.0, p[3] != 0.0, p[6] != 0.0];
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             for (ch, s) in f.iter_mut().enumerate() {
                 for (b, on) in bands.iter_mut().zip(active) {
                     if on {

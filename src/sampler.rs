@@ -84,7 +84,7 @@ pub(crate) mod b64_frames {
                     return Err(serde::de::Error::custom("bad frame data length"));
                 }
                 let mut out = Vec::with_capacity(bytes.len() / 8);
-                for c in bytes.chunks_exact(8) {
+                for c in bytes.as_chunks::<8>().0 {
                     let l = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
                     let r = f32::from_le_bytes([c[4], c[5], c[6], c[7]]);
                     if !l.is_finite() || !r.is_finite() {

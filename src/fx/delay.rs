@@ -86,7 +86,7 @@ impl Effect for Delay {
         let left_offset = ((-offset).max(0.0) * step_s * rate).round() as usize;
         let right_offset = (offset.max(0.0) * step_s * rate).round() as usize;
         let n = line.len();
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             let r = line[(*i + n - d) % n];
             let mid = (r[0] + r[1]) * 0.5 * (1.0 + sep.min(0.0) * 0.5);
             let side = (r[0] - r[1]) * 0.5 * (1.0 - sep.max(0.0));

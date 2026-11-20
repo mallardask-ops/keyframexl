@@ -134,7 +134,7 @@ impl Effect for Time {
         let fade = (((p[1] / 1000.0) * rate).round() as usize).clamp(1, (step_len / 2).max(1));
         let slice = (((p[2] / 100.0) * step_len as f32).round() as usize).clamp(1, step_len);
         let n = self.buf.len();
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             if self.left == 0 {
                 self.begin(p, step_len, fade, slice);
             }

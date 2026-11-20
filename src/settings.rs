@@ -7,22 +7,12 @@ use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct Settings {
     pub audio: AudioSettings,
     pub midi: MidiSettings,
     pub plugins: PluginSettings,
     pub general: GeneralSettings,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            audio: AudioSettings::default(),
-            midi: MidiSettings::default(),
-            plugins: PluginSettings::default(),
-            general: GeneralSettings::default(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

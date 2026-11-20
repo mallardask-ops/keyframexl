@@ -191,7 +191,7 @@ pub fn solo_channel_flp(bytes: &[u8], index: u32) -> Result<Vec<u8>, String> {
             }
             (MIXER_PARAMS, Value::Data(d), _) => {
                 let mut d = d.to_vec();
-                for rec in d.chunks_exact_mut(12) {
+                for rec in d.as_chunks_mut::<12>().0 {
                     let (pid, packed) = (rec[4], u16::from_le_bytes([rec[6], rec[7]]));
                     if packed == 0x4000 && pid == 0 && rec[5] == 0 {
                         rec[8..12].copy_from_slice(&12800i32.to_le_bytes());
@@ -368,13 +368,11 @@ pub fn native_host_flp(bytes: &[u8], channels: &[u32]) -> Result<(Vec<u8>, Vec<u
                 }
                 (MIXER_PARAMS, Value::Data(data)) => {
                     let mut params = data.to_vec();
-                    for r in params.chunks_exact_mut(12) {
+                    for r in params.as_chunks_mut::<12>().0 {
                         let addr = le16(r, 6);
                         let gain = if addr == 0x4000 && r[4..6] == [0, 0] {
                             Some(12800i32)
-                        } else if mixer_address(addr)
-                            .is_some_and(|(i, _)| i as usize <= channels.len())
-                        {
+                        } else if mixer_address(addr).is_some_and(|(i, _)| i <= channels.len()) {
                             match r[4] {
                                 192 => Some(12800),
                                 193 | 194 | 208..=210 => Some(0),
@@ -429,11 +427,13 @@ fn write_event(body: &mut Vec<u8>, id: u8, data: &[u8]) {
 /// FL keeps names as UTF-16 (FL 11.5 and later) or 8-bit text, NUL-ended.
 fn text(d: &[u8]) -> String {
     let utf16 = d.len() >= 2
-        && d.len() % 2 == 0
+        && d.len().is_multiple_of(2)
         && d.iter().skip(1).step_by(2).filter(|b| **b == 0).count() * 2 >= d.len() / 2;
     let s = if utf16 {
         String::from_utf16_lossy(
-            &d.chunks_exact(2)
+            &d.as_chunks::<2>()
+                .0
+                .iter()
                 .map(|c| u16::from_le_bytes([c[0], c[1]]))
                 .collect::<Vec<_>>(),
         )
@@ -1012,7 +1012,7 @@ struct Item {
 fn playlist_items(d: &[u8]) -> Vec<Item> {
     let size = [80usize, 60, 32]
         .into_iter()
-        .find(|s| d.len() % s == 0 && d.chunks_exact(*s).all(|it| le16(it, 4) == 20480))
+        .find(|s| d.len().is_multiple_of(*s) && d.chunks_exact(*s).all(|it| le16(it, 4) == 20480))
         .unwrap_or(0);
     if size == 0 {
         return vec![];
@@ -1218,8 +1218,17 @@ pub fn read_flp(bytes: &[u8]) -> Result<(Song, FlpReport), String> {
 
     // Mixer parameters: 12-byte records, the insert and slot packed in one
     // word (insert << 6 | slot), the value last.
-    let initial_mixer_values = initialized.chunks_exact(12).filter(|r| r[5] == 0x1f);
-    for r in params.chunks_exact(12).chain(initial_mixer_values) {
+    let initial_mixer_values = initialized
+        .as_chunks::<12>()
+        .0
+        .iter()
+        .filter(|r| r[5] == 0x1f);
+    for r in params
+        .as_chunks::<12>()
+        .0
+        .iter()
+        .chain(initial_mixer_values)
+    {
         let (pid, packed, value) = (r[4], le16(r, 6), le32(r, 8) as i32);
         let Some((insert, at)) = mixer_address(packed) else {
             continue;
@@ -1320,7 +1329,7 @@ pub fn read_flp(bytes: &[u8]) -> Result<(Song, FlpReport), String> {
         // FL slide notes draw as slides, not notes: they become glides after
         // the pattern is read, once the note they bend is known.
         let mut sliding = Vec::new();
-        for r in raw.chunks_exact(24) {
+        for r in raw.as_chunks::<24>().0 {
             let channel = le16(r, 6) as u32;
             let Some(&inst) = by_channel.get(&channel) else {
                 report.dropped_notes += 1;
@@ -1456,7 +1465,7 @@ pub fn read_flp(bytes: &[u8]) -> Result<(Song, FlpReport), String> {
     let mut pattern_tempos: BTreeMap<u32, Vec<(Tick, f64)>> = BTreeMap::new();
     for (number, raw) in &pattern_events {
         let mut by_control: BTreeMap<(u16, u16), Vec<(u32, i32)>> = BTreeMap::new();
-        for r in raw.chunks_exact(12) {
+        for r in raw.as_chunks::<12>().0 {
             by_control
                 .entry((le16(r, 4), le16(r, 6)))
                 .or_default()
@@ -2057,7 +2066,9 @@ fn auto_points(d: &[u8]) -> Vec<(f64, f32, f32)> {
         return vec![];
     }
     d[21..21 + n * 24]
-        .chunks_exact(24)
+        .as_chunks::<24>()
+        .0
+        .iter()
         .map(|r| {
             let f64_at = |i: usize| f64::from_le_bytes(r[i..i + 8].try_into().expect("8 bytes"));
             let tension = f32::from_le_bytes(r[16..20].try_into().expect("4 bytes"));

@@ -43,10 +43,18 @@ fn pan_preserves_mono_source_power_and_gate_rejects_low_level_noise() {
     pan.process(&[1., 100.], &mut signal, 48000., 120.);
     assert!(
         signal
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .all(|f| (f[0] * f[0] + f[1] * f[1] - 0.125).abs() < 1e-6)
     );
-    assert!(signal.chunks_exact(2).any(|f| f[0] < 0.001 && f[1] > 0.35));
+    assert!(
+        signal
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .any(|f| f[0] < 0.001 && f[1] > 0.35)
+    );
 
     let mut gate = FxState::new(FxKind::NoiseGate, 48000.);
     let params = FxKind::NoiseGate.defaults();

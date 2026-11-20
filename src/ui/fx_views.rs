@@ -1214,7 +1214,7 @@ pub fn filter(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, b
         })
         .collect();
     paint.add(egui::Shape::line(curve, Stroke::new(2.0_f32, t::ENC_BLUE)));
-    let fpos = (fc / 20.0).log(1000.0) as f32;
+    let fpos = (fc / 20.0).log(1000.0);
     paint.vline(
         egui::lerp(plot.x_range(), fpos.clamp(0.0, 1.0)),
         plot.y_range(),
@@ -1344,7 +1344,7 @@ pub fn chorus(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, b
     let t = ui.input(|i| i.time) as f32;
     paint.circle_stroke(c, r, Stroke::new(1.0_f32, Color32::from_gray(55)));
     for i in 0..3 {
-        let phase = t * p[2] * 6.283 + i as f32 * 2.094;
+        let phase = t * p[2] * std::f32::consts::TAU + i as f32 * 2.094;
         let dot = c + vec2(phase.cos(), phase.sin()) * (r + 10.0);
         paint.circle_filled(dot, 3.5, t::ENC_BLUE.gamma_multiply(0.85));
         paint.line_segment(

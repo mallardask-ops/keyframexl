@@ -1172,9 +1172,9 @@ mod tests {
     #[test]
     fn master_volume_becomes_program_decibels() {
         let z = pcm_zone(64, 1, 2, &[]);
-        let p = parse(&build(0x26, 0.5, &[z.clone()])).unwrap();
+        let p = parse(&build(0x26, 0.5, std::slice::from_ref(&z))).unwrap();
         assert!((p.program.volume_db + 6.0206).abs() < 1e-3);
-        let p = parse(&build(0x26, 100.0, &[z.clone()])).unwrap();
+        let p = parse(&build(0x26, 100.0, std::slice::from_ref(&z))).unwrap();
         assert_eq!(p.program.volume_db, 12.0);
         let p = parse(&build(0x26, 1.0, &[z])).unwrap();
         assert_eq!(p.program.volume_db, 0.0);

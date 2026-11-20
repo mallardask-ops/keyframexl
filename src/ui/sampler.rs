@@ -998,12 +998,13 @@ impl App {
         ui.data_mut(|d| d.insert_temp(mode_id, mode));
 
         // Plain click inside map selects zone (or All zones on empty space).
-        if resp.clicked() && !shift_or_alt.0 && !shift_or_alt.1 {
-            if let Some(pt) = resp.interact_pointer_pos()
-                && map_outer.contains(pt)
-            {
-                self.sampler_ui(id).zone = hovered_zone;
-            }
+        if resp.clicked()
+            && !shift_or_alt.0
+            && !shift_or_alt.1
+            && let Some(pt) = resp.interact_pointer_pos()
+            && map_outer.contains(pt)
+        {
+            self.sampler_ui(id).zone = hovered_zone;
         }
 
         // Hover tooltip on map zones.

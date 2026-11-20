@@ -733,7 +733,7 @@ impl App {
                 break;
             }
             let x = grid_l + tick as f32 / BAR as f32 * bar_w;
-            let strong = b % 4 == 0;
+            let strong = b.is_multiple_of(4);
             bar_lines.push((x, strong));
             let mut label_x = x + 6.0;
             if let Some(m) = meters
@@ -1585,87 +1585,88 @@ impl App {
                     }
                 }
             }
-            if resp.drag_stopped() && !marker_used[i] {
-                if let Some(dd) = active {
-                    let pos = resp.interact_pointer_pos().or(resp.hover_pos());
-                    if let Some(pos) = pos {
-                        let shift = ui.input(|i| i.modifiers.shift);
-                        match dd.mode {
-                            DragMode::Move => {
-                                let ns = song_snap(
-                                    &meters,
-                                    tick_at(pos.x, grid_l, bar_w) - dd.grab,
-                                    grid_ticks,
-                                    alt,
-                                    true,
-                                )
-                                .max(0);
-                                let nt = track_at(pos.y, grid.top(), lane_h).min(999);
-                                let ns = ns.min(keyframexl::sequence::MAX_BARS * BAR - len.max(1));
-                                if shift {
-                                    if ns != c.start || nt != c.track {
-                                        pending.push(Pending::Duplicate {
-                                            i,
-                                            start: ns,
-                                            track: nt,
-                                        });
-                                    }
-                                } else if ns != c.start || nt != c.track {
-                                    pending.push(Pending::Move {
+            if resp.drag_stopped()
+                && !marker_used[i]
+                && let Some(dd) = active
+            {
+                let pos = resp.interact_pointer_pos().or(resp.hover_pos());
+                if let Some(pos) = pos {
+                    let shift = ui.input(|i| i.modifiers.shift);
+                    match dd.mode {
+                        DragMode::Move => {
+                            let ns = song_snap(
+                                &meters,
+                                tick_at(pos.x, grid_l, bar_w) - dd.grab,
+                                grid_ticks,
+                                alt,
+                                true,
+                            )
+                            .max(0);
+                            let nt = track_at(pos.y, grid.top(), lane_h).min(999);
+                            let ns = ns.min(keyframexl::sequence::MAX_BARS * BAR - len.max(1));
+                            if shift {
+                                if ns != c.start || nt != c.track {
+                                    pending.push(Pending::Duplicate {
                                         i,
                                         start: ns,
                                         track: nt,
                                     });
                                 }
+                            } else if ns != c.start || nt != c.track {
+                                pending.push(Pending::Move {
+                                    i,
+                                    start: ns,
+                                    track: nt,
+                                });
                             }
-                            DragMode::Right => {
-                                let min = if alt { 1 } else { grid_ticks.max(1) };
-                                let end = song_snap(
-                                    &meters,
-                                    tick_at(pos.x, grid_l, bar_w),
-                                    grid_ticks,
-                                    alt,
-                                    true,
-                                )
-                                .max(c.start + min);
-                                let nl = (end - c.start).max(1);
-                                if nl != len {
-                                    pending.push(Pending::Resize { i, len: nl });
-                                }
+                        }
+                        DragMode::Right => {
+                            let min = if alt { 1 } else { grid_ticks.max(1) };
+                            let end = song_snap(
+                                &meters,
+                                tick_at(pos.x, grid_l, bar_w),
+                                grid_ticks,
+                                alt,
+                                true,
+                            )
+                            .max(c.start + min);
+                            let nl = (end - c.start).max(1);
+                            if nl != len {
+                                pending.push(Pending::Resize { i, len: nl });
                             }
-                            DragMode::Left => {
-                                let end = c.start + len;
-                                let min = if alt { 1 } else { grid_ticks.max(1) };
-                                let mut ns = song_snap(
-                                    &meters,
-                                    tick_at(pos.x, grid_l, bar_w),
-                                    grid_ticks,
-                                    alt,
-                                    true,
-                                )
-                                .clamp(0, end - min);
-                                let lo = (c.start - c.offset).max(0);
-                                let hi = c.start - c.offset + pat.length - 1;
-                                if hi >= lo {
-                                    ns = ns.clamp(lo, hi);
-                                } else {
-                                    ns = c.start;
-                                }
-                                let no = c.offset + (ns - c.start);
-                                let nl = end - ns;
-                                if ns != c.start && no >= 0 && no < pat.length && nl >= min {
-                                    pending.push(Pending::Trim {
-                                        i,
-                                        start: ns,
-                                        offset: no,
-                                        len: nl,
-                                    });
-                                }
+                        }
+                        DragMode::Left => {
+                            let end = c.start + len;
+                            let min = if alt { 1 } else { grid_ticks.max(1) };
+                            let mut ns = song_snap(
+                                &meters,
+                                tick_at(pos.x, grid_l, bar_w),
+                                grid_ticks,
+                                alt,
+                                true,
+                            )
+                            .clamp(0, end - min);
+                            let lo = (c.start - c.offset).max(0);
+                            let hi = c.start - c.offset + pat.length - 1;
+                            if hi >= lo {
+                                ns = ns.clamp(lo, hi);
+                            } else {
+                                ns = c.start;
+                            }
+                            let no = c.offset + (ns - c.start);
+                            let nl = end - ns;
+                            if ns != c.start && no >= 0 && no < pat.length && nl >= min {
+                                pending.push(Pending::Trim {
+                                    i,
+                                    start: ns,
+                                    offset: no,
+                                    len: nl,
+                                });
                             }
                         }
                     }
-                    ui.data_mut(|d| d.insert_temp(drag_id, None::<PlDrag>));
                 }
+                ui.data_mut(|d| d.insert_temp(drag_id, None::<PlDrag>));
             }
             let tip = format!(
                 "{} at {}{}",
@@ -1767,51 +1768,50 @@ impl App {
         if pressed || !down {
             seen.clear();
         }
-        if can_edit_grid && down && matches!(tool, Tool::Delete | Tool::Mute | Tool::Slice) {
-            if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
-                if grid_seen.contains(pos) {
-                    if let Some((i, c)) = clips.iter().enumerate().rev().find(|(_, c)| {
-                        clip_rect(c.start, self.song.clip_len(c), c.track.min(999)).contains(pos)
-                    }) {
-                        let key = (c.start, c.track, c.pattern);
-                        if !seen.contains(&key) {
-                            seen.push(key);
-                            match tool {
-                                Tool::Delete => pending.push(Pending::Delete(i)),
-                                Tool::Mute => pending.push(Pending::Menu(i, "mute".into())),
-                                Tool::Slice if pressed => {
-                                    let len = self.song.clip_len(c);
-                                    let at = song_snap(
-                                        &meters,
-                                        tick_at(pos.x, grid_l, bar_w),
-                                        grid_ticks,
-                                        ui.input(|i| i.modifiers.alt),
-                                        true,
-                                    );
-                                    if let Some((left, right_len)) = slice_lengths(c.start, len, at)
-                                    {
-                                        self.checkpoint();
-                                        let mut right = *c;
-                                        right.start = at;
-                                        right.offset = (c.offset + at - c.start)
-                                            % self
-                                                .song
-                                                .patterns
-                                                .iter()
-                                                .find(|p| p.id == c.pattern)
-                                                .map(|p| p.length.max(1))
-                                                .unwrap_or(1);
-                                        right.length = Some(right_len);
-                                        self.song.clips[i].length = Some(left);
-                                        self.song.clips.push(right);
-                                        self.publish();
-                                        self.say(Tone::Quiet, "Clip sliced. Ctrl+Z undoes.");
-                                    }
-                                }
-                                _ => {}
-                            }
+        if can_edit_grid
+            && down
+            && matches!(tool, Tool::Delete | Tool::Mute | Tool::Slice)
+            && let Some(pos) = ui.input(|i| i.pointer.interact_pos())
+            && grid_seen.contains(pos)
+            && let Some((i, c)) = clips.iter().enumerate().rev().find(|(_, c)| {
+                clip_rect(c.start, self.song.clip_len(c), c.track.min(999)).contains(pos)
+            })
+        {
+            let key = (c.start, c.track, c.pattern);
+            if !seen.contains(&key) {
+                seen.push(key);
+                match tool {
+                    Tool::Delete => pending.push(Pending::Delete(i)),
+                    Tool::Mute => pending.push(Pending::Menu(i, "mute".into())),
+                    Tool::Slice if pressed => {
+                        let len = self.song.clip_len(c);
+                        let at = song_snap(
+                            &meters,
+                            tick_at(pos.x, grid_l, bar_w),
+                            grid_ticks,
+                            ui.input(|i| i.modifiers.alt),
+                            true,
+                        );
+                        if let Some((left, right_len)) = slice_lengths(c.start, len, at) {
+                            self.checkpoint();
+                            let mut right = *c;
+                            right.start = at;
+                            right.offset = (c.offset + at - c.start)
+                                % self
+                                    .song
+                                    .patterns
+                                    .iter()
+                                    .find(|p| p.id == c.pattern)
+                                    .map(|p| p.length.max(1))
+                                    .unwrap_or(1);
+                            right.length = Some(right_len);
+                            self.song.clips[i].length = Some(left);
+                            self.song.clips.push(right);
+                            self.publish();
+                            self.say(Tone::Quiet, "Clip sliced. Ctrl+Z undoes.");
                         }
                     }
+                    _ => {}
                 }
             }
         }
@@ -1949,20 +1949,22 @@ impl App {
         });
         let paint_id = ui.id().with("playlist-paint-active");
         let mut painting: Option<(Tick, u32, bool)> = ui.data(|d| d.get_temp(paint_id)).flatten();
-        if can_edit_grid && tool == Tool::Paint && pressed {
-            if let Some(pos) = press_origin.filter(|p| grid_seen.contains(*p)) {
-                painting = Some((
-                    song_snap(
-                        &meters,
-                        tick_at(pos.x, grid_l, bar_w),
-                        grid_ticks,
-                        false,
-                        false,
-                    ),
-                    track_at(pos.y, grid.top(), lane_h),
+        if can_edit_grid
+            && tool == Tool::Paint
+            && pressed
+            && let Some(pos) = press_origin.filter(|p| grid_seen.contains(*p))
+        {
+            painting = Some((
+                song_snap(
+                    &meters,
+                    tick_at(pos.x, grid_l, bar_w),
+                    grid_ticks,
                     false,
-                ));
-            }
+                    false,
+                ),
+                track_at(pos.y, grid.top(), lane_h),
+                false,
+            ));
         }
         if let Some((start, track, mut changed)) = painting {
             if down {
@@ -2555,7 +2557,7 @@ impl App {
                                 self.renaming = Some((pid, name));
                             }
                         }
-                        w if w == "pat-color-default" => {
+                        "pat-color-default" => {
                             let pid = clips[i].pattern;
                             self.checkpoint();
                             if let Some(p) = self.song.patterns.iter_mut().find(|p| p.id == pid) {

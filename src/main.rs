@@ -206,7 +206,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             }))?;
             let rgb: Vec<u8> = img
                 .data()
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .flat_map(|p| [p[2], p[1], p[0]])
                 .collect();
             image::RgbImage::from_raw(w as u32, h as u32, rgb)

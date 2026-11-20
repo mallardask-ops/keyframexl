@@ -85,18 +85,22 @@ pub fn pattern_color(id: u64, custom: Option<u32>) -> C {
         .unwrap_or_else(|| pattern_code(id))
 }
 
+// Secondary hues shared by note colours and the track/pattern palette.
+pub const HUE_PINK: C = C::from_rgb(218, 110, 153);
+pub const HUE_PURPLE: C = C::from_rgb(158, 111, 190);
+pub const HUE_CYAN: C = C::from_rgb(91, 188, 198);
+pub const HUE_LIME: C = C::from_rgb(161, 190, 91);
+pub const HUE_GOLD: C = C::from_rgb(201, 164, 83);
+pub const HUE_BROWN: C = C::from_rgb(159, 116, 86);
+pub const HUE_ROSE: C = C::from_rgb(194, 126, 123);
+pub const HUE_TEAL: C = C::from_rgb(78, 155, 145);
+pub const HUE_INDIGO: C = C::from_rgb(105, 112, 185);
+pub const HUE_GREY: C = C::from_rgb(145, 150, 155);
+
 /// Palette offered for tracks and patterns (FL colour names reuse the note names).
 pub const COLOR_PALETTE: [C; 10] = [
-    ENC_WHITE,
-    ENC_BLUE,
-    ENC_GREEN,
-    WAIT,
-    ENC_ORANGE,
-    C::from_rgb(218, 110, 153),
-    C::from_rgb(158, 111, 190),
-    C::from_rgb(91, 188, 198),
-    C::from_rgb(161, 190, 91),
-    C::from_rgb(201, 164, 83),
+    ENC_WHITE, ENC_BLUE, ENC_GREEN, WAIT, ENC_ORANGE, HUE_PINK, HUE_PURPLE, HUE_CYAN, HUE_LIME,
+    HUE_GOLD,
 ];
 
 // KeyFrame Tide faceplate tokens (abyssal slate + tidal cyan oscilloscope).

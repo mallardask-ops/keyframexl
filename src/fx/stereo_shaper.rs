@@ -41,7 +41,7 @@ impl Effect for StereoShaper {
         let a = (1.0 - (p[5].abs() / 180.0)).clamp(0.0, 1.0);
         let (l2l, r2r, l2r, r2l) = (p[0] / 100.0, p[1] / 100.0, p[2] / 100.0, p[3] / 100.0);
         let n = self.ring.len();
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             let (l, r) = (f[0], f[1]);
             let delayed = if delay == 0 {
                 r

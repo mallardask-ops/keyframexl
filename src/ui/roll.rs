@@ -44,16 +44,16 @@ pub(crate) fn note_colors(c: u8) -> (egui::Color32, egui::Color32, egui::Color32
         3 => t::WAIT,
         4 => t::ENC_ORANGE,
         5 => t::ENC_WHITE,
-        6 => egui::Color32::from_rgb(218, 110, 153),
-        7 => egui::Color32::from_rgb(158, 111, 190),
-        8 => egui::Color32::from_rgb(91, 188, 198),
-        9 => egui::Color32::from_rgb(161, 190, 91),
-        10 => egui::Color32::from_rgb(201, 164, 83),
-        11 => egui::Color32::from_rgb(159, 116, 86),
-        12 => egui::Color32::from_rgb(194, 126, 123),
-        13 => egui::Color32::from_rgb(78, 155, 145),
-        14 => egui::Color32::from_rgb(105, 112, 185),
-        _ => egui::Color32::from_rgb(145, 150, 155),
+        6 => t::HUE_PINK,
+        7 => t::HUE_PURPLE,
+        8 => t::HUE_CYAN,
+        9 => t::HUE_LIME,
+        10 => t::HUE_GOLD,
+        11 => t::HUE_BROWN,
+        12 => t::HUE_ROSE,
+        13 => t::HUE_TEAL,
+        14 => t::HUE_INDIGO,
+        _ => t::HUE_GREY,
     };
     (
         base,
@@ -772,10 +772,11 @@ impl App {
             && pointer.is_some_and(|q| self.note_at(&g, q).is_none());
         let count = self.pattern().notes.len();
         self.roll_input(ui, &p, &g, &resp, scrollbar_busy);
-        if new_on_ghost && self.pattern().notes.len() > count {
-            if let (Some(target), Some(&id)) = (ghost, self.roll_sel.first()) {
-                ui.data_mut(|d| d.insert_temp(ghost_key, (self.selected, me, id, target, now)));
-            }
+        if new_on_ghost
+            && self.pattern().notes.len() > count
+            && let (Some(target), Some(&id)) = (ghost, self.roll_sel.first())
+        {
+            ui.data_mut(|d| d.insert_temp(ghost_key, (self.selected, me, id, target, now)));
         }
         self.paint_notes(&p.with_clip_rect(grid), &g);
         if self.is_vocal(me) {
@@ -2440,18 +2441,19 @@ impl App {
                     }
                 }
             }
-            Gesture::Erase if secondary_down || (self.tool == Tool::Delete && down) => {
-                if g.grid.contains(q) {
-                    if self.tool == Tool::Slide {
-                        if let Some(i) = self.slide_at(at, pitch) {
-                            self.erase_once();
-                            self.pattern_mut().slides.remove(i);
-                        }
-                    } else if let Some(n) = self.note_at(g, q) {
+            Gesture::Erase
+                if (secondary_down || (self.tool == Tool::Delete && down))
+                    && g.grid.contains(q) =>
+            {
+                if self.tool == Tool::Slide {
+                    if let Some(i) = self.slide_at(at, pitch) {
                         self.erase_once();
-                        self.pattern_mut().notes.retain(|x| x.id != n.id);
-                        self.roll_sel.retain(|x| *x != n.id);
+                        self.pattern_mut().slides.remove(i);
                     }
+                } else if let Some(n) = self.note_at(g, q) {
+                    self.erase_once();
+                    self.pattern_mut().notes.retain(|x| x.id != n.id);
+                    self.roll_sel.retain(|x| *x != n.id);
                 }
             }
             _ => {}

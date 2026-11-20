@@ -34,7 +34,7 @@ impl Effect for Stereo {
         let (gl, gr) = ((1.0 - bal).min(1.0), (1.0 + bal).min(1.0));
         let offset = ((p[2].abs() * 0.001 * rate) as usize).min(line.len() - 1);
         let n = line.len();
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             let (m, s) = ((f[0] + f[1]) * 0.5, (f[0] - f[1]) * 0.5 * width);
             let (l, r) = ((m + s) * gl, (m - s) * gr);
             line[*i] = [l, r];
@@ -67,7 +67,13 @@ mod tests {
             .collect()
     }
     fn rms(v: &[f32], ch: usize) -> f32 {
-        let s: Vec<f32> = v.chunks_exact(2).skip(2000).map(|f| f[ch]).collect();
+        let s: Vec<f32> = v
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .skip(2000)
+            .map(|f| f[ch])
+            .collect();
         (s.iter().map(|x| x * x).sum::<f32>() / s.len() as f32).sqrt()
     }
     fn run(kind: FxKind, p: &[f32], buf: Vec<f32>) -> Vec<f32> {
@@ -97,7 +103,8 @@ mod tests {
         );
         let haas = run(FxKind::Stereo, &[100.0, 0.0, 10.0], centre.clone());
         let lag = (0.010 * RATE) as usize;
-        let (l, r): (Vec<f32>, Vec<f32>) = haas.chunks_exact(2).map(|f| (f[0], f[1])).unzip();
+        let (l, r): (Vec<f32>, Vec<f32>) =
+            haas.as_chunks::<2>().0.iter().map(|f| (f[0], f[1])).unzip();
         assert!(
             (r[3000] - l[3000 - lag]).abs() < 1e-6,
             "right is the left delayed by 10 ms"

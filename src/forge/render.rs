@@ -67,7 +67,7 @@ pub fn render(p: &ForgePatch) -> Rendered {
             l.gain * (1.0 - l.pan.max(0.0)),
             l.gain * (1.0 + l.pan.min(0.0)),
         );
-        for (f, s) in buf.chunks_exact(2).enumerate() {
+        for (f, s) in buf.as_chunks::<2>().0.iter().enumerate() {
             let Some(o) = mix.get_mut((at + f) * 2..(at + f) * 2 + 2) else {
                 break;
             };
@@ -85,7 +85,9 @@ pub fn render(p: &ForgePatch) -> Rendered {
     limit.params = vec![0.0, -1.0, 60.0];
     run_chain(&[limit], &mut mix);
     let mut frames: Vec<[f32; 2]> = mix
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| {
             let ok = |v: f32| {
                 if v.is_finite() {
@@ -206,7 +208,9 @@ const ECHO_BLOCKS: usize = 200;
 
 /// The frame after the last audible one.
 fn sound_end(buf: &[f32]) -> usize {
-    buf.chunks_exact(2)
+    buf.as_chunks::<2>()
+        .0
+        .iter()
         .rposition(|f| f[0].abs().max(f[1].abs()) > SILENT)
         .map_or(0, |i| i + 1)
 }

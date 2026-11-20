@@ -33,7 +33,7 @@ impl Effect for Limiter {
         let ceil = db(p[1]);
         let rel = 1.0 - (-1.0 / (p[2] * 0.001 * rate)).exp();
         let mut least = 1.0f32;
-        for f in buf.chunks_exact_mut(2) {
+        for f in buf.as_chunks_mut::<2>().0 {
             let (l, r) = (f[0] * input, f[1] * input);
             let peak = l.abs().max(r.abs());
             let need = if peak > ceil { ceil / peak } else { 1.0 };

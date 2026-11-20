@@ -1500,7 +1500,7 @@ fn dragging_the_rolls_ruler_loops_that_span_and_a_double_click_clears_it() {
     app.set_song_mode(true);
     run(&ctx, &mut app, View::Roll, vec![]);
     // The ruler sits just above the grid.
-    let g = app.probe.roll.clone().expect("roll painted");
+    let g = app.probe.roll.expect("roll painted");
     let y = g.grid.top() - 8.0;
     let (a, b) = (pos2(g.x(4 * STEP), y), pos2(g.x(8 * STEP), y));
     run(
