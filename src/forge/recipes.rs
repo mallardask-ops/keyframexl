@@ -1,6 +1,7 @@
 //! Starting points: a recipe is a ready sound to bend into your own, and a
 //! style turns any of them toward the family a game's sounds belong to.
 
+use super::library::Category;
 use super::{Curve, FilterMode, ForgePatch, Layer, MAX_LAYERS, Macros, NoiseColor, Source, Wave};
 use crate::fx::{FxKind, FxSlot};
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,8 @@ pub enum Recipe {
     Magic,
     Portal,
     Hum,
+    /// A recipe of the catalogue (`super::library::RECIPES`).
+    Lib(u8),
 }
 
 /// A built-in effect at its defaults with some parameters set.
@@ -27,6 +30,19 @@ fn fx(kind: FxKind, set: &[(usize, f32)]) -> FxSlot {
         s.params[i] = v;
     }
     s
+}
+
+/// Set the patch's gain so it renders with this peak, rounded to 0.1 dB.
+/// Drive, dirt and the limiter are not linear: a few passes settle it.
+fn level(p: &mut ForgePatch, peak: f32) {
+    for _ in 0..4 {
+        let r = super::render::render(p);
+        if r.peak <= 1e-4 || (r.peak - peak).abs() < 0.02 * peak {
+            break;
+        }
+        let db = p.gain_db + 20.0 * (peak / r.peak).log10();
+        p.gain_db = ((db * 10.0).round() / 10.0).clamp(-36.0, 12.0);
+    }
 }
 
 /// Volume that starts at full and falls away, faster with lower `tension`.
@@ -54,7 +70,7 @@ fn knobs(size: f32, energy: f32, dirt: f32, space: f32) -> Macros {
 }
 
 impl Recipe {
-    pub const ALL: [Recipe; 11] = [
+    pub const ALL: [Recipe; 51] = [
         Recipe::Jump,
         Recipe::Coin,
         Recipe::Shot,
@@ -66,6 +82,46 @@ impl Recipe {
         Recipe::Magic,
         Recipe::Portal,
         Recipe::Hum,
+        Recipe::Lib(0),
+        Recipe::Lib(1),
+        Recipe::Lib(2),
+        Recipe::Lib(3),
+        Recipe::Lib(4),
+        Recipe::Lib(5),
+        Recipe::Lib(6),
+        Recipe::Lib(7),
+        Recipe::Lib(8),
+        Recipe::Lib(9),
+        Recipe::Lib(10),
+        Recipe::Lib(11),
+        Recipe::Lib(12),
+        Recipe::Lib(13),
+        Recipe::Lib(14),
+        Recipe::Lib(15),
+        Recipe::Lib(16),
+        Recipe::Lib(17),
+        Recipe::Lib(18),
+        Recipe::Lib(19),
+        Recipe::Lib(20),
+        Recipe::Lib(21),
+        Recipe::Lib(22),
+        Recipe::Lib(23),
+        Recipe::Lib(24),
+        Recipe::Lib(25),
+        Recipe::Lib(26),
+        Recipe::Lib(27),
+        Recipe::Lib(28),
+        Recipe::Lib(29),
+        Recipe::Lib(30),
+        Recipe::Lib(31),
+        Recipe::Lib(32),
+        Recipe::Lib(33),
+        Recipe::Lib(34),
+        Recipe::Lib(35),
+        Recipe::Lib(36),
+        Recipe::Lib(37),
+        Recipe::Lib(38),
+        Recipe::Lib(39),
     ];
 
     pub fn label(self) -> &'static str {
@@ -81,6 +137,7 @@ impl Recipe {
             Recipe::Magic => "Magic",
             Recipe::Portal => "Portal",
             Recipe::Hum => "Hum",
+            Recipe::Lib(i) => super::library::RECIPES[i as usize].name,
         }
     }
 
@@ -98,11 +155,59 @@ impl Recipe {
             Recipe::Magic => "magic",
             Recipe::Portal => "portal",
             Recipe::Hum => "hum",
+            Recipe::Lib(i) => super::library::RECIPES[i as usize].stem,
         }
     }
 
-    pub fn patch(self) -> ForgePatch {
+    pub fn category(self) -> Category {
         match self {
+            Recipe::Jump => Category::Actions,
+            Recipe::Coin => Category::Pickups,
+            Recipe::Shot | Recipe::Laser | Recipe::Hit | Recipe::Explosion => Category::Weapons,
+            Recipe::Step => Category::Steps,
+            Recipe::UiClick => Category::Ui,
+            Recipe::Magic | Recipe::Portal => Category::Magic,
+            Recipe::Hum => Category::Ambience,
+            Recipe::Lib(i) => super::library::RECIPES[i as usize].category,
+        }
+    }
+
+    /// Styles add only their light part to it (see `RecipeDef::light_style`).
+    pub fn light_style(self) -> bool {
+        match self {
+            Recipe::UiClick => true,
+            Recipe::Lib(i) => super::library::RECIPES[i as usize].light_style,
+            _ => false,
+        }
+    }
+
+    /// The recipe at its category's level (cached: levelling renders it once).
+    pub fn patch(self) -> ForgePatch {
+        static CACHE: [std::sync::OnceLock<ForgePatch>; 51] =
+            [const { std::sync::OnceLock::new() }; 51];
+        let i = Recipe::ALL.iter().position(|r| *r == self).unwrap_or(0);
+        CACHE[i]
+            .get_or_init(|| {
+                let mut p = self.raw_patch();
+                level(&mut p, self.category().peak());
+                p
+            })
+            .clone()
+    }
+
+    /// The recipe in a game style (or as made), honouring `light_style`.
+    pub fn styled(self, style: Option<Style>) -> ForgePatch {
+        let mut p = self.patch();
+        if let Some(s) = style {
+            s.apply_with(&mut p, self.light_style());
+        }
+        p
+    }
+
+    /// The recipe as written, before levelling.
+    fn raw_patch(self) -> ForgePatch {
+        match self {
+            Recipe::Lib(i) => (super::library::RECIPES[i as usize].build)(),
             Recipe::Jump => patch(
                 "Jump",
                 vec![
@@ -456,6 +561,41 @@ impl Style {
         }
     }
 
+    /// Turn `p` toward this style; `light` keeps only its waves, filters
+    /// and knobs (no added layers, effects or vibrato).
+    pub fn apply_with(self, p: &mut ForgePatch, light: bool) {
+        if !light {
+            return self.apply(p);
+        }
+        let mut full = p.clone();
+        self.apply(&mut full);
+        p.macros = full.macros;
+        for (l, f) in p.layers.iter_mut().zip(full.layers) {
+            let vib = match &l.source {
+                Source::Osc {
+                    vibrato_hz,
+                    vibrato,
+                    ..
+                } => Some((*vibrato_hz, *vibrato)),
+                _ => None,
+            };
+            l.source = f.source;
+            if let (
+                Some((h, d)),
+                Source::Osc {
+                    vibrato_hz,
+                    vibrato,
+                    ..
+                },
+            ) = (vib, &mut l.source)
+            {
+                (*vibrato_hz, *vibrato) = (h, d);
+            }
+            l.filter = f.filter;
+            l.pitch = f.pitch;
+        }
+    }
+
     /// Turn `p` toward this style.
     pub fn apply(self, p: &mut ForgePatch) {
         let m = &mut p.macros;
@@ -569,6 +709,25 @@ mod tests {
             assert!(!p.layers.is_empty() && p.layers.len() <= MAX_LAYERS);
             assert!(!seen.contains(&r.stem()));
             seen.push(r.stem());
+        }
+    }
+
+    #[test]
+    fn recipes_sit_at_their_category_level_and_light_styles_add_nothing() {
+        for r in Recipe::ALL {
+            let peak = super::super::render::render(&r.patch()).peak;
+            let want = r.category().peak();
+            assert!(
+                (peak - want).abs() < 0.05 * want + 0.02,
+                "{r:?}: {peak} for {want}"
+            );
+        }
+        for s in Style::ALL {
+            let light = Recipe::Lib(0);
+            assert!(light.light_style());
+            let p = light.styled(Some(s));
+            assert_eq!(p.layers.len(), light.patch().layers.len(), "{s:?}");
+            assert!(p.fx.is_empty(), "{s:?} added effects to a UI sound");
         }
     }
 

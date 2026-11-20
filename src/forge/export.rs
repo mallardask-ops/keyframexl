@@ -28,8 +28,11 @@ pub struct Options {
     pub format: FileFormat,
     /// 44_100 or 48_000.
     pub rate: u32,
-    /// Peak at −1 dBFS.
+    /// Peak at −1 dBFS. Off keeps the sound's own level (recipes are made
+    /// at their category's level, so a set stays balanced).
     pub normalize: bool,
+    /// Left and right averaged into one channel (positioned sounds in a game).
+    pub mono: bool,
     /// File names start with this ("jump" → jump_01.wav).
     pub stem: String,
     /// Seeds the variations.
@@ -42,7 +45,8 @@ impl Default for Options {
             count: 5,
             format: FileFormat::Wav,
             rate: 48_000,
-            normalize: true,
+            normalize: false,
+            mono: false,
             stem: "sound".into(),
             seed: 1,
         }
@@ -85,6 +89,7 @@ pub fn export(p: &ForgePatch, dir: &Path, opt: &Options) -> Result<Vec<PathBuf>,
         let frames = finish(&super::render::render(patch), opt);
         let path = dir.join(format!("{stem}_{:02}.{}", i + 1, opt.format.ext()));
         match opt.format {
+            FileFormat::Wav if opt.mono => write_mono_wav(&path, &frames, opt.rate)?,
             FileFormat::Wav => crate::render::write_wav_at(
                 &path,
                 &frames,
@@ -92,7 +97,7 @@ pub fn export(p: &ForgePatch, dir: &Path, opt: &Options) -> Result<Vec<PathBuf>,
                 true,
                 opt.rate,
             )?,
-            FileFormat::Ogg => write_ogg(&path, &frames, opt.rate)?,
+            FileFormat::Ogg => write_ogg(&path, &frames, opt.rate, opt.mono)?,
         }
         out.push(path);
     }
@@ -108,6 +113,12 @@ pub fn finish(r: &Rendered, opt: &Options) -> Vec<[f32; 2]> {
         .position(|f| f[0].abs().max(f[1].abs()) > 1e-3)
         .unwrap_or(0);
     let mut frames = resample(&r.frames[first..], r.rate, opt.rate);
+    if opt.mono {
+        for f in &mut frames {
+            let m = (f[0] + f[1]) * 0.5;
+            *f = [m, m];
+        }
+    }
     if opt.normalize {
         let peak = frames
             .iter()
@@ -166,13 +177,30 @@ pub fn resample(frames: &[[f32; 2]], from: u32, to: u32) -> Vec<[f32; 2]> {
         .collect()
 }
 
-fn write_ogg(path: &Path, frames: &[[f32; 2]], rate: u32) -> Result<(), String> {
+/// One channel, 16-bit (the left of `frames`, already the mix).
+fn write_mono_wav(path: &Path, frames: &[[f32; 2]], rate: u32) -> Result<(), String> {
+    let err = |e: hound::Error| format!("{}: {e}", path.display());
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: rate,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut w = hound::WavWriter::create(path, spec).map_err(err)?;
+    for f in frames {
+        w.write_sample((f[0].clamp(-1.0, 1.0) * 32767.0).round() as i16)
+            .map_err(err)?;
+    }
+    w.finalize().map_err(err)
+}
+
+fn write_ogg(path: &Path, frames: &[[f32; 2]], rate: u32, mono: bool) -> Result<(), String> {
     use std::num::{NonZeroU8, NonZeroU32};
     let err = |e: vorbis_rs::VorbisError| format!("{}: {e}", path.display());
     let file = std::fs::File::create(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut enc = vorbis_rs::VorbisEncoderBuilder::new_with_serial(
         NonZeroU32::new(rate).ok_or("bad sample rate")?,
-        NonZeroU8::new(2).unwrap(),
+        NonZeroU8::new(if mono { 1 } else { 2 }).unwrap(),
         std::io::BufWriter::new(file),
         // A fixed stream serial: the same sound writes the same file.
         0x4B46_584C,
@@ -181,8 +209,12 @@ fn write_ogg(path: &Path, frames: &[[f32; 2]], rate: u32) -> Result<(), String> 
     .map_err(err)?;
     for chunk in frames.chunks(4096) {
         let l: Vec<f32> = chunk.iter().map(|f| f[0]).collect();
-        let r: Vec<f32> = chunk.iter().map(|f| f[1]).collect();
-        enc.encode_audio_block([l, r]).map_err(err)?;
+        if mono {
+            enc.encode_audio_block([l]).map_err(err)?;
+        } else {
+            let r: Vec<f32> = chunk.iter().map(|f| f[1]).collect();
+            enc.encode_audio_block([l, r]).map_err(err)?;
+        }
     }
     enc.finish().map_err(err)?;
     Ok(())
@@ -228,7 +260,11 @@ mod tests {
     #[test]
     fn normalising_peaks_just_under_full_scale() {
         let r = super::super::render::render(&Recipe::UiClick.patch());
-        let f = finish(&r, &Options::default());
+        let opt = Options {
+            normalize: true,
+            ..Options::default()
+        };
+        let f = finish(&r, &opt);
         let peak = f
             .iter()
             .map(|f| f[0].abs().max(f[1].abs()))
@@ -236,6 +272,40 @@ mod tests {
         assert!((peak - 0.891).abs() < 1e-3);
         // Starts on the sound, not on silence.
         assert!(f[0][0].abs() > 1e-3 || f[0][1].abs() > 1e-3);
+    }
+
+    #[test]
+    fn a_set_keeps_its_levels_and_mono_is_one_channel() {
+        let peak = |r: Recipe| {
+            let f = finish(
+                &super::super::render::render(&r.patch()),
+                &Options::default(),
+            );
+            f.iter()
+                .map(|f| f[0].abs().max(f[1].abs()))
+                .fold(0.0, f32::max)
+        };
+        let (click, shot) = (peak(Recipe::UiClick), peak(Recipe::Shot));
+        assert!(
+            shot > 2.0 * click,
+            "a click ({click}) sits well under a shot ({shot})"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let opt = Options {
+            count: 1,
+            mono: true,
+            stem: "hover".into(),
+            ..Options::default()
+        };
+        export(&Recipe::Lib(0).patch(), dir.path(), &opt).unwrap();
+        let r = hound::WavReader::open(dir.path().join("hover_01.wav")).unwrap();
+        assert_eq!(r.spec().channels, 1);
+        let ogg = Options {
+            format: FileFormat::Ogg,
+            ..opt
+        };
+        export(&Recipe::Lib(0).patch(), dir.path(), &ogg).unwrap();
+        assert!(dir.path().join("hover_01.ogg").is_file());
     }
 
     #[test]

@@ -64,6 +64,7 @@ struct View {
     ogg: bool,
     rate_44: bool,
     normalize: bool,
+    mono: bool,
 }
 
 impl Default for View {
@@ -77,7 +78,9 @@ impl Default for View {
             count: 5.0,
             ogg: false,
             rate_44: false,
-            normalize: true,
+            // Off: a set keeps its levels (a UI click stays under a shot).
+            normalize: false,
+            mono: false,
         }
     }
 }
@@ -226,11 +229,7 @@ impl App {
 
     /// A recipe in the project's game style.
     fn recipe(&self, r: Recipe) -> ForgePatch {
-        let mut p = r.patch();
-        if let Some(s) = self.song.game_style {
-            s.apply(&mut p);
-        }
-        p
+        r.styled(self.song.game_style)
     }
 
     /// Hear a rendered sound now, without touching the project.
@@ -391,13 +390,12 @@ impl App {
                         .selected_text(format!("Start from: {}", p.name))
                         .show_ui(ui, |ui| {
                             kit::menu_style(ui);
-                            for r in Recipe::ALL {
-                                if ui.selectable_label(false, r.label()).clicked() {
-                                    let mut np = r.patch();
-                                    if let Some(s) = game_style {
-                                        s.apply(&mut np);
+                            for cat in keyframexl::forge::library::Category::ALL {
+                                ui.label(egui::RichText::new(cat.label()).font(t::sans(11.5)).color(t::FAINT));
+                                for r in Recipe::ALL.into_iter().filter(|r| r.category() == cat) {
+                                    if ui.selectable_label(false, r.label()).clicked() {
+                                        adopt = Some(r.styled(game_style));
                                     }
-                                    adopt = Some(np);
                                 }
                             }
                             if !user.is_empty() {
@@ -568,7 +566,13 @@ impl App {
                         ui.vertical(|ui| {
                             ui.horizontal(|ui| {
                                 super::settings_ui::kit_switch(ui, &mut view.normalize);
-                                ui.label("Normalize").on_hover_text("Loudest peak at −1 dB");
+                                ui.label("Normalize").on_hover_text(
+                                    "Every file's loudest peak at −1 dB. Off: files keep the sound's own level, so a set of recipes stays balanced (a click under a shotgun)",
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                super::settings_ui::kit_switch(ui, &mut view.mono);
+                                ui.label("Mono").on_hover_text("One channel: what a game engine positions in 3D");
                             });
                             export_now = kit::button(ui, "Export…", kit::Kind::Normal, true)
                                 .on_hover_text("Choose a folder: files are named like jump_01.wav, jump_02.wav")
@@ -904,6 +908,7 @@ impl App {
             },
             rate: if view.rate_44 { 44_100 } else { 48_000 },
             normalize: view.normalize,
+            mono: view.mono,
             stem: p.name.clone(),
             seed: view.seed.wrapping_add(id),
         };

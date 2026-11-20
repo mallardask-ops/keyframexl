@@ -11,6 +11,7 @@ use std::sync::Arc;
 pub mod curve;
 pub mod export;
 mod layer;
+pub mod library;
 pub mod mutate;
 pub mod recipes;
 pub mod render;

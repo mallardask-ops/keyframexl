@@ -232,7 +232,10 @@ mod tests {
         for r in Recipe::ALL {
             let out = render(&r.patch());
             assert!(out.frames.len() > RATE as usize / 100, "{r:?} too short");
-            assert!(out.seconds() < 12.0, "{r:?} too long");
+            assert!(
+                out.seconds() < f64::from(MAX_SECONDS + MAX_TAIL + 0.5),
+                "{r:?} too long"
+            );
             assert!(out.peak > 0.05, "{r:?} silent: peak {}", out.peak);
             assert!(out.peak <= 1.0, "{r:?} clips");
             assert!(rms(&out) > 0.003, "{r:?} too quiet");

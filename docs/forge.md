@@ -9,7 +9,7 @@ Playing a note on a Forge channel triggers the rendered sound: **C5** plays at i
 ## Quick Walkthrough
 
 1. **Create a Forge channel:** Open **Add channel → Forge (game sounds)**. New channels start with the *Jump* recipe.
-2. **Pick a starting point (`Start from`):** Choose from 11 built-in recipes (*Jump, Coin, Shot, Laser, Hit, Explosion, Step, UI click, Magic, Portal, Hum*) or load one of your own saved sounds from **My sounds**. Click **▶ PLAY** or click directly on the waveform to audition.
+2. **Pick a starting point (`Start from`):** Choose from 51 built-in recipes grouped by category (UI, Footsteps on seven surfaces, Actions, Weapons & combat, Pickups, Magic, Damage, Doors & mechanisms, Ambience, Creatures & sci-fi) or load one of your own saved sounds from **My sounds**. Each recipe is made at its category's level, so a UI click sits well under a shotgun; UI sounds and the heartbeat take only the light part of a game style (no added weight layer, ring mod or vibrato). Click **▶ PLAY** or click directly on the waveform to audition.
 3. **Set a style:**
    - **GAME STYLE** — a project-wide style setting saved with the project. Every recipe in *Start from* and every newly created Forge channel automatically starts in this style (`Any` leaves recipes neutral).
    - **MAKE IT** — transforms the current sound on demand (and can be clicked multiple times to push further):
@@ -43,7 +43,7 @@ Playing a note on a Forge channel triggers the rendered sound: **C5** plays at i
 9. **Save presets (`Save to My sounds`):** Saves the patch to `~/Music/KeyFrameXL/Presets/Forge/<name>.kfxforge`, making it immediately available under **Start from**.
 10. **Export for games (`EXPORT FOR GAME`):**
     - Choose **FILES** count to export the authored sound plus subtle randomized variations so repeated in-game triggers never sound robotic (`jump_01.wav`, `jump_02.wav`, …).
-    - Select **WAV (16-bit)** or **OGG**, **48 kHz** or **44.1 kHz**, and optional **Normalize** (peak −1 dB). Leading and trailing silence is trimmed automatically.
+    - Select **WAV (16-bit)** or **OGG**, **48 kHz** or **44.1 kHz**, and optional **Normalize** (peak −1 dB; off by default so a set of sounds keeps its balance) and **Mono** (one channel, for sounds a game positions in 3D). Leading and trailing silence is trimmed automatically.
 
 ---
 
@@ -55,7 +55,8 @@ Playing a note on a Forge channel triggers the rendered sound: **C5** plays at i
 | `src/forge/curve.rs` | Curve evaluation and tension shaping (reusing `automation::shape` from automation clips). |
 | `src/forge/layer.rs` | Layer sources (polyBLEP oscillators, noise generators, samples, Tide synth notes via `Engine`) and TPT SVF filter. |
 | `src/forge/render.rs` | Signal path: per-layer source → layer FX → mix → master FX → `DIRT`/`SPACE` macros → −1 dB limiter → tail trimming. |
-| `src/forge/recipes.rs` | Built-in recipes and style transforms. |
+| `src/forge/recipes.rs` | The `Recipe` list, levelling by category, style transforms. |
+| `src/forge/library.rs` | The recipe catalogue (40 recipes past the first 11) and categories. |
 | `src/forge/mutate.rs` | Seeded, deterministic patch mutations and export variations. |
 | `src/forge/export.rs` | Batch file export, Lanczos resampling, and OGG encoding. |
 | `src/ui/forge.rs` | Channel editor window, interactive curve editor, and background render scheduling. |
@@ -94,7 +95,7 @@ Playing a note on a Forge channel triggers the rendered sound: **C5** plays at i
   ```sh
   KFXL_CAPTURE_FORGE=N cargo run --release -- --capture-instrument out.png
   ```
-  (`N` is the recipe index, `0..10`.)
+  (`N` is the recipe index in `Recipe::ALL`, `0..50`.)
 
 ---
 
