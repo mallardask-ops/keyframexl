@@ -9,7 +9,9 @@ license = "MIT"
 libc = "0.2"
 hound = "3.5"
 eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
-cpal = "0.15"
+# PipeWire as its own host (a node in the graph), ALSA as the fallback;
+# realtime-dbus asks rtkit for the audio thread's priority.
+cpal = { version = "0.18.2", features = ["pipewire", "realtime-dbus"] }
 arc-swap = "1.7"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
@@ -25,7 +27,7 @@ rtrb = "0.3"
 midly = "0.5"
 flacenc = "0.5"
 vorbis_rs = "0.5"
-midir = "0.10"
+midir = "0.11"
 vst3-host = { version = "0.11.1", path = "vendor/vst3-host", default-features = false }
 base64 = "0.22"
 xcb = { version = "1", features = ["xtest"] }
@@ -42,9 +44,6 @@ cc = "1.2"
 # (yabridge, dragging a clip out of a Windows plugin) were silently lost.
 [patch.crates-io]
 winit = { path = "vendor/winit" }
-# cpal with one fix: an ALSA underrun reported as POLLERR (PipeWire) is
-# recovered, instead of an error repeated on every poll of a dead stream.
-cpal = { path = "vendor/cpal" }
 
 # Debug builds are what an IDE or launcher may run: an unoptimised audio
 # engine and DSP crackle and load the CPU many times over, so the program

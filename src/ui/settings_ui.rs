@@ -860,6 +860,7 @@ impl App {
                                 .unwrap_or_else(|| "device buffer".into());
                             let load = a.load.load(Ordering::Relaxed) as f64 / 10.0;
                             let overruns = a.overruns.load(Ordering::Relaxed);
+                            let xruns = a.xruns.load(Ordering::Relaxed);
                             ui.horizontal(|ui| {
                                 badge(ui, r.backend.label(), t::text());
                                 ui.label(
@@ -873,11 +874,11 @@ impl App {
                             });
                             ui.label(
                                 RichText::new(format!(
-                                    "Latency ≈{:.1} ms · CPU {load:.0}% · Overruns {overruns}",
+                                    "Latency ≈{:.1} ms · CPU {load:.0}% · Overruns {overruns} · Xruns {xruns}",
                                     r.latency_ms()
                                 ))
                                 .font(t::mono(13.0))
-                                .color(if overruns > 0 { t::wait() } else { t::muted() }),
+                                .color(if overruns + xruns > 0 { t::wait() } else { t::muted() }),
                             );
                             if r.rate != s.audio.rate {
                                 ui.label(

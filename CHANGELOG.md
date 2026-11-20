@@ -82,6 +82,10 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
   longer clips on chords.
 
 ### Engine and internals
+- **Native PipeWire output**: the program is a PipeWire node of its own
+  (cpal 0.18), with ALSA as the fallback; the buffer setting is the node's
+  quantum, xruns are counted, and the device list shows hardware outputs
+  and *System default* instead of ALSA plug names.
 - Patterns are shared between song snapshots and copied on write: an edit
   in a large project costs ~50 µs instead of 2–5 ms, and undo keeps only
   changed patterns.

@@ -25,6 +25,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libasound2-dev \
+            libpipewire-0.3-dev \
+            libclang-dev \
+            libdbus-1-dev \
             libxcb1-dev \
             libxcb-xtest0-dev \
             libvorbis-dev \
