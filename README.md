@@ -55,6 +55,10 @@ The Mixer (`F9`) ships with **32 native DSP effects** with custom visual faces a
 > **Linux only — Windows and macOS are NOT supported.**
 > KeyFrameXL **will not work properly on Windows or macOS**, and support for those platforms is **not planned at this time**. The codebase relies directly on Linux-specific APIs and subsystems (`libc` / file-descriptor manipulation, ALSA/PipeWire audio, X11/XCB plugin window embedding, UNIX IPC/process supervision, and Wine/yabridge bridging).
 
+### Install a release
+
+Download `keyframexl-linux-x86_64.tar.gz` from [Releases](https://github.com/mallardask-ops/keyframexl/releases), unpack it and run `./install.sh`: the binary goes to `~/.local/bin`, the launcher and icons to `~/.local/share` (set `PREFIX` for another place). After that the app updates itself.
+
 ### System Requirements
 
 - **OS:** 64-bit Linux (`x86_64`)

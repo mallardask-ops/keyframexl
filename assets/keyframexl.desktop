@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=KeyFrameXL
+Comment=Pattern-based music sequencer
+Exec=keyframexl %F
+Icon=keyframexl
+Terminal=false
+StartupNotify=true
+StartupWMClass=keyframexl
+Categories=AudioVideo;Audio;Music;
+Keywords=DAW;sequencer;music;audio;
+MimeType=application/x-keyframexl;
