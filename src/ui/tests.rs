@@ -373,7 +373,7 @@ fn duplicate_paste_nudge_and_quantize() {
     assert_eq!(app.song.patterns[0].notes.len(), 3);
     // Off-grid note quantizes back.
     app.roll_sel.clear();
-    app.song.patterns[0].notes[0].start = 37;
+    std::sync::Arc::make_mut(&mut app.song.patterns[0]).notes[0].start = 37;
     app.quantize_notes();
     assert_eq!(app.song.patterns[0].notes[0].start, 0);
     assert!(app.song.validate().is_ok());
@@ -1072,7 +1072,7 @@ fn delete_mute_and_slice_tools() {
         click(&ctx, &mut app, View::Roll, g.point(s, p));
     }
     // Make the third note four steps long for the slice.
-    app.song.patterns[0].notes[2].length = 4 * STEP;
+    std::sync::Arc::make_mut(&mut app.song.patterns[0]).notes[2].length = 4 * STEP;
     app.tool = Tool::Mute;
     click(&ctx, &mut app, View::Roll, g.point(4.5, 50));
     assert!(app.song.patterns[0].notes[1].muted);
@@ -1418,7 +1418,9 @@ fn notes_copied_in_one_open_roll_paste_into_another() {
 fn a_channels_notes_copy_paste_duplicate_and_clear_from_the_rack() {
     let mut app = app();
     let (from, to) = (app.song.instruments[0].id, app.song.instruments[1].id);
-    app.song.patterns[0].notes.clear();
+    std::sync::Arc::make_mut(&mut app.song.patterns[0])
+        .notes
+        .clear();
     for k in 0..3 {
         app.song.add_note(
             1,
@@ -1558,7 +1560,7 @@ fn the_rolls_playhead_follows_its_clip_in_the_song() {
     use keyframexl::sequence::Clip;
     let mut song = Song::default();
     let pid = song.patterns[0].id;
-    song.patterns[0].length = BAR;
+    std::sync::Arc::make_mut(&mut song.patterns[0]).length = BAR;
     let mut c = Clip::new(pid, 2 * BAR, 0);
     c.offset = 4 * STEP;
     c.length = Some(3 * BAR);

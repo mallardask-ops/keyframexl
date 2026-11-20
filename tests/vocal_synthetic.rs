@@ -56,10 +56,12 @@ fn song_with(bank: &str, notes: &[(&str, u8, i64, i64)]) -> Song {
             voice: Voice::new(bank, "test"),
         },
     ));
-    song.patterns[0].length = 4 * BAR;
+    std::sync::Arc::make_mut(&mut song.patterns[0]).length = 4 * BAR;
     for (l, p, at, len) in notes {
         let id = song.add_note(1, Note::new(10, at * STEP, len * STEP, *p, 100));
-        song.patterns[0].lyrics.insert(id, l.to_string());
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .lyrics
+            .insert(id, l.to_string());
     }
     song
 }
@@ -153,7 +155,9 @@ fn copying_a_note_copies_its_lyric_and_ids_stay_unique() {
         Some("ka")
     );
     // A deleted note's lyric keeps its id taken, so a new note cannot inherit it by accident.
-    song.patterns[0].notes.retain(|n| n.id != copy);
+    std::sync::Arc::make_mut(&mut song.patterns[0])
+        .notes
+        .retain(|n| n.id != copy);
     let fresh = song.add_note(1, Note::new(10, 8 * STEP, STEP, 60, 100));
     assert!(!song.patterns[0].lyrics.contains_key(&fresh));
 }

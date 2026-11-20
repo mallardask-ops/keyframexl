@@ -640,7 +640,7 @@ pub struct Song {
     pub instruments: Vec<Instrument>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_fl: Option<std::sync::Arc<NativeFlProject>>,
-    pub patterns: Vec<Pattern>,
+    pub patterns: Vec<std::sync::Arc<Pattern>>,
     pub clips: Vec<Clip>,
     /// Named or muted playlist tracks; index = `Clip::track`.
     #[serde(default)]
@@ -707,7 +707,7 @@ impl Default for Song {
                 Instrument::new(4, "Bass", InstrumentKind::Sampler { preset: None }),
             ],
             native_fl: None,
-            patterns: vec![Pattern::new(1, "Pattern 1")],
+            patterns: vec![Pattern::new(1, "Pattern 1").into()],
             clips: vec![],
             tracks: vec![],
             mixer: default_mixer(),
@@ -750,7 +750,12 @@ impl Song {
                 }
             }
         }
-        for pattern in &mut self.patterns {
+        for pattern in self
+            .patterns
+            .iter_mut()
+            .filter(|p| p.automation.is_some())
+            .map(std::sync::Arc::make_mut)
+        {
             if let Some(env) = &mut pattern.automation {
                 use crate::automation::Target::*;
                 match &mut env.target {
@@ -883,7 +888,12 @@ impl Song {
                 };
             }
         }
-        for pattern in &mut self.patterns {
+        for pattern in self
+            .patterns
+            .iter_mut()
+            .filter(|p| p.automation.is_some())
+            .map(std::sync::Arc::make_mut)
+        {
             if let Some(env) = &mut pattern.automation {
                 use crate::automation::Target::*;
                 let track = match &mut env.target {
@@ -914,18 +924,29 @@ impl Song {
         add(3, &[0, 2, 4, 6, 8, 10, 12], 100);
         add(3, &[14], 127);
         song.add_note(1, Note::new(4, 0, BAR, 48, 100));
-        song.patterns[0].slides.push(Glide {
-            start: 6 * STEP,
-            length: 4 * STEP,
-            target: 60,
-            group: 0,
-            instrument: 4,
-        });
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .slides
+            .push(Glide {
+                start: 6 * STEP,
+                length: 4 * STEP,
+                target: 60,
+                group: 0,
+                instrument: 4,
+            });
         song
     }
 
     pub fn pattern(&self, id: u64) -> Option<&Pattern> {
-        self.patterns.iter().find(|p| p.id == id)
+        self.patterns.iter().find(|p| p.id == id).map(|p| &**p)
+    }
+
+    /// Mutable pattern by id. Copies it first only while another snapshot (the
+    /// audio thread, the undo history) still shares it.
+    pub fn pattern_mut(&mut self, id: u64) -> Option<&mut Pattern> {
+        self.patterns
+            .iter_mut()
+            .find(|p| p.id == id)
+            .map(std::sync::Arc::make_mut)
     }
 
     pub fn instrument(&self, id: u64) -> Option<&Instrument> {
@@ -955,12 +976,10 @@ impl Song {
             .flatten();
         note.id = self.next_note_id();
         let id = note.id;
-        if let Some(l) = lyric
-            && let Some(p) = self.patterns.iter_mut().find(|p| p.id == pattern)
-        {
-            p.lyrics.insert(id, l);
-        }
-        if let Some(p) = self.patterns.iter_mut().find(|p| p.id == pattern) {
+        if let Some(p) = self.pattern_mut(pattern) {
+            if let Some(l) = lyric {
+                p.lyrics.insert(id, l);
+            }
             p.notes.push(note);
         }
         id
@@ -971,6 +990,15 @@ impl Song {
         let mut seen = std::collections::HashSet::new();
         let mut next = self.next_note_id();
         for p in &mut self.patterns {
+            let mut own = std::collections::HashSet::new();
+            if p.notes
+                .iter()
+                .all(|n| n.id != 0 && !seen.contains(&n.id) && own.insert(n.id))
+            {
+                seen.extend(own);
+                continue;
+            }
+            let p = std::sync::Arc::make_mut(p);
             for n in &mut p.notes {
                 if n.id == 0 || !seen.insert(n.id) {
                     n.id = next;
@@ -1005,7 +1033,7 @@ impl Song {
         p.name = format!("Pattern {}", p.id);
         p.renumber_notes(self.next_note_id());
         let new = p.id;
-        self.patterns.push(p);
+        self.patterns.push(p.into());
         self.clips[index].pattern = new;
         Ok(new)
     }
@@ -1242,7 +1270,11 @@ impl Song {
             return Err("Channel missing");
         }
         self.instruments.retain(|i| i.id != id);
-        for p in &mut self.patterns {
+        for p in self.patterns.iter_mut().filter(|p| {
+            p.notes.iter().any(|n| n.instrument == id)
+                || p.slides.iter().any(|s| s.instrument == id)
+        }) {
+            let p = std::sync::Arc::make_mut(p);
             p.notes.retain(|n| n.instrument != id);
             p.slides.retain(|s| s.instrument != id);
         }
@@ -1427,7 +1459,7 @@ mod mixer_edit_tests {
         ] {
             let mut pattern = Pattern::new(100 + song.patterns.len() as u64, "Automation");
             pattern.automation = Some(Envelope::flat(target, 0.5, BAR));
-            song.patterns.push(pattern);
+            song.patterns.push(pattern.into());
         }
         let first = song.patterns.len() - 3;
         assert_eq!(song.insert_track(2), 2);
@@ -1657,7 +1689,7 @@ mod tests {
             ..Song::demo()
         };
         let id = s.unique(1).unwrap();
-        s.patterns[1].notes.clear();
+        std::sync::Arc::make_mut(&mut s.patterns[1]).notes.clear();
         assert!(!s.patterns[0].notes.is_empty());
         assert_eq!(s.clips[1].pattern, id);
         assert!(s.validate().is_ok());
@@ -1695,7 +1727,9 @@ mod tests {
         song.solo(2);
         assert!(song.is_solo(2) && song.instruments[0].muted);
         let soloed = energy(&song);
-        song.patterns[0].notes.retain(|n| n.instrument != 1);
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .retain(|n| n.instrument != 1);
         assert_eq!(energy(&song), soloed);
         song.solo(2);
         assert!(
@@ -1707,7 +1741,7 @@ mod tests {
     #[test]
     fn off_grid_notes_and_long_patterns_are_valid() {
         let mut song = Song::default();
-        song.patterns[0].length = 2 * BAR;
+        std::sync::Arc::make_mut(&mut song.patterns[0]).length = 2 * BAR;
         // A triplet 8th (160 ticks) and a note 37 ticks late: representable now.
         song.add_note(1, Note::new(4, 160, 160, 60, 100));
         song.add_note(1, Note::new(4, BAR + 37, 300, 64, 100));
@@ -1718,7 +1752,7 @@ mod tests {
         let back: Song = serde_json::from_str(&json).unwrap();
         assert_eq!(back.patterns[0].notes, song.patterns[0].notes);
         // Past the pattern end is rejected.
-        song.patterns[0].notes[1].length = BAR;
+        std::sync::Arc::make_mut(&mut song.patterns[0]).notes[1].length = BAR;
         assert!(song.validate().is_err());
     }
 
@@ -1861,7 +1895,7 @@ mod tests {
         let mut song = Song::demo();
         let bar = loop_frames(&song, 1, false, RATE);
         let step = bar / 16;
-        song.patterns[0].loop_range = Some((4 * STEP, 8 * STEP));
+        std::sync::Arc::make_mut(&mut song.patterns[0]).loop_range = Some((4 * STEP, 8 * STEP));
         assert_eq!(
             loop_bounds(&song, None, 1, false, RATE),
             (4 * step, 8 * step),
@@ -1874,9 +1908,9 @@ mod tests {
         );
         assert!(song.validate().is_ok());
         // A span past the pattern's end stops at the end.
-        song.patterns[0].loop_range = Some((8 * STEP, 40 * STEP));
+        std::sync::Arc::make_mut(&mut song.patterns[0]).loop_range = Some((8 * STEP, 40 * STEP));
         assert_eq!(loop_bounds(&song, None, 1, false, RATE), (8 * step, bar));
-        song.patterns[0].loop_range = Some((8 * STEP, 8 * STEP));
+        std::sync::Arc::make_mut(&mut song.patterns[0]).loop_range = Some((8 * STEP, 8 * STEP));
         assert!(song.validate().is_err(), "an empty span is refused");
     }
 
@@ -2011,5 +2045,71 @@ mod clip_tests {
         song.clips[0].muted = true;
         assert_eq!(energy_in(&render(&song, 1, true), 0.0, 2.0), 0.0);
         assert_eq!(song.track_name(2), "Track 3");
+    }
+}
+
+#[cfg(test)]
+mod sharing_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    fn big_song(patterns: u64, notes: i64) -> Song {
+        let mut song = Song::default();
+        song.patterns.clear();
+        for id in 1..=patterns {
+            let mut p = Pattern::new(id, &format!("P{id}"));
+            for k in 0..notes {
+                p.notes.push(Note::new(1, k * STEP, STEP, 60, 100));
+            }
+            song.patterns.push(p.into());
+        }
+        song
+    }
+
+    #[test]
+    fn editing_one_pattern_copies_only_that_pattern() {
+        let mut song = big_song(5, 50);
+        let snapshot = song.clone(); // what the audio thread / undo holds
+        song.pattern_mut(3).unwrap().notes[0].pitch = 72;
+        for (old, new) in snapshot.patterns.iter().zip(&song.patterns) {
+            assert_eq!(Arc::ptr_eq(old, new), old.id != 3, "pattern {}", old.id);
+        }
+        assert_eq!(snapshot.pattern(3).unwrap().notes[0].pitch, 60);
+        assert_eq!(song.pattern(3).unwrap().notes[0].pitch, 72);
+        // Unshared: edited in place, no copy.
+        let before = Arc::as_ptr(&song.patterns[2]);
+        drop(snapshot);
+        song.pattern_mut(3).unwrap().notes[0].pitch = 74;
+        assert_eq!(Arc::as_ptr(&song.patterns[2]), before);
+    }
+
+    #[test]
+    fn removing_a_channel_leaves_unrelated_patterns_shared() {
+        let mut song = big_song(3, 10);
+        let other = song.add_sampler("Other");
+        song.add_note(2, Note::new(other, 0, STEP, 60, 100));
+        let snapshot = song.clone();
+        song.remove_instrument(other).unwrap();
+        assert!(Arc::ptr_eq(&snapshot.patterns[0], &song.patterns[0]));
+        assert!(!Arc::ptr_eq(&snapshot.patterns[1], &song.patterns[1]));
+        assert!(song.patterns[1].notes.iter().all(|n| n.instrument != other));
+    }
+
+    /// `cargo test --release --lib -- --ignored --nocapture edit_cost`
+    #[test]
+    #[ignore]
+    fn edit_cost() {
+        let mut song = big_song(100, 2000);
+        let t = std::time::Instant::now();
+        let n = 200;
+        let mut held = Vec::new();
+        for i in 0..n {
+            held.push(song.clone());
+            song.pattern_mut(1 + i % 100).unwrap().notes[0].pitch ^= 1;
+        }
+        eprintln!(
+            "clone + one-note edit, 100×2000 notes: {:.1} µs",
+            t.elapsed().as_secs_f64() * 1e6 / n as f64
+        );
     }
 }

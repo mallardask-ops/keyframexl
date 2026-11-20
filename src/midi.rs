@@ -876,17 +876,20 @@ pub fn import_smf(
         }
         n += 1;
     };
-    work.patterns.push(crate::sequence::Pattern {
-        id: pid,
-        name: pname,
-        length,
-        notes: vec![],
-        slides: vec![],
-        automation: None,
-        color: None,
-        loop_range: None,
-        lyrics: Default::default(),
-    });
+    work.patterns.push(
+        crate::sequence::Pattern {
+            id: pid,
+            name: pname,
+            length,
+            notes: vec![],
+            slides: vec![],
+            automation: None,
+            color: None,
+            loop_range: None,
+            lyrics: Default::default(),
+        }
+        .into(),
+    );
 
     let group_name = |ti: usize, ch: u8, program: Option<u8>| -> String {
         let (tname, iname) = &track_names[ti];
@@ -1116,7 +1119,9 @@ mod tests {
         let mut song = Song::default();
         let pid = song.patterns[0].id;
         let ch = song.instruments[3].id; // Bass: keys go out as they are
-        song.patterns[0].notes.clear();
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .clear();
         for (k, key) in [36u8, 38, 42, 46].iter().enumerate() {
             song.add_note(
                 pid,
@@ -1689,13 +1694,7 @@ mod bench {
             at = e.process(&song, r.pattern, false, at, &mut buf, true);
         }
         let all = t.elapsed().as_secs_f64();
-        for n in &mut song
-            .patterns
-            .iter_mut()
-            .find(|p| p.id == r.pattern)
-            .unwrap()
-            .notes
-        {
+        for n in &mut song.pattern_mut(r.pattern).unwrap().notes {
             n.muted = true;
         }
         let mut e = crate::engine::Engine::new(48_000);

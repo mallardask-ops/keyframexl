@@ -400,11 +400,7 @@ impl App {
         }
         let mut song = self.song.clone();
         let first_id = song.next_note_id();
-        let pat = song
-            .patterns
-            .iter_mut()
-            .find(|p| p.id == s.pattern)
-            .unwrap();
+        let pat = song.pattern_mut(s.pattern).unwrap();
         pat.notes = s.notes.clone();
         pat.length = ((s.span() + STEP - 1) / STEP) * STEP;
         pat.loop_range = Some((0, s.span()));
@@ -785,7 +781,9 @@ mod tests {
             .find(|n| n.instrument == inst)
             .unwrap()
             .id;
-        song.patterns[0].lyrics.insert(id, "la".into());
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .lyrics
+            .insert(id, "la".into());
         let original = serde_json::to_value(&song).unwrap();
         let other: Vec<_> = song.patterns[0]
             .notes

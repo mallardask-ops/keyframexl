@@ -1271,7 +1271,7 @@ impl App {
                         },
                     );
                 }
-                if let Some(p) = self.song.patterns.iter_mut().find(|p| p.id == pid) {
+                if let Some(p) = self.song.pattern_mut(pid) {
                     let slides: Vec<_> = p
                         .slides
                         .iter()

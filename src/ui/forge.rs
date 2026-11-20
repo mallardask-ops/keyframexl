@@ -649,7 +649,7 @@ impl App {
             .round()
             .max(1.0) as i64;
         pat.notes.push(Note::new(b.channel, 0, ticks, b.key, 100));
-        song.patterns.push(pat);
+        song.patterns.push(pat.into());
         if let Some(i) = song.instruments.iter_mut().find(|i| i.id == b.channel) {
             i.muted = false;
         }

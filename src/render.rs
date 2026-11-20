@@ -779,9 +779,9 @@ mod tests {
 
     fn reverb_song() -> Song {
         let mut s = Song::default();
-        s.patterns[0].notes.clear();
+        std::sync::Arc::make_mut(&mut s.patterns[0]).notes.clear();
         s.add_note(1, Note::new(1, 0, STEP, 60, 110));
-        s.patterns[0].length = BAR;
+        std::sync::Arc::make_mut(&mut s.patterns[0]).length = BAR;
         s.mixer[0].fx.push(FxSlot::new(FxKind::Reverb));
         s
     }
@@ -892,7 +892,9 @@ mod tests {
     fn export_keeps_float_headroom_for_normalizing() {
         use crate::sequence::{FADER_MAX, InstrumentKind, Note, STEP, SamplePreset};
         let mut song = Song::default();
-        song.patterns[0].notes.clear();
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .clear();
         let preset = SamplePreset::from_sample("Tone", RATE, vec![[1.0; 2]; 4096]);
         let id = song.add_channel(
             "Tone",
@@ -900,7 +902,7 @@ mod tests {
                 preset: Some(std::sync::Arc::new(preset)),
             },
         );
-        song.patterns[0]
+        std::sync::Arc::make_mut(&mut song.patterns[0])
             .notes
             .push(Note::new(id, 0, STEP * 4, 60, 127));
         song.mixer[0].volume = FADER_MAX;

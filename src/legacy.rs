@@ -206,6 +206,7 @@ impl V1Song {
                     lyrics: Default::default(),
                 }
             })
+            .map(std::sync::Arc::new)
             .collect();
         Song {
             native_fl: None,

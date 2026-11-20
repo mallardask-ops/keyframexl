@@ -535,7 +535,7 @@ mod tests {
                 },
             ],
         });
-        song.patterns.push(p);
+        song.patterns.push(p.into());
         let mut c = Clip::new(50, BAR, 3);
         c.length = Some(2 * BAR);
         song.clips.push(c);

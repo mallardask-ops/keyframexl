@@ -1428,7 +1428,7 @@ pub fn read_flp(bytes: &[u8]) -> Result<(Song, FlpReport), String> {
         p.length = (end.max(1) + BAR - 1) / BAR * BAR;
         report.notes += p.notes.len();
         report.slides += p.slides.len();
-        song.patterns.push(p);
+        song.patterns.push(p.into());
     }
     report.patterns = song.patterns.len();
     // Inserts that only automation names still have to exist.
@@ -1650,11 +1650,11 @@ pub fn read_flp(bytes: &[u8]) -> Result<(Song, FlpReport), String> {
                 let mut p = Pattern::new(next_id, &c.name);
                 p.color = c.color;
                 p.notes.push(Note::new(inst, 0, len, 60 + k as u8, 127));
-                song.patterns.push(p);
+                song.patterns.push(p.into());
                 next_id += 1;
                 next_id - 1
             });
-            if let Some(p) = song.patterns.iter_mut().find(|p| p.id == pattern) {
+            if let Some(p) = song.pattern_mut(pattern) {
                 let n = &mut p.notes[0];
                 n.length = n.length.max(len);
                 p.length = p.length.max(len);
@@ -1690,7 +1690,7 @@ pub fn read_flp(bytes: &[u8]) -> Result<(Song, FlpReport), String> {
             .collect();
     }
     if song.patterns.is_empty() {
-        song.patterns.push(Pattern::new(1, "Pattern 1"));
+        song.patterns.push(Pattern::new(1, "Pattern 1").into());
     }
     fit_limits(&mut song);
     song.ensure_note_ids();
@@ -1960,10 +1960,11 @@ fn fit_limits(song: &mut Song) {
         if let Some(p) = song.patterns.iter_mut().find(|p| p.id == c.pattern)
             && p.automation.is_some()
         {
+            let p = std::sync::Arc::make_mut(p);
             p.length = p.length.max(c.offset + c.length.unwrap_or(1)).min(max);
         }
     }
-    for p in &mut song.patterns {
+    for p in song.patterns.iter_mut().map(std::sync::Arc::make_mut) {
         p.length = ((p.length.max(1) + STEP - 1) / STEP * STEP).min(max);
         let len = p.length;
         p.notes.retain(|n| n.start >= 0 && n.start < len);
@@ -2039,7 +2040,12 @@ pub fn channel_key(channel: u32) -> u64 {
 pub fn resolve_plugin_keys(song: &mut Song, ids: &BTreeMap<u64, u64>) -> Vec<String> {
     use crate::automation::Target;
     let mut gone = Vec::new();
-    for p in &mut song.patterns {
+    for p in song
+        .patterns
+        .iter_mut()
+        .filter(|p| p.automation.is_some())
+        .map(std::sync::Arc::make_mut)
+    {
         if let Some(env) = &mut p.automation
             && let Target::PluginParam { plugin, .. } = &mut env.target
             && *plugin & PLUGIN_KEY != 0
@@ -2385,7 +2391,7 @@ fn build_automation(
                 points,
                 playback,
             });
-            song.patterns.push(p);
+            song.patterns.push(p.into());
             made.entry(c.index).or_default().push(next);
             report.automations += 1;
             next += 1;

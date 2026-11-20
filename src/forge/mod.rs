@@ -763,7 +763,7 @@ mod tests {
     fn the_offline_render_plays_forge_notes() {
         let (mut song, id) = song_with(Recipe::Hit.patch());
         let pat = song.patterns[0].id;
-        song.patterns[0]
+        std::sync::Arc::make_mut(&mut song.patterns[0])
             .notes
             .push(crate::sequence::Note::new(id, 0, 120, ROOT_KEY, 100));
         let out = crate::engine::render(&song, pat, false, RATE);

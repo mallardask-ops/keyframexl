@@ -969,7 +969,7 @@ impl App {
             });
         if done {
             self.checkpoint();
-            if let Some(p) = self.song.patterns.iter_mut().find(|p| p.id == id) {
+            if let Some(p) = self.song.pattern_mut(id) {
                 p.name = text.trim().to_string();
             }
             self.say(

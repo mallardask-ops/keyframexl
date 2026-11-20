@@ -748,8 +748,7 @@ impl App {
             if let Some(id) = created {
                 self.pattern_mut().notes.retain(|n| n.id != id);
                 for song in self.history.iter_mut().rev().take(2) {
-                    if let Some(pattern) = song.patterns.iter_mut().find(|p| p.id == self.selected)
-                    {
+                    if let Some(pattern) = song.pattern_mut(self.selected) {
                         pattern.notes.retain(|n| n.id != id);
                     }
                 }

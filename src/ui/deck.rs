@@ -1242,13 +1242,19 @@ fn tempo_fractional(rect: Rect, x: f32) -> bool {
 
 /// Nearest note (non-automation) pattern before / after `from` in list order.
 /// Automation clips live in the playlist only (FL): ◀ / ▶ never land on them.
-fn prev_note_pattern(patterns: &[keyframexl::sequence::Pattern], from: usize) -> Option<usize> {
+fn prev_note_pattern(
+    patterns: &[std::sync::Arc<keyframexl::sequence::Pattern>],
+    from: usize,
+) -> Option<usize> {
     (0..from.min(patterns.len()))
         .rev()
         .find(|&i| patterns[i].automation.is_none())
 }
 
-fn next_note_pattern(patterns: &[keyframexl::sequence::Pattern], from: usize) -> Option<usize> {
+fn next_note_pattern(
+    patterns: &[std::sync::Arc<keyframexl::sequence::Pattern>],
+    from: usize,
+) -> Option<usize> {
     (from.saturating_add(1)..patterns.len()).find(|&i| patterns[i].automation.is_none())
 }
 
@@ -1286,7 +1292,12 @@ mod note_step_tests {
 
     #[test]
     fn steppers_skip_automation_clips() {
-        let ps = vec![notes(1), auto(2), notes(3), auto(4)];
+        let ps: Vec<std::sync::Arc<_>> = vec![
+            notes(1).into(),
+            auto(2).into(),
+            notes(3).into(),
+            auto(4).into(),
+        ];
         assert_eq!(prev_note_pattern(&ps, 2), Some(0));
         assert_eq!(next_note_pattern(&ps, 0), Some(2));
         // At the last note pattern there is no next note: + makes a new one.
@@ -1296,7 +1307,7 @@ mod note_step_tests {
         assert_eq!(prev_note_pattern(&ps, 1), Some(0));
         assert_eq!(next_note_pattern(&ps, 1), Some(2));
         // A trailing automation clip still counts as the end.
-        let ps = vec![notes(1), auto(2)];
+        let ps: Vec<std::sync::Arc<_>> = vec![notes(1).into(), auto(2).into()];
         assert_eq!(next_note_pattern(&ps, 0), None);
     }
 }

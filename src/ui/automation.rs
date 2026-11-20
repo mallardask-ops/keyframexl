@@ -385,7 +385,7 @@ impl App {
                 let local_min = (first_tick - clip_start + clip_offset).max(0);
                 let local_max = (last_tick - clip_start + clip_offset).max(local_min);
                 let needed_len = ((local_max / BAR) + 1) * BAR;
-                let pat = &mut self.song.patterns[pi];
+                let pat = std::sync::Arc::make_mut(&mut self.song.patterns[pi]);
                 if needed_len > pat.length {
                     pat.length = needed_len;
                 }
@@ -463,7 +463,7 @@ impl App {
                     points,
                     playback: Playback::Clip,
                 });
-                self.song.patterns.push(pat);
+                self.song.patterns.push(pat.into());
                 let track = self
                     .song
                     .clips
@@ -507,7 +507,7 @@ impl App {
         let mut p = Pattern::new(id, &name);
         p.length = NEW_BARS * BAR;
         p.automation = Some(Envelope::flat(target, self.auto_current(target), p.length));
-        self.song.patterns.push(p);
+        self.song.patterns.push(p.into());
         let track = self
             .song
             .clips
@@ -751,7 +751,10 @@ impl App {
                         return None;
                     }
                     // Dragging empty space: a new point there, then drag it.
-                    let e = self.song.patterns[pi].automation.as_mut().expect("checked");
+                    let e = std::sync::Arc::make_mut(&mut self.song.patterns[pi])
+                        .automation
+                        .as_mut()
+                        .expect("checked");
                     e.points.push(Point {
                         tick: tick_at(pos.x),
                         value: value_at(pos.y),
@@ -780,7 +783,10 @@ impl App {
                 resp.interact_pointer_pos(),
             )
         {
-            let e = self.song.patterns[pi].automation.as_mut().expect("checked");
+            let e = std::sync::Arc::make_mut(&mut self.song.patterns[pi])
+                .automation
+                .as_mut()
+                .expect("checked");
             if i >= 1_000_000 {
                 let k = i - 1_000_000;
                 if let Some(q) = e.points.get_mut(k) {
@@ -813,7 +819,10 @@ impl App {
             && hit(pos).is_none()
         {
             self.checkpoint();
-            let e = self.song.patterns[pi].automation.as_mut().expect("checked");
+            let e = std::sync::Arc::make_mut(&mut self.song.patterns[pi])
+                .automation
+                .as_mut()
+                .expect("checked");
             e.points.push(Point {
                 tick: tick_at(pos.x),
                 value: value_at(pos.y),
@@ -827,7 +836,7 @@ impl App {
             && env.points.len() > 2
         {
             self.checkpoint();
-            self.song.patterns[pi]
+            std::sync::Arc::make_mut(&mut self.song.patterns[pi])
                 .automation
                 .as_mut()
                 .expect("checked")
@@ -839,7 +848,7 @@ impl App {
 
     fn set_auto_length(&mut self, pi: usize, len: Tick) {
         self.checkpoint();
-        let p = &mut self.song.patterns[pi];
+        let p = std::sync::Arc::make_mut(&mut self.song.patterns[pi]);
         let old = p.length;
         p.length = len.max(BAR);
         if let Some(e) = &mut p.automation {

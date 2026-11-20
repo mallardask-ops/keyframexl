@@ -23,7 +23,7 @@ fn sings_a_line() {
             voice: Voice::new(&bank, "Teto"),
         },
     ));
-    song.patterns[0].length = 4 * BAR;
+    std::sync::Arc::make_mut(&mut song.patterns[0]).length = 4 * BAR;
     // か ら お け ー: C4 D4 E4 G4 held G4, then a rest and こんにちは.
     let line = [
         ("ka", 60u8, 4i64),
@@ -41,7 +41,9 @@ fn sings_a_line() {
     let mut t = 0;
     for (l, p, len) in line {
         let id = song.add_note(1, Note::new(10, t * STEP, len * STEP, p, 100));
-        song.patterns[0].lyrics.insert(id, l.to_string());
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .lyrics
+            .insert(id, l.to_string());
         t += len;
     }
     let audio = keyframexl::engine::render(&song, 1, false, 48_000);
@@ -108,7 +110,9 @@ fn writes_a_vocal_project() {
     let b = banks.first().expect("Teto installed");
     let mut song = Song::default();
     song.instruments.clear();
-    song.patterns[0].notes.clear();
+    std::sync::Arc::make_mut(&mut song.patterns[0])
+        .notes
+        .clear();
     song.instruments.push(Instrument::new(
         1,
         "Kasane Teto",
@@ -116,7 +120,7 @@ fn writes_a_vocal_project() {
             voice: Voice::new(&b.path.to_string_lossy(), &b.name),
         },
     ));
-    song.patterns[0].length = 4 * BAR;
+    std::sync::Arc::make_mut(&mut song.patterns[0]).length = 4 * BAR;
     let line = [
         ("ka", 60u8, 4i64),
         ("ra", 62, 4),
@@ -134,7 +138,9 @@ fn writes_a_vocal_project() {
     for (l, p, len) in line {
         if l != "-" {
             let id = song.add_note(1, Note::new(1, t * STEP, len * STEP, p, 100));
-            song.patterns[0].lyrics.insert(id, l.to_string());
+            std::sync::Arc::make_mut(&mut song.patterns[0])
+                .lyrics
+                .insert(id, l.to_string());
         }
         t += len;
     }
@@ -157,7 +163,9 @@ fn looping_playback_starts_each_phrase_on_time() {
     ));
     for (l, p, at, len) in [("по", 63u8, 1i64, 4i64), ("д", 63, 5, 2), ("ро", 61, 7, 2)] {
         let id = song.add_note(1, Note::new(10, at * STEP, len * STEP, p, 100));
-        song.patterns[0].lyrics.insert(id, l.to_string());
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .lyrics
+            .insert(id, l.to_string());
     }
     let (map, msgs) = keyframexl::vocal::host::render_all(&song, 48_000);
     println!(
@@ -206,7 +214,9 @@ fn writes_screenshot_project() {
     let b = &keyframexl::vocal::install::installed()[0];
     let mut song = Song::default();
     song.instruments.clear();
-    song.patterns[0].notes.clear();
+    std::sync::Arc::make_mut(&mut song.patterns[0])
+        .notes
+        .clear();
     song.instruments.push(Instrument::new(
         1,
         "Vocal",
@@ -216,7 +226,9 @@ fn writes_screenshot_project() {
     ));
     for (l, p, at, len) in [("по", 63u8, 1i64, 4i64), ("д", 63, 5, 2), ("ро", 61, 7, 2)] {
         let id = song.add_note(1, Note::new(1, at * STEP, len * STEP, p, 100));
-        song.patterns[0].lyrics.insert(id, l.to_string());
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .lyrics
+            .insert(id, l.to_string());
     }
     keyframexl::project_io::save(&song, std::path::Path::new(&out)).unwrap();
 }

@@ -2560,7 +2560,7 @@ impl App {
                         "pat-color-default" => {
                             let pid = clips[i].pattern;
                             self.checkpoint();
-                            if let Some(p) = self.song.patterns.iter_mut().find(|p| p.id == pid) {
+                            if let Some(p) = self.song.pattern_mut(pid) {
                                 p.color = None;
                             }
                             self.publish();
@@ -2571,8 +2571,7 @@ impl App {
                             let hex = &w["pat-color-".len()..];
                             if let Ok(v) = u32::from_str_radix(hex, 16) {
                                 self.checkpoint();
-                                if let Some(p) = self.song.patterns.iter_mut().find(|p| p.id == pid)
-                                {
+                                if let Some(p) = self.song.pattern_mut(pid) {
                                     p.color = Some(v);
                                 }
                                 self.publish();

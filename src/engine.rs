@@ -3737,8 +3737,8 @@ mod tests {
         let mut song = song_with(vec![[0.5; 2]; RATE as usize * 2], |z, _| {
             z.params.one_shot = true
         });
-        song.patterns[0].notes = vec![note(0, 1, 60)];
-        song.patterns[0].length = 4 * crate::sequence::BAR;
+        std::sync::Arc::make_mut(&mut song.patterns[0]).notes = vec![note(0, 1, 60)];
+        std::sync::Arc::make_mut(&mut song.patterns[0]).length = 4 * crate::sequence::BAR;
         let bass = song.instruments.iter().position(|i| i.id == 4).unwrap();
         let mut e = Engine::new(RATE);
         let mut buf = vec![0.0f32; 1000 * 2];
@@ -4254,9 +4254,11 @@ mod tests {
         let mut song = Song::default();
         song.tempo = 120.0;
         song.swing = 0.0;
-        song.patterns[0].notes.clear();
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .clear();
         song.add_note(1, note(0, 1, 60));
-        song.patterns[0].length = BAR;
+        std::sync::Arc::make_mut(&mut song.patterns[0]).length = BAR;
         song.clips = vec![Clip::new(1, 2 * BAR, 0)];
         let onset_after = |v: &[[f32; 2]], from: usize| {
             v[from..]
@@ -4303,9 +4305,11 @@ mod tests {
     fn a_clip_longer_than_its_pattern_repeats_it() {
         use crate::sequence::{BAR, Clip};
         let mut song = Song::default();
-        song.patterns[0].notes.clear();
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .clear();
         song.add_note(1, note(0, 1, 60));
-        song.patterns[0].length = BAR;
+        std::sync::Arc::make_mut(&mut song.patterns[0]).length = BAR;
         let one = Clip::new(1, 0, 0);
         song.clips = vec![one];
         let single = render(&song, 1, true, RATE);
@@ -4359,10 +4363,12 @@ mod tests {
     #[test]
     fn drum_voices_follow_the_key_and_stay_exact_at_c5() {
         let mut song = Song::default();
-        song.patterns[0].notes.clear();
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .clear();
         song.add_note(1, Note::new(1, 0, crate::sequence::STEP, 60, 100));
         let c5 = render(&song, 1, false, RATE);
-        song.patterns[0].notes[0].pitch = 72;
+        std::sync::Arc::make_mut(&mut song.patterns[0]).notes[0].pitch = 72;
         let c6 = render(&song, 1, false, RATE);
         let sound = |v: &[[f32; 2]]| v.iter().rposition(|f| f[0].abs() > 1e-4).unwrap_or(0);
         let (a, b) = (sound(&c5), sound(&c6));
@@ -4370,7 +4376,7 @@ mod tests {
             (b as f64 / a as f64 - 0.5).abs() < 0.05,
             "an octave up runs twice as fast: {a} -> {b}"
         );
-        song.patterns[0].notes[0].pitch = 60;
+        std::sync::Arc::make_mut(&mut song.patterns[0]).notes[0].pitch = 60;
         assert_eq!(
             render(&song, 1, false, RATE),
             c5,
@@ -4381,11 +4387,13 @@ mod tests {
     #[test]
     fn porta_notes_glide_in_from_the_previous_note() {
         let mut song = Song::default();
-        song.patterns[0].notes.clear();
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .clear();
         song.add_note(1, note(0, 4, 48));
         song.add_note(1, note(4, 4, 60));
         let plain = render(&song, 1, false, RATE);
-        song.patterns[0].notes[1].porta = true;
+        std::sync::Arc::make_mut(&mut song.patterns[0]).notes[1].porta = true;
         let porta = render(&song, 1, false, RATE);
         let step = (RATE as f64 * 60.0 / song.tempo / 4.0) as usize;
         assert_eq!(
@@ -4470,7 +4478,9 @@ mod tests {
         let mut song = song_with(vec![[0.5; 2]; RATE as usize * 4], |z, _| {
             z.adsr.release = 0.5;
         });
-        song.patterns[0].notes.push(note(15, 1, 60));
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .push(note(15, 1, 60));
         let length = loop_frames(&song, 1, false, RATE);
         let mut engine = Engine::new(RATE);
         let mut buf = vec![0.0f32; length as usize * 2];
@@ -4486,14 +4496,18 @@ mod tests {
             .map(|i| [if i % 2 == 0 { 0.5 } else { -0.5 }; 2])
             .collect();
         let mut dry = song_with(nyquist.clone(), |_, _| {});
-        dry.patterns[0].notes.push(note(0, 8, 60));
+        std::sync::Arc::make_mut(&mut dry.patterns[0])
+            .notes
+            .push(note(0, 8, 60));
         let mut wet = song_with(nyquist, |z, _| {
             for f in &mut z.params.filters {
                 f.kind = FilterKind::Lowpass;
                 f.cutoff = 300.0;
             }
         });
-        wet.patterns[0].notes.push(note(0, 8, 60));
+        std::sync::Arc::make_mut(&mut wet.patterns[0])
+            .notes
+            .push(note(0, 8, 60));
         let (d, w) = (
             energy(&render(&dry, 1, false, RATE)),
             energy(&render(&wet, 1, false, RATE)),
@@ -4506,7 +4520,8 @@ mod tests {
         let mut song = song_with(vec![[0.5; 2]; RATE as usize], |_, p| {
             p.play_mode = PlayMode::Mono
         });
-        song.patterns[0].notes = vec![note(0, 8, 60), note(2, 8, 64)];
+        std::sync::Arc::make_mut(&mut song.patterns[0]).notes =
+            vec![note(0, 8, 60), note(2, 8, 64)];
         let mut e = Engine::new(RATE);
         let mut buf = vec![0.0f32; 2 * (RATE as usize / 2)];
         e.process(&song, 1, false, 0, &mut buf, false);
@@ -4515,7 +4530,8 @@ mod tests {
         let mut song = song_with(vec![[0.5; 2]; RATE as usize], |z, _| {
             z.params.mute_group = 1
         });
-        song.patterns[0].notes = vec![note(0, 8, 60), note(2, 8, 64)];
+        std::sync::Arc::make_mut(&mut song.patterns[0]).notes =
+            vec![note(0, 8, 60), note(2, 8, 64)];
         let mut e = Engine::new(RATE);
         e.process(&song, 1, false, 0, &mut buf, false);
         assert_eq!(e.voices.iter().filter(|v| v.kill.is_none()).count(), 1);
@@ -4527,7 +4543,9 @@ mod tests {
             .map(|i| [i as f32 / RATE as f32; 2])
             .collect();
         let mut song = song_with(ramp.clone(), |z, _| z.params.one_shot = true);
-        song.patterns[0].notes.push(note(0, 1, 60));
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .push(note(0, 1, 60));
         let out = render(&song, 1, false, RATE);
         let step = (seconds_per_step(120.0) * RATE as f64) as usize;
         assert!(
@@ -4538,7 +4556,9 @@ mod tests {
             z.params.reverse = true;
             z.adsr.attack = 0.0;
         });
-        song.patterns[0].notes.push(note(0, 4, 60));
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .push(note(0, 4, 60));
         let out = render(&song, 1, false, RATE);
         assert!(
             out[0][0] > 0.99,
@@ -4555,7 +4575,9 @@ mod tests {
             z.params.lfo[0].rate = 8.0;
             z.params.route(S::Lfo1, T::Gain, -1.0);
         });
-        song.patterns[0].notes.push(note(0, 8, 60));
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .push(note(0, 8, 60));
         let out = render(&song, 1, false, RATE);
         let window = &out[1000..RATE as usize / 2];
         let (lo, hi) = window
@@ -4579,7 +4601,9 @@ mod tests {
             };
             z.params.route(S::Env1, T::Cutoff1, 1.0);
         });
-        song.patterns[0].notes.push(note(0, 16, 60));
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .push(note(0, 16, 60));
         let out = render(&song, 1, false, RATE);
         let early = energy(&out[0..4800]);
         let late = energy(&out[24000..28800]);
@@ -4592,7 +4616,8 @@ mod tests {
             p.play_mode = PlayMode::Legato;
             p.glide = 0.1;
         });
-        song.patterns[0].notes = vec![note(0, 8, 60), note(4, 8, 67)];
+        std::sync::Arc::make_mut(&mut song.patterns[0]).notes =
+            vec![note(0, 8, 60), note(4, 8, 67)];
         let mut e = Engine::new(RATE);
         let step = (seconds_per_step(120.0) * RATE as f64) as usize;
         let mut buf = vec![0.0f32; 2 * (step * 5)];
@@ -4616,18 +4641,20 @@ mod tests {
             InstrumentKind::Sampler { preset: None },
         ));
         // Two bars of a held tone.
-        song.patterns[0].length = 2 * BAR;
-        song.patterns[0].notes.push(Note {
-            instrument: 9,
-            ..note(0, 32, 69)
-        });
+        std::sync::Arc::make_mut(&mut song.patterns[0]).length = 2 * BAR;
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .push(Note {
+                instrument: 9,
+                ..note(0, 32, 69)
+            });
         song.clips.push(Clip::new(1, 0, 0));
         let plain = render(&song, 1, true, RATE);
         // Master down to silence for the second bar only.
         let mut auto = Pattern::new(7, "Master");
         auto.length = BAR;
         auto.automation = Some(Envelope::flat(Target::MixerVolume { track: 0 }, 0.0, BAR));
-        song.patterns.push(auto);
+        song.patterns.push(auto.into());
         song.clips.push(Clip::new(7, BAR, 1));
         let ducked = render(&song, 1, true, RATE);
         let bar = (16.0 * seconds_per_step(song.tempo) * RATE as f64) as usize;
@@ -4653,10 +4680,12 @@ mod tests {
             "S",
             InstrumentKind::Sampler { preset: None },
         ));
-        song.patterns[0].notes.push(Note {
-            instrument: 9,
-            ..note(0, 4, 69)
-        });
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .push(Note {
+                instrument: 9,
+                ..note(0, 4, 69)
+            });
         assert!(energy(&render(&song, 1, false, RATE)) > 1.0);
         song.instruments.last_mut().unwrap().fl_plugin =
             Some(crate::sequence::FlPluginState::new("FLEX", b"preset"));
@@ -4685,8 +4714,10 @@ mod tests {
     /// Two bars of a held 0.5 DC tone, ready for automation clips.
     fn held_tone_song() -> Song {
         let mut song = song_with(vec![[0.5; 2]; RATE as usize * 4], |_, _| {});
-        song.patterns[0].length = 2 * crate::sequence::BAR;
-        song.patterns[0].notes.push(note(0, 32, 60));
+        std::sync::Arc::make_mut(&mut song.patterns[0]).length = 2 * crate::sequence::BAR;
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .push(note(0, 32, 60));
         song.clips.push(crate::sequence::Clip::new(1, 0, 0));
         song
     }
@@ -4697,7 +4728,7 @@ mod tests {
         let mut auto = Pattern::new(id, "Step");
         auto.length = bar;
         auto.automation = Some(crate::automation::Envelope::flat(target, value, bar));
-        song.patterns.push(auto);
+        song.patterns.push(auto.into());
         song.clips.push(crate::sequence::Clip::new(id, bar, 1));
     }
 
@@ -4846,7 +4877,7 @@ mod tests {
                 value,
                 crate::sequence::BAR,
             ));
-            song.patterns.push(clip);
+            song.patterns.push(clip.into());
             song.clips.push(crate::sequence::Clip::new(id, 0, 1));
         }
         let run = |live: &[(Target, f32)]| {
@@ -5043,8 +5074,10 @@ mod tests {
             .find(|i| i.id == 4)
             .unwrap()
             .mixer = 1;
-        song.patterns[0].length = 2 * crate::sequence::BAR;
-        song.patterns[0].notes.push(note(0, 32, 60));
+        std::sync::Arc::make_mut(&mut song.patterns[0]).length = 2 * crate::sequence::BAR;
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .push(note(0, 32, 60));
         song.clips.push(crate::sequence::Clip::new(1, 0, 0));
         song.mixer[1]
             .fx
@@ -5082,7 +5115,7 @@ mod tests {
                 from,
                 crate::sequence::BAR,
             ));
-            song.patterns.push(first);
+            song.patterns.push(first.into());
             song.clips.push(crate::sequence::Clip::new(id, 0, 1));
             step_at_bar_two(&mut song, id + 2, target, to);
         }
@@ -5254,7 +5287,9 @@ mod tests {
         let tone = sine_frames(1.0, 440.0);
         let render_fx = |fx: VoiceFx| {
             let mut song = song_with(tone.clone(), |z, _| z.params.voice_fx = fx);
-            song.patterns[0].notes.push(note(0, 8, 60));
+            std::sync::Arc::make_mut(&mut song.patterns[0])
+                .notes
+                .push(note(0, 8, 60));
             render(&song, 1, false, RATE)
         };
         let dry = render_fx(VoiceFx::default());
@@ -5327,7 +5362,9 @@ mod tests {
         let tone = sine_frames(0.5, 440.0);
         let render_fx = |fx: VoiceFx| {
             let mut song = song_with(tone.clone(), |z, _| z.params.voice_fx = fx);
-            song.patterns[0].notes.push(note(0, 4, 60));
+            std::sync::Arc::make_mut(&mut song.patterns[0])
+                .notes
+                .push(note(0, 4, 60));
             render(&song, 1, false, RATE)
         };
         // Full decimation: runs of 64 equal frames.
@@ -5359,7 +5396,9 @@ mod tests {
             p.lfo[0].rate = 8.0;
             z.params.route(S::ProgLfo1, T::Gain, -1.0);
         });
-        song.patterns[0].notes.push(note(0, 8, 60));
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .push(note(0, 8, 60));
         let out = render(&song, 1, false, RATE);
         let (lo, hi) = out[1000..RATE as usize / 2]
             .iter()
@@ -5371,7 +5410,9 @@ mod tests {
             z.params.route(S::Lfo1, T::Gain, -1.0);
             z.params.lfo[0].rate = 0.01;
         });
-        plain.patterns[0].notes.push(note(0, 8, 60));
+        std::sync::Arc::make_mut(&mut plain.patterns[0])
+            .notes
+            .push(note(0, 8, 60));
         let flat = render(&plain, 1, false, RATE);
         let (lo2, hi2) = flat[1000..RATE as usize / 2]
             .iter()
@@ -5388,7 +5429,9 @@ mod tests {
                     z.params.route(S::ProgLfo2, T::Pitch, 0.5);
                 }
             });
-            song.patterns[0].notes.push(note(0, 8, 60));
+            std::sync::Arc::make_mut(&mut song.patterns[0])
+                .notes
+                .push(note(0, 8, 60));
             render(&song, 1, false, RATE)
         };
         let (bent, straight) = (run(true), run(false));
@@ -5403,7 +5446,9 @@ mod tests {
         let burst = sine_frames(0.1, 330.0);
         let render_fx = |fx: ProgramFx| {
             let mut song = song_with(burst.clone(), |_, p| p.fx = fx);
-            song.patterns[0].notes.push(note(0, 1, 60));
+            std::sync::Arc::make_mut(&mut song.patterns[0])
+                .notes
+                .push(note(0, 1, 60));
             render(&song, 1, false, RATE)
         };
         let dry = render_fx(ProgramFx::default());
@@ -5460,7 +5505,9 @@ mod tests {
         use crate::sampler::ProgramFx;
         // Defaults: the sample comes out as is, and no effect entry is ever claimed.
         let mut song = song_with(vec![[0.5; 2]; 4000], |_, p| p.fx = ProgramFx::default());
-        song.patterns[0].notes.push(note(0, 8, 60));
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .push(note(0, 8, 60));
         let mut e = Engine::new(RATE);
         let mut buf = vec![0.0f32; 512 * 2];
         e.process(&song, 1, false, 0, &mut buf, false);
@@ -5476,7 +5523,9 @@ mod tests {
                 reverb: 0.5,
             }
         });
-        song.patterns[0].notes.push(note(0, 2, 60));
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .push(note(0, 2, 60));
         let run = |block: usize| {
             let mut e = Engine::new(RATE);
             let mut out = Vec::new();
@@ -5713,7 +5762,9 @@ mod plugin_tests {
 
     fn plugin_song() -> (Song, u64, u64) {
         let mut song = Song::default();
-        song.patterns[0].notes.clear();
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .clear();
         let r = PluginRef {
             id: 9,
             format: "vst3".into(),
@@ -5931,7 +5982,9 @@ mod plugin_tests {
     #[test]
     fn a_slow_effects_dry_signal_waits_for_it_and_other_inserts_line_up() {
         let (mut song, inst, pat) = plugin_song();
-        song.patterns[0].notes.clear();
+        std::sync::Arc::make_mut(&mut song.patterns[0])
+            .notes
+            .clear();
         // Two instruments that each make one click at their first frame:
         // A on insert 1 through a 100-frame effect at 50% mix, B on insert 2.
         let r = |id, name: &str| PluginRef {
@@ -6156,15 +6209,16 @@ mod plugin_tests {
             unreachable!()
         };
         plugin.format = "fl-native".into();
-        song.patterns[0].slides = [(STEP + STEP / 3, STEP / 3, 71), (STEP + STEP, STEP / 3, 68)]
-            .map(|(start, length, target)| crate::sequence::Glide {
-                start,
-                length,
-                target,
-                instrument: inst,
-                group: 0,
-            })
-            .to_vec();
+        std::sync::Arc::make_mut(&mut song.patterns[0]).slides =
+            [(STEP + STEP / 3, STEP / 3, 71), (STEP + STEP, STEP / 3, 68)]
+                .map(|(start, length, target)| crate::sequence::Glide {
+                    start,
+                    length,
+                    target,
+                    instrument: inst,
+                    group: 0,
+                })
+                .to_vec();
         song.add_note(pat, Note::new(inst, 3 * STEP, STEP, 72, 100));
         let synth = TestSynth::default();
         let seen = synth.seen.clone();

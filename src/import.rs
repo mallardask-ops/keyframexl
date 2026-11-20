@@ -987,10 +987,8 @@ mod tests {
             .enumerate()
         {
             let id = i as u64 + 1;
-            song.patterns.push(Pattern::new(
-                id,
-                &format!("Key {key} / velocity {velocity}"),
-            ));
+            song.patterns
+                .push(Pattern::new(id, &format!("Key {key} / velocity {velocity}")).into());
             song.add_note(
                 id,
                 Note::new(4, 0, 12 * keyframexl::sequence::STEP, key, velocity),

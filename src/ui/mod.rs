@@ -999,7 +999,7 @@ impl App {
         // KFXL_CAPTURE_AUTOMATION: an Insert 1 pan clip with a sweep, editor open.
         if capture && std::env::var_os("KFXL_CAPTURE_AUTOMATION").is_some() {
             app.create_automation(keyframexl::automation::Target::MixerPan { track: 1 });
-            if let Some(p) = app.song.patterns.last_mut()
+            if let Some(p) = app.song.patterns.last_mut().map(std::sync::Arc::make_mut)
                 && let Some(e) = &mut p.automation
             {
                 use keyframexl::automation::Point;
@@ -1287,11 +1287,7 @@ impl App {
 
     pub(crate) fn pattern_mut(&mut self) -> &mut keyframexl::sequence::Pattern {
         let id = self.selected;
-        self.song
-            .patterns
-            .iter_mut()
-            .find(|p| p.id == id)
-            .expect("selected pattern exists")
+        self.song.pattern_mut(id).expect("selected pattern exists")
     }
 
     pub(crate) fn pattern_index(&self, id: u64) -> usize {
@@ -1310,10 +1306,9 @@ impl App {
     pub(crate) fn new_pattern(&mut self) {
         self.checkpoint();
         let id = self.song.patterns.iter().map(|p| p.id).max().unwrap_or(0) + 1;
-        self.song.patterns.push(keyframexl::sequence::Pattern::new(
-            id,
-            &format!("Pattern {id}"),
-        ));
+        self.song
+            .patterns
+            .push(keyframexl::sequence::Pattern::new(id, &format!("Pattern {id}")).into());
         // Keep the new pattern right after the current one.
         let at = self.pattern_index(self.selected) + 1;
         let p = self.song.patterns.pop().expect("pushed");
@@ -1359,7 +1354,7 @@ impl App {
         p.renumber_notes(self.song.next_note_id());
         let at = self.pattern_index(self.selected) + 1;
         let (id, name) = (p.id, p.name.clone());
-        self.song.patterns.insert(at, p);
+        self.song.patterns.insert(at, p.into());
         self.select_pattern(id);
         self.say(Tone::Quiet, format!("{name} added. Ctrl+Z undoes."));
     }
@@ -2221,7 +2216,12 @@ impl App {
                         ));
                         song.mixer[t].fx.remove(k);
                         // Automation of later effects on this insert follows them.
-                        for pat in &mut song.patterns {
+                        for pat in song
+                            .patterns
+                            .iter_mut()
+                            .filter(|p| p.automation.is_some())
+                            .map(std::sync::Arc::make_mut)
+                        {
                             use keyframexl::automation::Target::{FxMix, FxParam};
                             match pat.automation.as_mut().map(|env| &mut env.target) {
                                 Some(FxParam { track, slot, .. } | FxMix { track, slot })
@@ -2470,7 +2470,7 @@ impl App {
             let mut pattern = Pattern::new(pid, &label);
             pattern.notes.push(Note::new(id, 0, length, 60, 127));
             pattern.length = (length + STEP - 1) / STEP * STEP;
-            self.song.patterns.push(pattern);
+            self.song.patterns.push(pattern.into());
             self.song.clips.push(Clip {
                 pattern: pid,
                 start: 0,
