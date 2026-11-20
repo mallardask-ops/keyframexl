@@ -621,9 +621,14 @@ impl Voice {
             (i + 1).min(z.end - 1)
         };
         let (a, b) = (z.frames[i], z.frames[next]);
+        let fade = if z.fade_in > 0 || z.fade_out > 0 {
+            z.fade_gain(self.pos)
+        } else {
+            1.0
+        };
         let s = [
-            (a[0] + (b[0] - a[0]) * frac) as f64,
-            (a[1] + (b[1] - a[1]) * frac) as f64,
+            (a[0] + (b[0] - a[0]) * frac) as f64 * fade,
+            (a[1] + (b[1] - a[1]) * frac) as f64 * fade,
         ];
         self.pos += ratio * self.dir;
         if looping {
@@ -3658,6 +3663,8 @@ mod tests {
     fn song_with(frames: Vec<[f32; 2]>, setup: impl FnOnce(&mut Zone, &mut Program)) -> Song {
         let end = frames.len();
         let mut zone = Zone {
+            fade_in: 0,
+            fade_out: 0,
             name: "test".into(),
             root: 60,
             low: 0,

@@ -635,6 +635,8 @@ where
     }
 
     Ok(Zone {
+        fade_in: 0,
+        fade_out: 0,
         name: raw.name.clone(),
         root,
         low,

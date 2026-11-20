@@ -634,8 +634,30 @@ pub struct Zone {
     pub velocity_tracking: f64,
     #[serde(default)]
     pub params: ZoneParams,
+    /// Linear fades over the first/last frames of `offset..end` (FL audio
+    /// clip fades), in sample frames.
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub fade_in: usize,
+    #[serde(default, skip_serializing_if = "is_zero_usize")]
+    pub fade_out: usize,
+}
+
+fn is_zero_usize(v: &usize) -> bool {
+    *v == 0
 }
 impl Zone {
+    /// The fade gain at sample position `pos` (1 without fades).
+    pub fn fade_gain(&self, pos: f64) -> f64 {
+        let mut g = 1.0;
+        if self.fade_in > 0 {
+            g *= ((pos - self.offset as f64) / self.fade_in as f64).clamp(0.0, 1.0);
+        }
+        if self.fade_out > 0 {
+            g *= ((self.end as f64 - pos) / self.fade_out as f64).clamp(0.0, 1.0);
+        }
+        g
+    }
+
     pub fn matches(&self, key: u8, velocity: u8) -> bool {
         key >= self.low
             && key <= self.high
@@ -703,7 +725,7 @@ impl Zone {
         let b = self.frames[next];
         let velocity_gain =
             (1.0 - self.velocity_tracking) + self.velocity_tracking * (velocity as f64 / 127.0);
-        let gain = self.adsr.value(t, gate) * self.gain * velocity_gain;
+        let gain = self.adsr.value(t, gate) * self.gain * velocity_gain * self.fade_gain(index);
         [
             (a[0] + (b[0] - a[0]) * fraction) * (gain * (1.0 - self.pan.max(0.0))) as f32,
             (a[1] + (b[1] - a[1]) * fraction) * (gain * (1.0 + self.pan.min(0.0))) as f32,
@@ -793,6 +815,8 @@ impl TryFrom<PresetDocument> for SamplePreset {
             let samples = d.samples.ok_or("Missing sample zones")?;
             let end = samples.len();
             vec![Zone {
+                fade_in: 0,
+                fade_out: 0,
                 name: d.name.clone(),
                 root: d.root.unwrap_or(60),
                 low: d.low.unwrap_or(0),
@@ -840,6 +864,8 @@ impl SamplePreset {
             name: name.into(),
             program: Program::default(),
             zones: vec![Zone {
+                fade_in: 0,
+                fade_out: 0,
                 name: "z".into(),
                 root: 60,
                 low: 0,
@@ -1087,6 +1113,8 @@ mod tests {
     #[test]
     fn forward_sustain_and_ping_pong_loops_use_frame_boundaries() {
         let mut z = Zone {
+            fade_in: 0,
+            fade_out: 0,
             name: "ramp".into(),
             root: 60,
             low: 0,

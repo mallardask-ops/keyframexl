@@ -490,6 +490,11 @@ const PAT_NOTES: u8 = 224;
 const PLAYLIST: u8 = 233;
 const TRACK_DATA: u8 = 238;
 const TRACK_NAME: u8 = 239;
+/// Playlist record layout flags (FL 2025+): bit 0x2 clear = 60-byte
+/// records, else bit 0x8 clear = 80, else 88.
+const PLAYLIST_LAYOUT: u8 = 169;
+/// A channel's sample parameters: stretch pitch/multiplier/mode at 100..112.
+const CH_PARAMS: u8 = 215;
 /// A pattern's automation events (recorded knob moves): 12-byte records.
 const PAT_EVENTS: u8 = 223;
 /// An automation channel's points.
@@ -536,9 +541,72 @@ pub struct FlpChannel {
     pub insert: Option<u32>,
     /// The channel's Pitch knob in cents (FL: ±range, default ±200).
     pub pitch: i32,
+    /// Sampler time stretching (FL: the channel's sample settings).
+    pub stretch: Option<FlpStretch>,
     /// An automation channel's points: beats since the previous point,
     /// value 0..1, tension of the curve into this point.
     pub points: Vec<(f64, f32, f32)>,
+}
+
+/// A sampler channel's stretch settings (event 215).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FlpStretch {
+    /// Pitch shift in cents.
+    pub pitch: i32,
+    /// Time multiplier as `10000 · log2(ratio)`.
+    pub multiplier: i32,
+    /// -1 Stretch, 0 Resample, 1.. the élastique/slice/auto modes.
+    pub mode: i32,
+}
+
+impl FlpStretch {
+    /// The pitch a sampler plays it at, in cents. Resample changes speed and
+    /// pitch together (the multiplier is a pitch too); the other modes keep
+    /// time, which a sampler cannot, so only their pitch is kept.
+    pub fn cents(&self) -> f64 {
+        if self.mode == 0 {
+            self.pitch as f64 + 0.12 * self.multiplier as f64
+        } else {
+            self.pitch as f64
+        }
+    }
+}
+
+/// The part of a sample an audio clip plays, in seconds into the sample.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct AudioSlice {
+    pub start: f64,
+    /// Where the clip's window ends; kept only for a fade-out to end there.
+    pub end: Option<f64>,
+    pub fade_in: f64,
+    pub fade_out: f64,
+}
+
+impl AudioSlice {
+    pub fn at(start: f64) -> Self {
+        Self {
+            start,
+            ..Default::default()
+        }
+    }
+
+    fn same(&self, o: &Self) -> bool {
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-4;
+        near(self.start, o.start)
+            && near(self.end.unwrap_or(-1.0), o.end.unwrap_or(-1.0))
+            && near(self.fade_in, o.fade_in)
+            && near(self.fade_out, o.fade_out)
+    }
+}
+
+/// How a sampler's audio clips cut its sample, and its pitch.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AudioSlices {
+    /// Index 0 is the whole sample (key 60); index k plays slice k on key
+    /// 60 + k.
+    pub slices: Vec<AudioSlice>,
+    /// FL's stretch pitch, in cents.
+    pub tune_cents: f64,
 }
 
 impl FlpChannel {
@@ -830,10 +898,15 @@ pub struct FlpReport {
     pub audio_clips: usize,
     /// Audio clips placed (as one-note patterns of their sampler channel).
     pub audio_imported: usize,
-    /// Sampler instrument → where its clips start in the sample, in seconds
-    /// (index 0 = the start, key 60; index k plays from there on key 60 + k).
-    /// The program applies it with `slice_preset` once the sample is loaded.
-    pub audio_slices: Vec<(u64, Vec<f64>)>,
+    /// Sampler instrument → where its clips start in the sample and its
+    /// pitch. The program applies it with `slice_preset` once the sample is
+    /// loaded.
+    pub audio_slices: Vec<(u64, AudioSlices)>,
+    /// Audio clips whose stretch mode keeps time (a sampler cannot): their
+    /// pitch is kept, their length follows the pitch.
+    pub audio_stretched: usize,
+    /// Audio clips with fades (each becomes its own slice).
+    pub audio_faded: usize,
     pub automation_clips: usize,
     pub arrangements: usize,
     pub meter: (u32, u32),
@@ -942,7 +1015,10 @@ impl FlpReport {
             ));
         }
         if self.audio_imported > 0 {
-            v.push(format!("{} audio clip(s) imported (one note of their sample channel each; FL's stretching and fades are not read)", self.audio_imported));
+            v.push(format!("{} audio clip(s) imported (one note of their sample channel each; fades kept, FL's clip volume is not read)", self.audio_imported));
+        }
+        if self.audio_stretched > 0 {
+            v.push(format!("{} audio clip(s) use a time-keeping stretch mode: their pitch is kept, their timing follows it", self.audio_stretched));
         }
         if self.audio_clips > 0 {
             v.push(format!(
@@ -990,7 +1066,10 @@ impl FlpReport {
                 self.tempo_points
             ));
         }
-        v.push("Not imported yet: FL audio clip stretching and fades.".into());
+        v.push(
+            "Not imported yet: FL audio clip volume, fade curves (tension) and time stretching."
+                .into(),
+        );
         v
     }
 }
@@ -1004,28 +1083,100 @@ struct Item {
     muted: bool,
     /// Pattern clips: ticks into the pattern (-1 = none).
     start_offset: i32,
-    /// Automation and audio clips: the same field as a float, in beats.
+    /// Automation clips: the same field as a float, in beats. Audio clips:
+    /// milliseconds into the sample (FL 21-25.1).
     start_beats: f32,
+    /// Audio clips: where the sample window ends (as `start_beats`/`start_offset`).
+    end_raw: u32,
+    /// Audio clip fades in ms (records of 60 bytes and more).
+    fade_in_ms: f32,
+    fade_out_ms: f32,
+    /// 88-byte records (FL 25.2+): the sample window as playlist ticks.
+    window_ticks: bool,
 }
 
-/// Playlist record size by layout: FL 2024+ (80), FL 21 (60), FL 12.3-20 (32).
-fn playlist_items(d: &[u8]) -> Vec<Item> {
-    let size = [80usize, 60, 32]
-        .into_iter()
-        .find(|s| d.len().is_multiple_of(*s) && d.chunks_exact(*s).all(|it| le16(it, 4) == 20480))
-        .unwrap_or(0);
-    if size == 0 {
-        return vec![];
+impl Item {
+    fn window_secs(&self, raw: u32, seconds_per_tick: f64) -> f64 {
+        let s = if self.window_ticks {
+            raw as i32 as f64 * seconds_per_tick
+        } else {
+            let ms = f32::from_bits(raw);
+            if ms.is_finite() {
+                ms as f64 / 1000.0
+            } else {
+                0.0
+            }
+        };
+        s.max(0.0)
     }
+
+    /// An audio clip's start in its sample, in seconds.
+    fn audio_start(&self, seconds_per_tick: f64) -> f64 {
+        self.window_secs(self.start_offset as u32, seconds_per_tick)
+    }
+
+    /// The part of its sample an audio clip plays.
+    fn audio_slice(&self, seconds_per_tick: f64) -> AudioSlice {
+        let start = self.audio_start(seconds_per_tick);
+        let end = self.window_secs(self.end_raw, seconds_per_tick);
+        let ms = |v: f32| {
+            if v.is_finite() {
+                (v as f64 / 1000.0).max(0.0)
+            } else {
+                0.0
+            }
+        };
+        let (fade_in, fade_out) = (ms(self.fade_in_ms), ms(self.fade_out_ms));
+        AudioSlice {
+            start,
+            end: (fade_out > 0.0 && end > start).then_some(end),
+            fade_in,
+            fade_out,
+        }
+    }
+}
+
+/// Playlist record size: from the layout event when the file has one (FL
+/// 2025+), else the first size whose records all carry FL's pattern base:
+/// 88 (FL 25.2+), 80 (FL 24.2-25.1), 60 (FL 20.99-24.1), 32 (FL 12.3-20).
+fn playlist_items(d: &[u8], layout: Option<u32>) -> Vec<Item> {
+    let fits = |s: usize| {
+        s > 0 && d.len().is_multiple_of(s) && d.chunks_exact(s).all(|it| le16(it, 4) == 20480)
+    };
+    let declared = layout.map(|l| match l {
+        l if l & 0x2 == 0 => 60,
+        l if l & 0x8 == 0 => 80,
+        _ => 88,
+    });
+    let Some(size) = declared
+        .filter(|s| fits(*s))
+        .or_else(|| [88usize, 80, 60, 32].into_iter().find(|s| fits(*s)))
+    else {
+        return vec![];
+    };
     d.chunks_exact(size)
         .map(|it| Item {
             position: le32(it, 0),
             index: le16(it, 6),
             length: le32(it, 8),
             track: 499u32.saturating_sub(le16(it, 12) as u32),
-            muted: le16(it, 18) & 0x1000 != 0,
+            // 0x2000 is FL's mute (performance-mode clips carry it); 0x1000
+            // rides along with it on some clips and is something else.
+            muted: le16(it, 18) & 0x2000 != 0,
             start_offset: le32(it, 24) as i32,
             start_beats: f32::from_bits(le32(it, 24)),
+            end_raw: le32(it, 28),
+            fade_in_ms: if size >= 60 {
+                f32::from_bits(le32(it, 36))
+            } else {
+                0.0
+            },
+            fade_out_ms: if size >= 60 {
+                f32::from_bits(le32(it, 44))
+            } else {
+                0.0
+            },
+            window_ticks: size == 88,
         })
         .collect()
 }
@@ -1044,7 +1195,9 @@ pub fn read_flp(bytes: &[u8]) -> Result<(Song, FlpReport), String> {
     let mut patterns: BTreeMap<u32, (String, Option<u32>, Vec<u8>)> = BTreeMap::new();
     // Pattern number → its automation events (event 223).
     let mut pattern_events: BTreeMap<u32, Vec<u8>> = BTreeMap::new();
-    let mut items: Vec<Item> = Vec::new();
+    // Read after all events: the layout event may come after the records.
+    let mut playlist: Vec<&[u8]> = Vec::new();
+    let mut playlist_layout: Option<u32> = None;
     let mut tracks: BTreeMap<u32, Track> = BTreeMap::new();
     #[derive(PartialEq)]
     enum Ctx {
@@ -1090,9 +1243,8 @@ pub fn read_flp(bytes: &[u8]) -> Result<(Song, FlpReport), String> {
                     .trim_end_matches('\0')
                     .to_string()
             }
-            (PLAYLIST, Value::Data(d)) if report.arrangements <= 1 => {
-                items.extend(playlist_items(d))
-            }
+            (PLAYLIST_LAYOUT, Value::Num(l)) => playlist_layout = Some(l),
+            (PLAYLIST, Value::Data(d)) if report.arrangements <= 1 => playlist.push(d),
             (TRACK_DATA, Value::Data(d)) if report.arrangements <= 1 => {
                 let i = le32(d, 0);
                 track = Some(i);
@@ -1164,6 +1316,14 @@ pub fn read_flp(bytes: &[u8]) -> Result<(Song, FlpReport), String> {
                     }
                     (CH_COLOR, Value::Num(col)) => c.color = Some(rgb(col)),
                     (AUTO_POINTS, Value::Data(d)) => c.points = auto_points(d),
+                    (CH_PARAMS, Value::Data(d)) if d.len() >= 112 => {
+                        c.stretch = Some(FlpStretch {
+                            pitch: le32(d, 100) as i32,
+                            multiplier: le32(d, 104) as i32,
+                            mode: le32(d, 108) as i32,
+                        })
+                        .filter(|s| s.pitch != 0 || s.multiplier != 0);
+                    }
                     (CH_LEVELS, Value::Data(d)) if d.len() >= 8 => {
                         c.pan = Some(le32(d, 0));
                         c.volume = Some(le32(d, 4));
@@ -1525,9 +1685,14 @@ pub fn read_flp(bytes: &[u8]) -> Result<(Song, FlpReport), String> {
     let mut tempo_events = Vec::new();
     // Audio clips: per sampler channel, the start points used (in beats) and
     // a one-note pattern for each.
-    let mut slices: BTreeMap<u64, Vec<f32>> = BTreeMap::new();
+    let mut slices: BTreeMap<u64, AudioSlices> = BTreeMap::new();
     let mut audio_patterns: BTreeMap<(u64, usize), u64> = BTreeMap::new();
     let mut next_id = song.patterns.iter().map(|p| p.id).max().unwrap_or(0) + 1;
+    let items: Vec<Item> = playlist
+        .iter()
+        .flat_map(|d| playlist_items(d, playlist_layout))
+        .collect();
+    let seconds_per_tick = 60.0 / report.tempo.max(1.0) / ppq.max(1) as f64;
     for it in &items {
         let active = !it.muted && !tracks.get(&(it.track + 1)).is_some_and(|t| t.muted);
         // A tempo automation clip (it may drive other controls too).
@@ -1631,16 +1796,22 @@ pub fn read_flp(bytes: &[u8]) -> Result<(Song, FlpReport), String> {
             // FL's audio clip: its channel's sample from the clip's start
             // offset, for the clip's length. Each start point is a key of
             // the sampler (60 = the beginning, 61.. = later points).
-            let beats = if it.start_beats.is_finite() && it.start_beats > 0.0 {
-                it.start_beats
-            } else {
-                0.0
-            };
-            let starts = slices.entry(inst).or_insert_with(|| vec![0.0]);
-            let k = match starts.iter().position(|b| (*b - beats).abs() < 1e-4) {
+            let at = it.audio_slice(seconds_per_tick);
+            if c.stretch.is_some_and(|s| s.mode != 0) {
+                report.audio_stretched += 1;
+            }
+            if at.fade_in > 0.0 || at.fade_out > 0.0 {
+                report.audio_faded += 1;
+            }
+            let entry = slices.entry(inst).or_insert_with(|| AudioSlices {
+                slices: vec![AudioSlice::at(0.0)],
+                tune_cents: c.stretch.map_or(0.0, |s| s.cents()),
+            });
+            let starts = &mut entry.slices;
+            let k = match starts.iter().position(|b| b.same(&at)) {
                 Some(k) => k,
                 None if starts.len() < 68 => {
-                    starts.push(beats);
+                    starts.push(at);
                     starts.len() - 1
                 }
                 None => 0,
@@ -1676,11 +1847,9 @@ pub fn read_flp(bytes: &[u8]) -> Result<(Song, FlpReport), String> {
         song.tempo_map = tempo_map(song.tempo, &mut tempo_clips, tempo_events);
         report.tempo_points = song.tempo_map.points.len();
     }
-    let seconds = 60.0 / song.tempo;
     report.audio_slices = slices
         .into_iter()
-        .filter(|(_, s)| s.len() > 1)
-        .map(|(i, s)| (i, s.iter().map(|b| *b as f64 * seconds).collect()))
+        .filter(|(_, s)| s.slices.len() > 1 || s.tune_cents != 0.0)
         .collect();
     report.clips = song.clips.len();
     let last = song.clips.iter().map(|c| c.track).max();
@@ -1923,12 +2092,18 @@ fn build_mixer(
 }
 
 /// An imported audio clip channel's sample, cut at the clip start points
-/// (`starts` in seconds, from `FlpReport::audio_slices`): key 60 plays it from
-/// the beginning, key 60 + k from start point k, each at its own pitch.
+/// (from `FlpReport::audio_slices`): key 60 plays it from the beginning, key
+/// 60 + k from start point k, all at the channel's stretch pitch.
 pub fn slice_preset(
     mut preset: crate::sequence::SamplePreset,
-    starts: &[f64],
+    slices: &AudioSlices,
 ) -> crate::sequence::SamplePreset {
+    let whole = [AudioSlice::at(0.0)];
+    let cuts: &[AudioSlice] = if slices.slices.is_empty() {
+        &whole
+    } else {
+        &slices.slices
+    };
     let Some(first) = preset.zones.first().cloned() else {
         return preset;
     };
@@ -1936,12 +2111,20 @@ pub fn slice_preset(
         return preset;
     }
     preset.zones.clear();
-    for (k, &at) in starts.iter().enumerate().take(68) {
+    for (k, cut) in cuts.iter().enumerate().take(68) {
         let mut z = first.clone();
         let key = 60 + k as u8;
         (z.root, z.low, z.high) = (key, key, key);
-        z.offset = ((at * z.sample_rate as f64) as usize).min(z.end.saturating_sub(1));
-        z.loop_start = z.loop_start.max(z.offset);
+        let frames = |s: f64| (s * z.sample_rate as f64) as usize;
+        z.offset = frames(cut.start).min(z.end.saturating_sub(1));
+        if let Some(end) = cut.end {
+            z.end = frames(end).clamp(z.offset + 1, z.end);
+            z.loop_end = z.loop_end.min(z.end);
+        }
+        z.loop_start = z.loop_start.max(z.offset).min(z.loop_end);
+        z.fade_in = frames(cut.fade_in);
+        z.fade_out = frames(cut.fade_out);
+        z.tune_cents += slices.tune_cents;
         preset.zones.push(z);
     }
     preset
@@ -2944,13 +3127,14 @@ mod tests {
         ev_data(&mut d, PLUGIN_NAME, &utf16("Vox"));
         ev_data(&mut d, SAMPLE_PATH, &utf16("C:\\vox.wav"));
         ev_num(&mut d, ARR_NEW, 0);
-        let clip = |bar: u32, beats: f32, len_bars: u32| {
+        let clip = |bar: u32, ms: f32, len_bars: u32| {
             let mut r = item(96 * 4 * bar, 0, 96 * 4 * len_bars, 0);
             r[6..8].copy_from_slice(&0u16.to_le_bytes());
-            r[24..28].copy_from_slice(&beats.to_le_bytes());
+            r[24..28].copy_from_slice(&ms.to_le_bytes());
             r
         };
-        let pl = [clip(0, -1.0, 2), clip(4, 0.0, 1), clip(8, 6.0, 1)].concat();
+        // Audio clip offsets are milliseconds into the sample.
+        let pl = [clip(0, -1.0, 2), clip(4, 0.0, 1), clip(8, 3000.0, 1)].concat();
         ev_data(&mut d, PLAYLIST, &pl);
         let mut f = b"FLhd".to_vec();
         f.extend_from_slice(&6u32.to_le_bytes());
@@ -2977,13 +3161,24 @@ mod tests {
             (song.clips[2].start, song.clips[2].length),
             (8 * BAR, Some(BAR))
         );
-        // 6 beats at 120 BPM = 3 s.
         assert_eq!(
             report.audio_slices,
-            [(song.instruments[0].id, vec![0.0, 3.0])]
+            [(
+                song.instruments[0].id,
+                AudioSlices {
+                    slices: vec![AudioSlice::at(0.0), AudioSlice::at(3.0)],
+                    tune_cents: 0.0
+                }
+            )]
         );
         let preset = crate::sequence::SamplePreset::from_sample("v", 1000, vec![[0.0; 2]; 5000]);
-        let cut = slice_preset(preset, &[0.0, 3.0]);
+        let cut = slice_preset(
+            preset,
+            &AudioSlices {
+                slices: vec![AudioSlice::at(0.0), AudioSlice::at(3.0)],
+                tune_cents: 0.0,
+            },
+        );
         assert_eq!(cut.zones.len(), 2);
         assert_eq!(
             (
@@ -3061,6 +3256,115 @@ mod tests {
         bad.truncate(40);
         // A cut file reads what it can or reports truncation, never panics.
         let _ = read_flp(&bad);
+    }
+
+    #[test]
+    fn playlist_layout_mute_bit_and_stretch_pitch() {
+        // 88-byte records (FL 25.2+): the layout event says so; the sample
+        // window is in ticks.
+        let mut r = item(0, 0, 96, 0);
+        r.resize(88, 0);
+        r[18..20].copy_from_slice(&0x2040u16.to_le_bytes());
+        r[24..28].copy_from_slice(&48i32.to_le_bytes());
+        let two = [r.clone(), r].concat();
+        let items = playlist_items(&two, Some(0xF));
+        assert_eq!(items.len(), 2);
+        assert!(items[0].muted && items[0].window_ticks);
+        // 48 ticks at 120 BPM, PPQ 96 = a quarter second.
+        assert!((items[0].audio_start(60.0 / 120.0 / 96.0) - 0.25).abs() < 1e-9);
+        // FL 2025.1 (layout 7): 80 bytes, offset in ms; 0x1000 alone is not mute.
+        let mut r = item(0, 0, 96, 0);
+        r[18..20].copy_from_slice(&0x1040u16.to_le_bytes());
+        r[24..28].copy_from_slice(&967.7419f32.to_le_bytes());
+        let items = playlist_items(&r, Some(7));
+        assert!(!items[0].muted && !items[0].window_ticks);
+        assert!((items[0].audio_start(1.0) - 0.9677419).abs() < 1e-6);
+        // Without the event the size is found from the records.
+        assert_eq!(playlist_items(&[r.clone(), r].concat(), None).len(), 2);
+
+        let resample = FlpStretch {
+            pitch: 300,
+            multiplier: 10000,
+            mode: 0,
+        };
+        assert_eq!(resample.cents(), 1500.0);
+        let auto = FlpStretch {
+            mode: 5,
+            ..resample
+        };
+        assert_eq!(auto.cents(), 300.0);
+        let preset = crate::sequence::SamplePreset::from_sample("v", 1000, vec![[0.0; 2]; 100]);
+        let one = slice_preset(
+            preset,
+            &AudioSlices {
+                slices: vec![AudioSlice::at(0.0)],
+                tune_cents: -400.0,
+            },
+        );
+        assert_eq!(one.zones.len(), 1);
+        assert_eq!(one.zones[0].tune_cents, -400.0);
+
+        // Fades: a clip window 0.01..0.05 s fading 10 ms in and 20 ms out.
+        let mut r = item(0, 0, 96, 0);
+        r[6..8].copy_from_slice(&0u16.to_le_bytes());
+        r[24..28].copy_from_slice(&10f32.to_le_bytes());
+        r[28..32].copy_from_slice(&50f32.to_le_bytes());
+        r[36..40].copy_from_slice(&10f32.to_le_bytes());
+        r[44..48].copy_from_slice(&20f32.to_le_bytes());
+        let cut = playlist_items(&r, Some(7))[0].audio_slice(1.0);
+        assert_eq!(cut.end, Some(0.05));
+        let preset = crate::sequence::SamplePreset::from_sample("v", 1000, vec![[1.0; 2]; 100]);
+        let z = &slice_preset(
+            preset,
+            &AudioSlices {
+                slices: vec![AudioSlice::at(0.0), cut],
+                tune_cents: 0.0,
+            },
+        )
+        .zones[1];
+        assert_eq!((z.offset, z.end, z.fade_in, z.fade_out), (10, 50, 10, 20));
+        assert_eq!(z.fade_gain(10.0), 0.0);
+        assert_eq!(z.fade_gain(15.0), 0.5);
+        assert_eq!(z.fade_gain(25.0), 1.0);
+        assert_eq!(z.fade_gain(40.0), 0.5);
+    }
+
+    /// The FL 21 demo with vocal audio clips: offsets are milliseconds.
+    #[test]
+    fn demo_audio_clips_start_where_fl_starts_them() {
+        let Some(home) = std::env::var_os("HOME") else {
+            return;
+        };
+        let path = std::path::Path::new(&home).join(
+            ".local/share/keyframexl/wine32-prefix/drive_c/Program Files/Image-Line/FL Studio 21/Data/Demo projects/NewStuff.flp",
+        );
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        let (_, report) = read_flp(&bytes).unwrap();
+        let all: Vec<f64> = report
+            .audio_slices
+            .iter()
+            .flat_map(|(_, s)| s.slices.iter().map(|x| x.start))
+            .collect();
+        assert!(all.iter().any(|s| (s - 0.9677419).abs() < 1e-4), "{all:?}");
+        // The longest sample there (KARRA LEAD VOCAL.ogg) is 226 s.
+        assert!(
+            all.iter().all(|s| *s < 226.0),
+            "offsets inside the samples: {all:?}"
+        );
+        assert!(report.audio_slices.iter().any(|(_, s)| s.tune_cents != 0.0));
+        // Its first vocal clip fades in 25.2 ms and out 10.08 ms, ending at 3871 ms.
+        assert!(report.audio_faded > 0);
+        let faded = report
+            .audio_slices
+            .iter()
+            .flat_map(|(_, s)| &s.slices)
+            .find(|x| (x.start - 0.9677419).abs() < 1e-4 && x.fade_in > 0.0)
+            .copied()
+            .unwrap();
+        assert!((faded.fade_in - 0.0252).abs() < 1e-4, "{faded:?}");
+        assert!((faded.end.unwrap() - 3.871).abs() < 1e-3, "{faded:?}");
     }
 
     #[test]

@@ -320,7 +320,7 @@ pub struct App {
     pub(crate) load_queue: std::collections::VecDeque<(u64, std::path::PathBuf, bool)>,
     /// FL audio clip start points (seconds) to cut a sampler's sample at once
     /// it loads (see `flp::slice_preset`).
-    pub(crate) flp_slices: std::collections::HashMap<u64, Vec<f64>>,
+    pub(crate) flp_slices: std::collections::HashMap<u64, keyframexl::flp::AudioSlices>,
     /// FL Studio rendering an imported project's generators: progress
     /// lines, then the WAV per FL channel (see `flp_freeze`).
     pub(crate) flp_freeze: Option<std::sync::mpsc::Receiver<FreezeMsg>>,
@@ -2527,7 +2527,7 @@ impl App {
         match result {
             Ok(preset) => {
                 let preset = match self.flp_slices.remove(&target) {
-                    Some(starts) => keyframexl::flp::slice_preset(preset, &starts),
+                    Some(slices) => keyframexl::flp::slice_preset(preset, &slices),
                     None => preset,
                 };
                 if !quiet {
