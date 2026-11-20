@@ -349,6 +349,37 @@ impl Demo {
             let id = self.note(song_line, vocal, at * STEP, len * STEP, p, 100);
             if let Some(pat) = self.song.pattern_mut(song_line) {
                 pat.lyrics.insert(id, l.into());
+                // The long notes: a scoop up into the first, an own vibrato
+                // on the others (Pitch lane of the piano roll).
+                use crate::sequence::{CurveShape, NotePitch, NoteVibrato, PitchPoint};
+                if len == 8 && at == 8 {
+                    pat.pitch.insert(
+                        id,
+                        NotePitch {
+                            points: vec![
+                                PitchPoint {
+                                    at: 0,
+                                    cents: -300.0,
+                                    shape: CurveShape::EaseOut,
+                                },
+                                PitchPoint {
+                                    at: STEP,
+                                    cents: 0.0,
+                                    shape: CurveShape::Smooth,
+                                },
+                            ],
+                            vibrato: Some(NoteVibrato::default()),
+                        },
+                    );
+                } else if len == 8 {
+                    pat.pitch.insert(
+                        id,
+                        NotePitch {
+                            points: vec![],
+                            vibrato: Some(NoteVibrato::default()),
+                        },
+                    );
+                }
             }
         }
         let chimes = self.pattern("Bell", 4);

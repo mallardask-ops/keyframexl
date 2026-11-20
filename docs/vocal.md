@@ -66,7 +66,7 @@ cuts the phrase. Pattern mode plays each pattern as a loop at the song tempo.
 
 ## Known Limitations
 
-- **Pitch slides & UTAU pitch curves:** Piano-roll slide notes and per-note UTAU `PBS`/`PBW` pitch-bend curves are not yet supported; pitch transitions use a cosine curve controlled by `GLIDE`.
+- **Pitch slides:** Piano-roll slide notes are not used; draw the pitch in the piano roll's *Pitch* lane instead (per-note points and vibrato, stored in `Pattern.pitch`; without a curve, transitions use a cosine glide controlled by `GLIDE`). UST import is not there yet.
 - **UTAU flags & external resamplers:** UTAU flags (`g`, `B`, `H`, …) and external resampler binaries are not supported — synthesis always uses the built-in WORLD engine.
 - **Live key preview:** Audition buffers are capped at 2.5 seconds per note and use the single default syllable.
 - **Missing syllables:** If a syllable has no matching entry in the loaded voicebank, that note stays silent and the missing lyric is listed in red in the Vocal channel window.

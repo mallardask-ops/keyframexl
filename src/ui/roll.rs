@@ -117,16 +117,19 @@ pub(crate) enum LaneTarget {
     Fine,
     ModX,
     ModY,
+    /// Vocal notes' drawn pitch curves (not a note value: `Pattern::pitch`).
+    Pitch,
 }
 
 impl LaneTarget {
-    pub const ALL: [LaneTarget; 6] = [
+    pub const ALL: [LaneTarget; 7] = [
         Self::Velocity,
         Self::Pan,
         Self::Release,
         Self::Fine,
         Self::ModX,
         Self::ModY,
+        Self::Pitch,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -136,6 +139,7 @@ impl LaneTarget {
             Self::Fine => "Fine pitch",
             Self::ModX => "Mod X",
             Self::ModY => "Mod Y",
+            Self::Pitch => "Pitch curve",
         }
     }
     fn short(self) -> &'static str {
@@ -146,6 +150,7 @@ impl LaneTarget {
             Self::Fine => "fine",
             Self::ModX => "mod x",
             Self::ModY => "mod y",
+            Self::Pitch => "pitch",
         }
     }
     /// Centred targets draw stems from the middle.
@@ -161,6 +166,7 @@ impl LaneTarget {
             Self::Fine => (n.fine + 100.0) / 200.0,
             Self::ModX => n.mod_x,
             Self::ModY => n.mod_y,
+            Self::Pitch => 0.5,
         }
     }
     pub fn set(self, n: &mut Note, v: f32) {
@@ -172,6 +178,7 @@ impl LaneTarget {
             Self::Fine => n.fine = v * 200.0 - 100.0,
             Self::ModX => n.mod_x = v,
             Self::ModY => n.mod_y = v,
+            Self::Pitch => {}
         }
     }
     fn default_value(self) -> f32 {
@@ -193,6 +200,7 @@ impl LaneTarget {
             Self::Fine => format!("{:+.0} ct", n.fine),
             Self::ModX => format!("{:.0}%", n.mod_x * 100.0),
             Self::ModY => format!("{:.0}%", n.mod_y * 100.0),
+            Self::Pitch => String::new(),
         }
     }
 }
@@ -3160,6 +3168,10 @@ impl App {
             pos2(g.grid.right(), well.bottom() - 6.0),
         );
         let lp = p.with_clip_rect(area.expand2(vec2(0.0, 6.0)));
+        if target == LaneTarget::Pitch {
+            self.pitch_lane(ui, &lp, g, area);
+            return;
+        }
         for v in [0.25f32, 0.5, 0.75, 1.0] {
             let y = area.bottom() - v * area.height();
             lp.line_segment(
@@ -3256,6 +3268,326 @@ impl App {
                     target.label()
                 ),
             );
+        }
+    }
+
+    /// The Pitch lane: each vocal note's drawn curve, in cents from the note
+    /// (±6 semitones, or ±1 octave when a point is further). Click adds a point, drag moves it (snaps to the grid and
+    /// to semitones, Alt frees both, Shift keeps its time), double-click
+    /// removes it, right-click sets its shape or the note's vibrato.
+    fn pitch_lane(&mut self, ui: &Ui, lp: &egui::Painter, g: &Geom, area: Rect) {
+        use keyframexl::sequence::{CurveShape, NotePitch, NoteVibrato, PitchPoint};
+        let me = self.roll_inst;
+        // ±6 semitones, ±1 octave once a visible point goes further.
+        let wide = self
+            .pattern()
+            .notes
+            .iter()
+            .filter(|n| n.instrument == me)
+            .any(|n| {
+                self.pattern()
+                    .pitch
+                    .get(&n.id)
+                    .is_some_and(|c| c.points.iter().any(|p| p.cents.abs() > 600.0))
+            });
+        let range: f32 = if wide { 1200.0 } else { 600.0 };
+        let half = area.height() / 2.0;
+        let y_of = |c: f32| area.center().y - c.clamp(-range, range) / range * half;
+        let c_of = |y: f32| (area.center().y - y) / half * range;
+        for (c, strong) in [
+            (-range, false),
+            (-range / 2.0, false),
+            (0.0, true),
+            (range / 2.0, false),
+            (range, false),
+        ] {
+            let y = y_of(c);
+            lp.line_segment(
+                [pos2(area.left(), y), pos2(area.right(), y)],
+                Stroke::new(
+                    1.0_f32,
+                    t::line().gamma_multiply(if strong { 1.0 } else { 0.5 }),
+                ),
+            );
+        }
+        let me = self.roll_inst;
+        let vocal = self
+            .song
+            .instrument(me)
+            .is_some_and(|i| matches!(i.kind, keyframexl::sequence::InstrumentKind::Vocal { .. }));
+        if !vocal {
+            lp.text(
+                area.center(),
+                Align2::CENTER_CENTER,
+                "Pitch curves are for vocal channels",
+                t::sans(12.0),
+                t::faint(),
+            );
+            return;
+        }
+        let notes: Vec<Note> = self
+            .pattern()
+            .notes
+            .iter()
+            .filter(|n| n.instrument == me && n.start + n.length >= g.x0 && n.start <= g.end())
+            .copied()
+            .collect();
+        let sel = self.roll_sel.clone();
+        // Where each point is on screen: (note id, point index, position).
+        let mut handles: Vec<(u64, usize, Pos2)> = Vec::new();
+        for n in &notes {
+            let (x0, x1) = (g.x(n.start), g.x(n.start + n.length));
+            let on = sel.is_empty() || sel.contains(&n.id);
+            let col = if on { t::brand() } else { t::strong() };
+            let curve = self.pattern().pitch.get(&n.id).cloned().unwrap_or_default();
+            let mut pts = Vec::new();
+            let steps = ((x1 - x0) / 3.0).ceil().max(1.0) as usize;
+            for k in 0..=steps {
+                let f = k as f32 / steps as f32;
+                let at = f as f64 * n.length as f64;
+                let mut c = curve.cents_at(at, n.length) as f32;
+                if let Some(v) = curve.vibrato {
+                    // Sketch of the note's own vibrato over its last part.
+                    let from = 1.0 - v.len.clamp(0.0, 1.0);
+                    if f > from {
+                        let phase = (f - from) * 14.0 * std::f32::consts::TAU;
+                        c += v.depth * phase.sin();
+                    }
+                }
+                pts.push(pos2(x0 + (x1 - x0) * f, y_of(c)));
+            }
+            lp.add(egui::Shape::line(
+                pts,
+                Stroke::new(if on { 1.8_f32 } else { 1.2 }, col),
+            ));
+            for (i, pt) in curve.points.iter().enumerate() {
+                let pos = pos2(g.x(n.start + pt.at), y_of(pt.cents));
+                lp.circle_filled(pos, 4.0, col);
+                lp.circle_filled(pos, 1.5, t::brand_edge());
+                handles.push((n.id, i, pos));
+            }
+        }
+        let resp = ui.interact(area, ui.id().with("pitch-lane"), Sense::click_and_drag());
+        let drag_id = ui.id().with("pitch-drag");
+        let menu_id = ui.id().with("pitch-menu");
+        let hit = |pos: Pos2| {
+            handles
+                .iter()
+                .filter(|h| h.2.distance(pos) < 8.0)
+                .min_by(|a, b| a.2.distance(pos).total_cmp(&b.2.distance(pos)))
+                .map(|h| (h.0, h.1))
+        };
+        let note_at = |pos: Pos2| {
+            notes
+                .iter()
+                .find(|n| (g.x(n.start)..=g.x(n.start + n.length)).contains(&pos.x))
+                .copied()
+        };
+        let (alt, shift) = ui.input(|i| (i.modifiers.alt, i.modifiers.shift));
+        let grid = self.snap.grid();
+        // Point (tick from the note's start, cents) under the pointer.
+        let place = |n: &Note, pos: Pos2| {
+            let tick = snap_round(g.tick_f(pos.x), grid, alt).clamp(n.start, n.start + n.length);
+            let c = c_of(pos.y).clamp(-range, range);
+            let c = if alt {
+                c.round()
+            } else {
+                (c / 100.0).round() * 100.0
+            };
+            (tick - n.start, c)
+        };
+        if let Some(pos) = resp.hover_pos() {
+            resp.clone().on_hover_text(match note_at(pos) {
+                Some(n) => format!(
+                    "{}: {:+.0} ct here · click adds a point, drag moves it, double-click removes, right-click: shape and vibrato",
+                    note_name(n.pitch),
+                    self.pattern()
+                        .pitch
+                        .get(&n.id)
+                        .map_or(0.0, |c| c.cents_at((g.tick_f(pos.x) - n.start) as f64, n.length))
+                ),
+                None => format!("Pitch curves of the vocal notes, ±{} semitones", range / 100.0),
+            });
+        }
+        let mut changed = false;
+        if resp.double_clicked() {
+            if let Some(pos) = resp.interact_pointer_pos()
+                && let Some((id, i)) = hit(pos)
+            {
+                self.checkpoint();
+                let pat = self.pattern_mut();
+                if let Some(c) = pat.pitch.get_mut(&id) {
+                    if i < c.points.len() {
+                        c.points.remove(i);
+                    }
+                    if c.is_empty() {
+                        pat.pitch.remove(&id);
+                    }
+                }
+                changed = true;
+            }
+        } else if (resp.drag_started() || resp.clicked())
+            && let Some(pos) = resp.interact_pointer_pos()
+        {
+            match hit(pos) {
+                Some(h) => {
+                    self.checkpoint();
+                    ui.data_mut(|d| d.insert_temp(drag_id, Some(h)));
+                }
+                None => {
+                    if let Some(n) = note_at(pos) {
+                        self.checkpoint();
+                        let (at, cents) = place(&n, pos);
+                        let c = self.pattern_mut().pitch.entry(n.id).or_default();
+                        if c.points.len() < NotePitch::MAX_POINTS {
+                            let i = c.points.partition_point(|p| p.at < at);
+                            if c.points.get(i).is_some_and(|p| p.at == at) {
+                                c.points[i].cents = cents;
+                            } else {
+                                c.points.insert(
+                                    i,
+                                    PitchPoint {
+                                        at,
+                                        cents,
+                                        shape: CurveShape::Smooth,
+                                    },
+                                );
+                            }
+                            ui.data_mut(|d| d.insert_temp(drag_id, Some((n.id, i))));
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+        let dragging: Option<(u64, usize)> = ui.data(|d| d.get_temp(drag_id)).flatten();
+        if resp.dragged()
+            && let (Some((id, i)), Some(pos)) = (dragging, resp.interact_pointer_pos())
+            && let Some(n) = notes.iter().find(|n| n.id == id).copied()
+        {
+            let (at, cents) = place(&n, pos);
+            if let Some(c) = self.pattern_mut().pitch.get_mut(&id)
+                && i < c.points.len()
+            {
+                // A point stays between its neighbours while it moves.
+                let lo = if i > 0 { c.points[i - 1].at + 1 } else { 0 };
+                let hi = c.points.get(i + 1).map_or(n.length, |p| p.at - 1);
+                if !shift {
+                    c.points[i].at = at.clamp(lo, hi.max(lo));
+                }
+                c.points[i].cents = cents;
+                changed = true;
+            }
+        }
+        if resp.drag_stopped() || resp.clicked() {
+            if let Some((id, _)) = dragging {
+                let len = notes.iter().find(|n| n.id == id).map_or(0, |n| n.length);
+                if let Some(c) = self.pattern_mut().pitch.get_mut(&id) {
+                    c.tidy(len);
+                }
+            }
+            ui.data_mut(|d| d.insert_temp::<Option<(u64, usize)>>(drag_id, None));
+        }
+        if resp.secondary_clicked()
+            && let Some(pos) = resp.interact_pointer_pos()
+        {
+            let target = hit(pos)
+                .map(|(id, i)| (id, Some(i)))
+                .or_else(|| note_at(pos).map(|n| (n.id, None)));
+            ui.data_mut(|d| d.insert_temp(menu_id, target));
+        }
+        resp.context_menu(|ui| {
+            kit::menu_style(ui);
+            let Some((id, point)): Option<(u64, Option<usize>)> =
+                ui.data(|d| d.get_temp(menu_id)).flatten()
+            else {
+                ui.close_menu();
+                return;
+            };
+            let current = self.pattern().pitch.get(&id).cloned().unwrap_or_default();
+            if let Some(i) = point.filter(|i| *i < current.points.len()) {
+                kit::menu_header(
+                    ui,
+                    egui::RichText::new("Curve to the next point").color(t::muted()),
+                );
+                for shape in CurveShape::ALL {
+                    if ui
+                        .selectable_label(current.points[i].shape == shape, shape.label())
+                        .clicked()
+                    {
+                        self.checkpoint();
+                        if let Some(c) = self.pattern_mut().pitch.get_mut(&id) {
+                            c.points[i].shape = shape;
+                        }
+                        self.publish();
+                        ui.close_menu();
+                    }
+                }
+                if ui.button("Remove point").clicked() {
+                    self.checkpoint();
+                    let pat = self.pattern_mut();
+                    if let Some(c) = pat.pitch.get_mut(&id) {
+                        c.points.remove(i);
+                        if c.is_empty() {
+                            pat.pitch.remove(&id);
+                        }
+                    }
+                    self.publish();
+                    ui.close_menu();
+                }
+                ui.separator();
+            }
+            kit::menu_header(
+                ui,
+                egui::RichText::new("Vibrato of this note").color(t::muted()),
+            );
+            let vib = current.vibrato;
+            for (label, value) in [
+                ("The channel's", None),
+                ("Own (last 60 %, 40 ct)", Some(NoteVibrato::default())),
+                (
+                    "Wide (last 70 %, 80 ct)",
+                    Some(NoteVibrato {
+                        len: 0.7,
+                        depth: 80.0,
+                        ..NoteVibrato::default()
+                    }),
+                ),
+                (
+                    "None",
+                    Some(NoteVibrato {
+                        depth: 0.0,
+                        ..NoteVibrato::default()
+                    }),
+                ),
+            ] {
+                if ui.selectable_label(vib == value, label).clicked() {
+                    self.checkpoint();
+                    let pat = self.pattern_mut();
+                    let c = pat.pitch.entry(id).or_default();
+                    c.vibrato = value;
+                    if c.is_empty() {
+                        pat.pitch.remove(&id);
+                    }
+                    self.publish();
+                    ui.close_menu();
+                }
+            }
+            if !current.points.is_empty() && ui.button("Clear the curve").clicked() {
+                self.checkpoint();
+                let pat = self.pattern_mut();
+                if let Some(c) = pat.pitch.get_mut(&id) {
+                    c.points.clear();
+                    if c.is_empty() {
+                        pat.pitch.remove(&id);
+                    }
+                }
+                self.publish();
+                ui.close_menu();
+            }
+        });
+        if changed {
+            self.publish();
         }
     }
 

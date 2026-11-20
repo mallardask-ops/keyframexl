@@ -11,6 +11,7 @@ use super::{
     lyric::{self, Token},
     oto::Entry,
 };
+use crate::sequence::{CurveShape, NoteVibrato};
 use std::sync::Arc;
 
 /// One note of a phrase, in seconds from the pattern's start.
@@ -27,6 +28,11 @@ pub struct RNote {
     pub vibrato: f64,
     /// Added to the channel's gender (the note's Mod Y: 0.5 = none), -1..1.
     pub gender: f64,
+    /// Drawn pitch: (seconds as `start`, cents from `pitch`, shape to the
+    /// next point), the note's ends included. Empty: the glide and nothing else.
+    pub curve: Vec<(f64, f64, CurveShape)>,
+    /// The note's own vibrato instead of the channel's.
+    pub own_vibrato: Option<NoteVibrato>,
 }
 
 pub struct Rendered {
@@ -64,6 +70,39 @@ struct Seg {
     end: f64,
     pitch: f64,
     vibrato: f64,
+    curve: Vec<(f64, f64, CurveShape)>,
+    own_vibrato: Option<NoteVibrato>,
+}
+
+impl Seg {
+    fn of(n: &RNote) -> Self {
+        Self {
+            start: n.start,
+            end: n.end,
+            pitch: n.pitch,
+            vibrato: n.vibrato,
+            curve: n.curve.clone(),
+            own_vibrato: n.own_vibrato,
+        }
+    }
+}
+
+/// Cents along a drawn curve at `tau` seconds.
+fn curve_at(curve: &[(f64, f64, CurveShape)], tau: f64) -> f64 {
+    let Some(first) = curve.first() else {
+        return 0.0;
+    };
+    if tau <= first.0 {
+        return first.1;
+    }
+    for w in curve.windows(2) {
+        let ((t0, c0, shape), (t1, c1, _)) = (w[0], w[1]);
+        if tau <= t1 {
+            let x = if t1 > t0 { (tau - t0) / (t1 - t0) } else { 1.0 };
+            return c0 + (c1 - c0) * shape.at(x);
+        }
+    }
+    curve.last().map_or(0.0, |c| c.1)
 }
 
 fn ease(x: f64) -> f64 {
@@ -84,13 +123,31 @@ fn contour(segs: &[Seg], tau: f64, p: &Params) -> f64 {
     }
     let seg = &segs[k];
     let mut pitch = seg.pitch;
-    if k > 0 {
+    if !seg.curve.is_empty() {
+        // A drawn curve replaces the glide into the note.
+        pitch += curve_at(&seg.curve, tau) / 100.0;
+    } else if k > 0 {
         let prev = &segs[k - 1];
         // Glide only between touching notes.
         if seg.start - prev.end < 0.06 {
             let x = (tau - (seg.start - p.transition * 0.5)) / p.transition.max(1e-3);
             pitch = prev.pitch + (seg.pitch - prev.pitch) * ease(x);
         }
+    }
+    if let Some(v) = seg.own_vibrato {
+        // The note's own: over the last `len` of it, faded in and out.
+        let len = seg.end - seg.start;
+        let from = seg.end - len * v.len.clamp(0.0, 1.0) as f64;
+        let t = tau - from;
+        if v.depth > 0.0 && t > 0.0 && tau < seg.end {
+            let fade_in = (t / (v.fade_in as f64).max(1e-3)).min(1.0);
+            let fade_out = ((seg.end - tau) / (v.fade_out as f64).max(1e-3)).min(1.0);
+            pitch += v.depth as f64 / 100.0
+                * fade_in
+                * fade_out
+                * (std::f64::consts::TAU * v.rate as f64 * t).sin();
+        }
+        return pitch;
     }
     // Vibrato, after a delay, on notes that are long enough.
     let t = tau - seg.start - p.vibrato_delay;
@@ -207,20 +264,10 @@ pub fn render_phrase(
                 if let Some(last) = sylls.last_mut() {
                     last.t1 = n.end;
                 }
-                segs.push(Seg {
-                    start: n.start,
-                    end: n.end,
-                    pitch: n.pitch,
-                    vibrato: n.vibrato,
-                });
+                segs.push(Seg::of(n));
             }
             Token::Sing(list) => {
-                segs.push(Seg {
-                    start: n.start,
-                    end: n.end,
-                    pitch: n.pitch,
-                    vibrato: n.vibrato,
-                });
+                segs.push(Seg::of(n));
                 let count = list.len();
                 let span = (n.end - n.start) / count as f64;
                 for (k, s) in list.into_iter().enumerate() {
@@ -421,4 +468,113 @@ pub fn render_phrase(
         data,
         missing,
     })
+}
+
+#[cfg(test)]
+mod contour_tests {
+    use super::*;
+    use crate::sequence::{BAR, NotePitch, PitchPoint};
+
+    fn note(start: f64, end: f64, pitch: f64) -> RNote {
+        RNote {
+            id: 1,
+            start,
+            end,
+            pitch,
+            velocity: 100,
+            lyric: "a".into(),
+            vibrato: 1.0,
+            gender: 0.0,
+            curve: Vec::new(),
+            own_vibrato: None,
+        }
+    }
+
+    #[test]
+    fn a_drawn_curve_bends_the_note_and_replaces_the_glide() {
+        let p = Params {
+            vibrato_depth: 0.0,
+            ..Params::default()
+        };
+        let a = note(0.0, 1.0, 60.0);
+        let mut b = note(1.0, 2.0, 64.0);
+        // From 2 semitones under, up to the note by a quarter, held.
+        b.curve = vec![
+            (1.0, -200.0, CurveShape::Linear),
+            (1.25, 0.0, CurveShape::Smooth),
+            (2.0, 0.0, CurveShape::Smooth),
+        ];
+        let segs = [Seg::of(&a), Seg::of(&b)];
+        assert!((contour(&segs, 1.0, &p) - 62.0).abs() < 1e-9);
+        assert!(
+            (contour(&segs, 1.125, &p) - 63.0).abs() < 1e-9,
+            "linear halfway"
+        );
+        assert!((contour(&segs, 1.6, &p) - 64.0).abs() < 1e-9);
+        // Without the curve the glide starts from the note before.
+        let plain = [Seg::of(&a), Seg::of(&note(1.0, 2.0, 64.0))];
+        assert!(contour(&plain, 1.0, &p) < 64.0 && contour(&plain, 1.0, &p) > 60.0);
+    }
+
+    #[test]
+    fn a_notes_own_vibrato_replaces_the_channels() {
+        let p = Params::default();
+        let mut n = note(0.0, 2.0, 60.0);
+        n.own_vibrato = Some(NoteVibrato {
+            len: 0.5,
+            depth: 100.0,
+            rate: 5.0,
+            fade_in: 0.001,
+            fade_out: 0.001,
+        });
+        let segs = [Seg::of(&n)];
+        // Still before the last half; then up to ±1 semitone.
+        assert_eq!(contour(&segs, 0.9, &p), 60.0);
+        let peak = (0..200)
+            .map(|i| (contour(&segs, 1.0 + i as f64 * 0.005, &p) - 60.0).abs())
+            .fold(0.0, f64::max);
+        assert!((peak - 1.0).abs() < 0.05, "{peak}");
+    }
+
+    #[test]
+    fn note_pitch_points_join_by_their_shapes() {
+        let c = NotePitch {
+            points: vec![PitchPoint {
+                at: BAR / 2,
+                cents: 100.0,
+                shape: CurveShape::EaseOut,
+            }],
+            vibrato: None,
+        };
+        assert_eq!(c.cents_at(0.0, BAR), 0.0);
+        assert_eq!(c.cents_at((BAR / 2) as f64, BAR), 100.0);
+        assert_eq!(c.cents_at(BAR as f64, BAR), 0.0);
+        // Smooth from the start: a quarter of the way is under the line.
+        assert!(c.cents_at((BAR / 8) as f64, BAR) < 25.0);
+        let mut messy = NotePitch {
+            points: vec![
+                PitchPoint {
+                    at: 50,
+                    cents: 9000.0,
+                    shape: CurveShape::Linear,
+                },
+                PitchPoint {
+                    at: -5,
+                    cents: 0.0,
+                    shape: CurveShape::Linear,
+                },
+                PitchPoint {
+                    at: 50,
+                    cents: 1.0,
+                    shape: CurveShape::Linear,
+                },
+            ],
+            vibrato: None,
+        };
+        messy.tidy(40);
+        assert_eq!(messy.points.len(), 2);
+        assert_eq!(messy.points[0].at, 0);
+        assert_eq!(messy.points[1].at, 40);
+        assert_eq!(messy.points[1].cents, 2400.0);
+    }
 }

@@ -204,6 +204,7 @@ impl V1Song {
                     color: None,
                     loop_range: None,
                     lyrics: Default::default(),
+                    pitch: Default::default(),
                 }
             })
             .map(std::sync::Arc::new)

@@ -945,6 +945,10 @@ impl App {
         app.welcome_open = (!capture && !opened_cli && app.settings.general.show_welcome)
             || (capture && std::env::var_os("KFXL_CAPTURE_WELCOME").is_some());
         // KFXL_CAPTURE_WELCOME=genres opens it on the Genres tab.
+        // KFXL_CAPTURE_LANE=pitch: the roll's lane shows pitch curves.
+        if capture && std::env::var("KFXL_CAPTURE_LANE").as_deref() == Ok("pitch") {
+            app.lane_target = roll::LaneTarget::Pitch;
+        }
         if capture && std::env::var("KFXL_CAPTURE_WELCOME").as_deref() == Ok("genres") {
             app.welcome.tab = welcome::WelcomeTab::Genres;
         }

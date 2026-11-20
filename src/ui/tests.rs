@@ -408,6 +408,74 @@ fn event_lane_sets_pan_of_a_note() {
 }
 
 #[test]
+fn pitch_lane_draws_moves_and_removes_a_vocal_curve_point() {
+    let (ctx, mut app) = setup();
+    let voice = keyframexl::vocal::Voice {
+        bank: String::new(),
+        name: "Test".into(),
+        default_lyric: "a".into(),
+        params: Default::default(),
+    };
+    // The test roll shows channel 4: make it sing.
+    let vocal = 4;
+    app.song
+        .instruments
+        .iter_mut()
+        .find(|i| i.id == vocal)
+        .unwrap()
+        .kind = keyframexl::sequence::InstrumentKind::Vocal { voice };
+    app.roll_inst = vocal;
+    run(&ctx, &mut app, View::Roll, vec![]);
+    let g = app.probe.roll.unwrap();
+    app.song.add_note(
+        1,
+        keyframexl::sequence::Note::new(vocal, 2 * STEP, 4 * STEP, 60, 100),
+    );
+    let note = app.song.patterns[0]
+        .notes
+        .iter()
+        .find(|n| n.instrument == vocal)
+        .copied()
+        .unwrap();
+    app.lane_target = super::roll::LaneTarget::Pitch;
+    run(&ctx, &mut app, View::Roll, vec![]);
+    // Half way up the upper half: +3 semitones (the lane spans ±6), at the note's start.
+    let area_top = g.lane.top() + 8.0;
+    let area_bottom = g.lane.bottom() - 6.0;
+    let y = (area_top + area_bottom) / 2.0 - (area_bottom - area_top) / 4.0;
+    let at = pos2(g.x(note.start), y);
+    click(&ctx, &mut app, View::Roll, at);
+    let curve = app.song.patterns[0]
+        .pitch
+        .get(&note.id)
+        .cloned()
+        .expect("a curve");
+    assert_eq!(curve.points.len(), 1);
+    assert_eq!(curve.points[0].at, 0);
+    assert_eq!(curve.points[0].cents, 300.0);
+    // Dragged down to the middle: 0 cents.
+    let mid = pos2(at.x, (area_top + area_bottom) / 2.0);
+    drag(&ctx, &mut app, View::Roll, at, mid);
+    let curve = app.song.patterns[0].pitch.get(&note.id).cloned().unwrap();
+    assert_eq!(curve.points[0].cents, 0.0);
+    // A double click removes it, and the empty curve goes.
+    run(
+        &ctx,
+        &mut app,
+        View::Roll,
+        vec![
+            Event::PointerMoved(mid),
+            button(mid, true, true),
+            button(mid, true, false),
+            button(mid, true, true),
+            button(mid, true, false),
+        ],
+    );
+    assert!(!app.song.patterns[0].pitch.contains_key(&note.id));
+    assert!(app.song.validate().is_ok());
+}
+
+#[test]
 fn misses_leave_history_untouched() {
     let (ctx, mut app) = setup();
     run(&ctx, &mut app, View::Roll, vec![]);

@@ -115,6 +115,142 @@ pub struct Glide {
     pub instrument: u64,
 }
 
+/// The shape of a pitch curve segment (UTAU / OpenUtau names in brackets).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CurveShape {
+    /// Sine in and out (io).
+    #[default]
+    Smooth,
+    /// Straight (l).
+    Linear,
+    /// Slow start (i, UST "j").
+    EaseIn,
+    /// Slow end (o, UST "r").
+    EaseOut,
+}
+
+impl CurveShape {
+    pub const ALL: [Self; 4] = [Self::Smooth, Self::Linear, Self::EaseIn, Self::EaseOut];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Smooth => "Smooth",
+            Self::Linear => "Linear",
+            Self::EaseIn => "Ease in",
+            Self::EaseOut => "Ease out",
+        }
+    }
+    /// 0..1 → 0..1 along the shape, from the segment's start.
+    pub fn at(self, x: f64) -> f64 {
+        let x = x.clamp(0.0, 1.0);
+        let pi = std::f64::consts::PI;
+        match self {
+            Self::Smooth => 0.5 - 0.5 * (pi * x).cos(),
+            Self::Linear => x,
+            Self::EaseIn => 1.0 - (pi * x / 2.0).cos(),
+            Self::EaseOut => (pi * x / 2.0).sin(),
+        }
+    }
+}
+
+/// A point of a sung note's pitch curve: ticks from the note's start, cents
+/// from the note. The segment from this point to the next has `shape`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PitchPoint {
+    pub at: Tick,
+    pub cents: f32,
+    #[serde(default)]
+    pub shape: CurveShape,
+}
+
+/// A sung note's own vibrato, over the channel's.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NoteVibrato {
+    /// Share of the note at its end that shakes, 0..1.
+    pub len: f32,
+    /// Peak depth in cents.
+    pub depth: f32,
+    /// Hz.
+    pub rate: f32,
+    /// Seconds.
+    pub fade_in: f32,
+    pub fade_out: f32,
+}
+
+impl Default for NoteVibrato {
+    fn default() -> Self {
+        Self {
+            len: 0.6,
+            depth: 40.0,
+            rate: 5.5,
+            fade_in: 0.15,
+            fade_out: 0.05,
+        }
+    }
+}
+
+/// A sung note's pitch beyond its key: drawn points (they replace the glide
+/// into the note) and its own vibrato. Kept beside the note, as lyrics are,
+/// so `Note` stays `Copy`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct NotePitch {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub points: Vec<PitchPoint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vibrato: Option<NoteVibrato>,
+}
+
+impl NotePitch {
+    /// Most points a note keeps (undo copies the song).
+    pub const MAX_POINTS: usize = 64;
+
+    pub fn is_empty(&self) -> bool {
+        self.points.is_empty() && self.vibrato.is_none()
+    }
+
+    /// Cents from the note at `at` ticks into a note `length` long: the
+    /// points joined by their shapes, 0 at the note's ends unless a point
+    /// sits there.
+    pub fn cents_at(&self, at: f64, length: Tick) -> f64 {
+        if self.points.is_empty() {
+            return 0.0;
+        }
+        let mut pts: Vec<(f64, f64, CurveShape)> = Vec::with_capacity(self.points.len() + 2);
+        if self.points[0].at > 0 {
+            pts.push((0.0, 0.0, CurveShape::Smooth));
+        }
+        pts.extend(
+            self.points
+                .iter()
+                .map(|p| (p.at as f64, p.cents as f64, p.shape)),
+        );
+        if self.points.last().is_some_and(|p| p.at < length) {
+            pts.push((length as f64, 0.0, CurveShape::Smooth));
+        }
+        if at <= pts[0].0 {
+            return pts[0].1;
+        }
+        for w in pts.windows(2) {
+            let ((t0, c0, shape), (t1, c1, _)) = (w[0], w[1]);
+            if at <= t1 {
+                let x = if t1 > t0 { (at - t0) / (t1 - t0) } else { 1.0 };
+                return c0 + (c1 - c0) * shape.at(x);
+            }
+        }
+        pts.last().map_or(0.0, |p| p.1)
+    }
+
+    /// Points in time order, one per tick, within the note and range.
+    pub fn tidy(&mut self, length: Tick) {
+        for p in &mut self.points {
+            p.at = p.at.clamp(0, length.max(0));
+            p.cents = p.cents.clamp(-2400.0, 2400.0);
+        }
+        self.points.sort_by_key(|p| p.at);
+        self.points.dedup_by_key(|p| p.at);
+        self.points.truncate(Self::MAX_POINTS);
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Pattern {
     pub id: u64,
@@ -136,16 +272,24 @@ pub struct Pattern {
     /// Lyrics of vocal channels' notes, by note id.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub lyrics: std::collections::BTreeMap<u64, String>,
+    /// Pitch curves and vibrato of vocal channels' notes, by note id.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub pitch: std::collections::BTreeMap<u64, NotePitch>,
 }
 
 impl Pattern {
-    /// Give the notes fresh ids from `first` on; lyrics follow their notes.
+    /// Give the notes fresh ids from `first` on; lyrics and pitch curves
+    /// follow their notes.
     pub fn renumber_notes(&mut self, first: u64) {
         let old = std::mem::take(&mut self.lyrics);
+        let old_pitch = std::mem::take(&mut self.pitch);
         for (i, n) in self.notes.iter_mut().enumerate() {
             let id = first + i as u64;
             if let Some(l) = old.get(&n.id) {
                 self.lyrics.insert(id, l.clone());
+            }
+            if let Some(c) = old_pitch.get(&n.id) {
+                self.pitch.insert(id, c.clone());
             }
             n.id = id;
         }
@@ -161,6 +305,7 @@ impl Pattern {
             color: None,
             loop_range: None,
             lyrics: Default::default(),
+            pitch: Default::default(),
         }
     }
     pub fn step_count(&self) -> usize {
@@ -968,7 +1113,8 @@ impl Song {
             .iter()
             .flat_map(|p| p.notes.iter().map(|n| n.id));
         let lyrics = self.patterns.iter().flat_map(|p| p.lyrics.keys().copied());
-        notes.chain(lyrics).max().unwrap_or(0) + 1
+        let curves = self.patterns.iter().flat_map(|p| p.pitch.keys().copied());
+        notes.chain(lyrics).chain(curves).max().unwrap_or(0) + 1
     }
 
     /// Add a note to pattern `pattern` with a fresh id. Returns the id.
@@ -981,11 +1127,21 @@ impl Song {
                     .find_map(|p| p.lyrics.get(&note.id).cloned())
             })
             .flatten();
+        let curve = (note.id != 0)
+            .then(|| {
+                self.patterns
+                    .iter()
+                    .find_map(|p| p.pitch.get(&note.id).cloned())
+            })
+            .flatten();
         note.id = self.next_note_id();
         let id = note.id;
         if let Some(p) = self.pattern_mut(pattern) {
             if let Some(l) = lyric {
                 p.lyrics.insert(id, l);
+            }
+            if let Some(c) = curve {
+                p.pitch.insert(id, c);
             }
             p.notes.push(note);
         }

@@ -50,6 +50,9 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 - **Forge export levels.** Export no longer normalises every file to −1 dB
   by default; each recipe is made at its category's level, so a UI click
   stays well under a shotgun. *Normalize* is a switch; *Mono* export added.
+- **Vocal pitch curves.** The piano roll's *Pitch* lane draws each sung
+  note's pitch: points with smooth, linear or eased segments (a scoop, a
+  fall, a bend), and a note's own vibrato instead of the channel's.
 - **Vocal timing.** Notes inside a phrase follow the tempo map (they used
   the constant song tempo); a tempo-map edit renders the phrase again. A
   playlist clip cut in the middle of a phrase now sings from its first note

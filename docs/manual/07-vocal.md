@@ -33,11 +33,28 @@ touching notes), *Gender* (formants without changing pitch) and *Breath*.
 Piano-roll lanes per note: *Velocity* (loudness), *Mod X* (vibrato depth),
 *Mod Y* (gender), *Fine pitch*.
 
+## Pitch curves
+
+Pick *Pitch curve* in the piano roll's lane (click the lane's name, or
+right-click it for the list). Each sung note shows its pitch around the
+key, ±6 semitones:
+
+- Click to add a point; drag to move it. It snaps to the grid and to
+  semitones; hold `Alt` for free values, `Shift` to change only the
+  height.
+- Double-click a point to remove it.
+- Right-click a point for the shape of the curve to the next one (smooth,
+  linear, ease in, ease out); right-click a note for its own vibrato or to
+  clear the curve.
+
+A drawn curve replaces the glide into the note; the note's own vibrato
+replaces the channel's.
+
 Phrases render in the background. Editing one phrase renders only that
 phrase again; moving it in time needs no render. Export waits for every
 phrase.
 
 ## Limits
 
-Slides and UTAU pitch-bend curves are not supported yet, nor UTAU flags
-and external resamplers.
+Piano-roll slide notes, UTAU flags and external resamplers are not
+supported; UST files cannot be imported yet.

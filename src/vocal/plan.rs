@@ -115,6 +115,33 @@ pub fn plan(song: &Song, rate: u32) -> Vec<Spec> {
     out
 }
 
+/// A note's drawn pitch points in the phrase's seconds (through the tempo
+/// map, as its notes), with its ends.
+fn curve_secs(
+    song: &Song,
+    rate: u32,
+    place: &Place,
+    pitch: Option<&crate::sequence::NotePitch>,
+    t: Tick,
+    length: Tick,
+) -> Vec<(f64, f64, crate::sequence::CurveShape)> {
+    use crate::sequence::CurveShape;
+    let Some(c) = pitch.filter(|c| !c.points.is_empty()) else {
+        return Vec::new();
+    };
+    let mut pts: Vec<(Tick, f64, CurveShape)> = Vec::with_capacity(c.points.len() + 2);
+    if c.points[0].at > 0 {
+        pts.push((0, 0.0, CurveShape::Smooth));
+    }
+    pts.extend(c.points.iter().map(|p| (p.at, p.cents as f64, p.shape)));
+    if c.points.last().is_some_and(|p| p.at < length) {
+        pts.push((length, 0.0, CurveShape::Smooth));
+    }
+    pts.into_iter()
+        .map(|(at, cents, shape)| (place.secs(song, rate, t + at), cents, shape))
+        .collect()
+}
+
 fn phrases(
     song: &Song,
     rate: u32,
@@ -171,6 +198,8 @@ fn phrases(
                 .unwrap_or_else(|| voice.default_lyric.clone()),
             vibrato: (n.mod_x as f64 * 2.0).clamp(0.0, 2.0),
             gender: ((n.mod_y as f64 - 0.5) * 2.0).clamp(-1.0, 1.0),
+            curve: curve_secs(song, rate, place, pat.pitch.get(&n.id), t, n.length),
+            own_vibrato: pat.pitch.get(&n.id).and_then(|c| c.vibrato),
         });
         ticks.push(place.start + (t - w0));
     }
@@ -209,6 +238,16 @@ fn phrases(
                 h.write(n.lyric.as_bytes());
                 hash_f(&mut h, n.vibrato);
                 hash_f(&mut h, n.gender);
+                for &(at, cents, shape) in &n.curve {
+                    hash_f(&mut h, at - base);
+                    hash_f(&mut h, cents);
+                    h.write(&[shape as u8]);
+                }
+                if let Some(v) = n.own_vibrato {
+                    for x in [v.len, v.depth, v.rate, v.fade_in, v.fade_out] {
+                        hash_f(&mut h, x as f64);
+                    }
+                }
             }
             out.push(Spec {
                 inst,
@@ -243,6 +282,8 @@ pub fn previews(song: &Song, rate: u32) -> Vec<(u64, u8, u64, Spec)> {
                 lyric: voice.default_lyric.clone(),
                 vibrato: 1.0,
                 gender: 0.0,
+                curve: Vec::new(),
+                own_vibrato: None,
             };
             let mut h = Fnv(0x9e37_79b9_7f4a_7c15);
             h.write(voice.bank.as_bytes());
@@ -299,6 +340,8 @@ pub fn previews(song: &Song, rate: u32) -> Vec<(u64, u8, u64, Spec)> {
                     lyric: l.clone(),
                     vibrato: 1.0,
                     gender: 0.0,
+                    curve: Vec::new(),
+                    own_vibrato: None,
                 };
                 let mut h = Fnv(0x9e37_79b9_7f4a_7c15);
                 h.write(voice.bank.as_bytes());

@@ -887,6 +887,7 @@ pub fn import_smf(
             color: None,
             loop_range: None,
             lyrics: Default::default(),
+            pitch: Default::default(),
         }
         .into(),
     );
