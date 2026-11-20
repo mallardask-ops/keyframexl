@@ -79,10 +79,7 @@ impl App {
                 let (mark_rect, mark_resp) =
                     ui.allocate_exact_size(vec2(16.0, 16.0), egui::Sense::click());
                 kit::icon_brand(ui.painter(), mark_rect);
-                if mark_resp
-                    .on_hover_text("About KeyFrameXL")
-                    .clicked()
-                {
+                if mark_resp.on_hover_text("About KeyFrameXL").clicked() {
                     ui.ctx()
                         .data_mut(|d| d.insert_temp(egui::Id::new("about-open"), true));
                 }

@@ -371,7 +371,16 @@ fn run(
         .map_err(|e| e.to_string())?
         .create_virtual(&midi_port)
         .map_err(|e| e.to_string())?;
-    configure(&bin, &prefix, &exe, &dll, work.path(), &display, rate, &midi_port)?;
+    configure(
+        &bin,
+        &prefix,
+        &exe,
+        &dll,
+        work.path(),
+        &display,
+        rate,
+        &midi_port,
+    )?;
     if stop.load(Ordering::Acquire) {
         return Ok(());
     }
@@ -474,7 +483,15 @@ fn run(
         });
         // Drain pw-cat before linking FL's outputs. Its stdout must keep
         // flowing while FL opens the project and the host handles dialogs.
-        let connected = connect(&mut fl, &display, &node, &capture_node, count, stop, &midi_port);
+        let connected = connect(
+            &mut fl,
+            &display,
+            &node,
+            &capture_node,
+            count,
+            stop,
+            &midi_port,
+        );
         if !matches!(connected, Ok(true)) {
             let _ = capture.0.kill();
             return connected.map(|_| ());

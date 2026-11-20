@@ -67,7 +67,12 @@ pub fn stem_of(name: &str) -> String {
 /// The patches an export writes: the sound as it is, then `count - 1` variations.
 pub fn patches(p: &ForgePatch, opt: &Options) -> Vec<ForgePatch> {
     let mut v = vec![p.clone()];
-    v.extend(mutate::variations(p, opt.count.saturating_sub(1), opt.seed, mutate::VARIATION));
+    v.extend(mutate::variations(
+        p,
+        opt.count.saturating_sub(1),
+        opt.seed,
+        mutate::VARIATION,
+    ));
     v.truncate(opt.count.max(1));
     v
 }
@@ -224,7 +229,10 @@ mod tests {
     fn normalising_peaks_just_under_full_scale() {
         let r = super::super::render::render(&Recipe::UiClick.patch());
         let f = finish(&r, &Options::default());
-        let peak = f.iter().map(|f| f[0].abs().max(f[1].abs())).fold(0.0, f32::max);
+        let peak = f
+            .iter()
+            .map(|f| f[0].abs().max(f[1].abs()))
+            .fold(0.0, f32::max);
         assert!((peak - 0.891).abs() < 1e-3);
         // Starts on the sound, not on silence.
         assert!(f[0][0].abs() > 1e-3 || f[0][1].abs() > 1e-3);
@@ -247,7 +255,10 @@ mod tests {
             .count() as f64
             / (42_000.0 / 44_100.0);
         assert!((crossings - 2000.0).abs() < 10.0, "{crossings}");
-        let peak = out[1000..43_000].iter().map(|f| f[0].abs()).fold(0.0, f32::max);
+        let peak = out[1000..43_000]
+            .iter()
+            .map(|f| f[0].abs())
+            .fold(0.0, f32::max);
         assert!((peak - 0.5).abs() < 0.01, "{peak}");
     }
 }

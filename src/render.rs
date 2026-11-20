@@ -213,7 +213,10 @@ pub fn cut_to(song: &Song, (a, b): (crate::sequence::Tick, crate::sequence::Tick
         .iter()
         .zip(&lens)
         .map(|(c, l)| {
-            let held = song.patterns.iter().find(|p| p.id == c.pattern)
+            let held = song
+                .patterns
+                .iter()
+                .find(|p| p.id == c.pattern)
                 .and_then(|p| p.automation.as_ref())
                 .is_some_and(|e| e.playback != crate::automation::Playback::Clip);
             c.start < b && (c.start + l > a || held)
@@ -287,14 +290,21 @@ pub fn render_range(
         crate::plugin::OFFLINE.store(true, std::sync::atomic::Ordering::Release);
         Offline
     });
-    let realtime = plugins.0.iter().any(|(id, p)| {
-        song.instruments.iter().any(|i| !i.muted && i.plugin().is_some_and(|r| r.id == *id))
-            && p.lock().is_ok_and(|p| p.needs_realtime())
-    }).then(std::time::Instant::now);
+    let realtime = plugins
+        .0
+        .iter()
+        .any(|(id, p)| {
+            song.instruments
+                .iter()
+                .any(|i| !i.muted && i.plugin().is_some_and(|r| r.id == *id))
+                && p.lock().is_ok_and(|p| p.needs_realtime())
+        })
+        .then(std::time::Instant::now);
     let pace = |pos| {
         if let Some(start) = realtime
-            && let Some(wait) = (start + std::time::Duration::from_secs_f64(pos as f64 / rate as f64))
-                .checked_duration_since(std::time::Instant::now())
+            && let Some(wait) = (start
+                + std::time::Duration::from_secs_f64(pos as f64 / rate as f64))
+            .checked_duration_since(std::time::Instant::now())
         {
             std::thread::sleep(wait);
         }
@@ -523,10 +533,15 @@ pub fn run(job: &Job, cancel: &AtomicBool, send: &mut dyn FnMut(Progress)) {
         None => return send(Progress::Cancelled),
     };
     if job.plugins.0.iter().any(|(id, p)| {
-        job.song.instruments.iter().any(|i| !i.muted && i.plugin().is_some_and(|r| r.id == *id))
+        job.song
+            .instruments
+            .iter()
+            .any(|i| !i.muted && i.plugin().is_some_and(|r| r.id == *id))
             && p.lock().is_ok_and(|p| !p.available())
     }) {
-        return send(Progress::Failed("Audio from an external instrument was interrupted during export.".into()));
+        return send(Progress::Failed(
+            "Audio from an external instrument was interrupted during export.".into(),
+        ));
     }
     if job.normalize {
         normalize(&mut frames);

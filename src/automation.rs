@@ -359,14 +359,7 @@ pub fn thin_points(
     keep[0] = true;
     keep[dedup.len() - 1] = true;
 
-    fn rdp(
-        pts: &[(Tick, f32)],
-        units: &[f32],
-        a: usize,
-        b: usize,
-        tol: f32,
-        keep: &mut [bool],
-    ) {
+    fn rdp(pts: &[(Tick, f32)], units: &[f32], a: usize, b: usize, tol: f32, keep: &mut [bool]) {
         if b <= a + 1 {
             return;
         }
@@ -392,7 +385,14 @@ pub fn thin_points(
         }
     }
 
-    rdp(&dedup, &units, 0, dedup.len() - 1, tolerance.max(0.0), &mut keep);
+    rdp(
+        &dedup,
+        &units,
+        0,
+        dedup.len() - 1,
+        tolerance.max(0.0),
+        &mut keep,
+    );
     dedup
         .into_iter()
         .enumerate()
@@ -416,7 +416,11 @@ pub struct ValueAt {
 /// Values in force at song tick `at`, including FL controls held between clips.
 pub fn values_at(song: &Song, at: Tick, out: &mut Vec<ValueAt>) {
     out.clear();
-    for clip in song.clips.iter().filter(|c| !c.muted && !song.track_muted(c.track)) {
+    for clip in song
+        .clips
+        .iter()
+        .filter(|c| !c.muted && !song.track_muted(c.track))
+    {
         let Some(p) = song.patterns.iter().find(|p| p.id == clip.pattern) else {
             continue;
         };
@@ -438,7 +442,10 @@ pub fn values_at(song: &Song, at: Tick, out: &mut Vec<ValueAt>) {
             }
             Playback::Events => {
                 let local = clip.offset + elapsed.min(len - 1);
-                let Some(point) = env.event_at(local).filter(|point| point.tick >= clip.offset) else {
+                let Some(point) = env
+                    .event_at(local)
+                    .filter(|point| point.tick >= clip.offset)
+                else {
                     continue;
                 };
                 (clip.start + point.tick - clip.offset, Some(point.value))
@@ -447,7 +454,11 @@ pub fn values_at(song: &Song, at: Tick, out: &mut Vec<ValueAt>) {
         let Some(value) = value else {
             continue;
         };
-        let sample = ValueAt { target: env.target, value, tick };
+        let sample = ValueAt {
+            target: env.target,
+            value,
+            tick,
+        };
         if let Some(slot) = out.iter_mut().find(|s| s.target == env.target) {
             if slot.tick <= tick {
                 *slot = sample;

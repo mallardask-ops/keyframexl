@@ -120,7 +120,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .map_err(std::io::Error::other)?;
         }
         Some("fl-native-test") if args.len() >= 4 => {
-            let channels = args[3..].iter().map(|c| c.parse::<u32>())
+            let channels = args[3..]
+                .iter()
+                .map(|c| c.parse::<u32>())
                 .collect::<Result<Vec<_>, _>>()?;
             fl_native::test(std::path::Path::new(&args[2]), &channels)
                 .map_err(std::io::Error::other)?;
@@ -266,7 +268,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     (!capture)
                         .then_some(prefs.general.window_size)
                         .flatten()
-                        .filter(|[w, h]| w.is_finite() && h.is_finite() && *w >= 600.0 && *h >= 400.0)
+                        .filter(|[w, h]| {
+                            w.is_finite() && h.is_finite() && *w >= 600.0 && *h >= 400.0
+                        })
                         .map(|[w, h]| [w.clamp(1180.0, 7680.0), h.clamp(680.0, 4320.0)])
                 })
                 .unwrap_or([1366.0, 768.0]);

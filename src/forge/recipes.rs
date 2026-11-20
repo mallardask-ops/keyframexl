@@ -1,9 +1,7 @@
 //! Starting points: a recipe is a ready sound to bend into your own, and a
 //! style turns any of them toward the family a game's sounds belong to.
 
-use super::{
-    Curve, FilterMode, ForgePatch, Layer, Macros, NoiseColor, Source, Wave, MAX_LAYERS,
-};
+use super::{Curve, FilterMode, ForgePatch, Layer, MAX_LAYERS, Macros, NoiseColor, Source, Wave};
 use crate::fx::{FxKind, FxSlot};
 use serde::{Deserialize, Serialize};
 
@@ -109,8 +107,16 @@ impl Recipe {
                 "Jump",
                 vec![
                     Layer::new("Rise", Source::osc(Wave::Pulse25, 330.0), 0.26)
-                        .with_pitch(Curve::new(&[(0.0, 0.0, -0.5), (0.7, 12.0, 0.0), (1.0, 14.0, 0.0)]))
-                        .with_amp(Curve::new(&[(0.0, 0.9, 0.0), (0.55, 0.8, 0.3), (1.0, 0.0, 0.0)])),
+                        .with_pitch(Curve::new(&[
+                            (0.0, 0.0, -0.5),
+                            (0.7, 12.0, 0.0),
+                            (1.0, 14.0, 0.0),
+                        ]))
+                        .with_amp(Curve::new(&[
+                            (0.0, 0.9, 0.0),
+                            (0.55, 0.8, 0.3),
+                            (1.0, 0.0, 0.0),
+                        ])),
                     Layer::new("Body", Source::osc(Wave::Triangle, 165.0), 0.2)
                         .with_pitch(Curve::new(&[(0.0, 0.0, -0.5), (1.0, 12.0, 0.0)]))
                         .with_amp(decay(-0.2))
@@ -126,7 +132,11 @@ impl Recipe {
                         .with_amp(Curve::flat(0.85)),
                     Layer::new("Dong", Source::osc(Wave::Pulse25, 1319.0), 0.42)
                         .with_start(0.075)
-                        .with_amp(Curve::new(&[(0.0, 0.85, 0.0), (0.25, 0.7, -0.4), (1.0, 0.0, 0.0)])),
+                        .with_amp(Curve::new(&[
+                            (0.0, 0.85, 0.0),
+                            (0.25, 0.7, -0.4),
+                            (1.0, 0.0, 0.0),
+                        ])),
                 ],
                 vec![],
                 knobs(0.5, 0.5, 0.0, 0.08),
@@ -191,7 +201,11 @@ impl Recipe {
                         .with_gain(0.8),
                     Layer::new("Body", Source::noise(NoiseColor::Pink, 4000.0), 0.13)
                         .with_amp(decay(-0.5))
-                        .with_filter(FilterMode::LowPass, Curve::new(&[(0.0, 0.62, 0.0), (1.0, 0.38, 0.0)]), 0.2),
+                        .with_filter(
+                            FilterMode::LowPass,
+                            Curve::new(&[(0.0, 0.62, 0.0), (1.0, 0.38, 0.0)]),
+                            0.2,
+                        ),
                 ],
                 vec![fx(FxKind::Transient, &[])],
                 knobs(0.5, 0.55, 0.15, 0.05),
@@ -201,10 +215,22 @@ impl Recipe {
                 vec![
                     Layer::new("Blast", Source::noise(NoiseColor::White, 4000.0), 0.3)
                         .with_amp(decay(-0.6))
-                        .with_filter(FilterMode::LowPass, Curve::new(&[(0.0, 0.85, 0.0), (1.0, 0.5, 0.0)]), 0.0),
+                        .with_filter(
+                            FilterMode::LowPass,
+                            Curve::new(&[(0.0, 0.85, 0.0), (1.0, 0.5, 0.0)]),
+                            0.0,
+                        ),
                     Layer::new("Rumble", Source::noise(NoiseColor::Brown, 4000.0), 1.7)
-                        .with_amp(Curve::new(&[(0.0, 0.0, 0.0), (0.02, 1.0, -0.35), (1.0, 0.0, 0.0)]))
-                        .with_filter(FilterMode::LowPass, Curve::new(&[(0.0, 0.72, -0.3), (1.0, 0.3, 0.0)]), 0.2)
+                        .with_amp(Curve::new(&[
+                            (0.0, 0.0, 0.0),
+                            (0.02, 1.0, -0.35),
+                            (1.0, 0.0, 0.0),
+                        ]))
+                        .with_filter(
+                            FilterMode::LowPass,
+                            Curve::new(&[(0.0, 0.72, -0.3), (1.0, 0.3, 0.0)]),
+                            0.2,
+                        )
                         .with_gain(1.4),
                     Layer::new("Sub", Source::osc(Wave::Sine, 55.0), 0.9)
                         .with_pitch(Curve::new(&[(0.0, 12.0, -0.5), (1.0, -12.0, 0.0)]))
@@ -270,7 +296,11 @@ impl Recipe {
                             (0.84, 24.0, 0.0),
                             (1.0, 24.0, 0.0),
                         ]))
-                        .with_amp(Curve::new(&[(0.0, 0.8, 0.0), (0.7, 0.6, 0.3), (1.0, 0.0, 0.0)])),
+                        .with_amp(Curve::new(&[
+                            (0.0, 0.8, 0.0),
+                            (0.7, 0.6, 0.3),
+                            (1.0, 0.0, 0.0),
+                        ])),
                     Layer::new(
                         "Shimmer",
                         Source::Osc {
@@ -281,11 +311,19 @@ impl Recipe {
                         },
                         0.9,
                     )
-                    .with_amp(Curve::new(&[(0.0, 0.0, 0.0), (0.2, 0.6, 0.0), (1.0, 0.0, 0.0)]))
+                    .with_amp(Curve::new(&[
+                        (0.0, 0.0, 0.0),
+                        (0.2, 0.6, 0.0),
+                        (1.0, 0.0, 0.0),
+                    ]))
                     .with_gain(0.4)
                     .with_pan(-0.3),
                     Layer::new("Dust", Source::noise(NoiseColor::White, 4000.0), 0.8)
-                        .with_amp(Curve::new(&[(0.0, 0.0, 0.0), (0.3, 1.0, 0.0), (1.0, 0.0, 0.0)]))
+                        .with_amp(Curve::new(&[
+                            (0.0, 0.0, 0.0),
+                            (0.3, 1.0, 0.0),
+                            (1.0, 0.0, 0.0),
+                        ]))
                         .with_filter(FilterMode::HighPass, Curve::flat(0.85), 0.2)
                         .with_gain(0.25)
                         .with_pan(0.3),
@@ -298,7 +336,12 @@ impl Recipe {
                 vec![
                     Layer::new("Sweep", Source::osc(Wave::Saw, 110.0), 1.5)
                         .with_pitch(Curve::new(&[(0.0, -12.0, 0.3), (1.0, 24.0, 0.0)]))
-                        .with_amp(Curve::new(&[(0.0, 0.0, 0.0), (0.15, 0.8, 0.0), (0.8, 0.7, 0.0), (1.0, 0.0, 0.0)]))
+                        .with_amp(Curve::new(&[
+                            (0.0, 0.0, 0.0),
+                            (0.15, 0.8, 0.0),
+                            (0.8, 0.7, 0.0),
+                            (1.0, 0.0, 0.0),
+                        ]))
                         .with_filter(
                             FilterMode::LowPass,
                             Curve::new(&[(0.0, 0.25, 0.0), (0.6, 0.8, 0.0), (1.0, 0.35, 0.0)]),
@@ -314,9 +357,17 @@ impl Recipe {
                         },
                         1.5,
                     )
-                    .with_amp(Curve::new(&[(0.0, 0.0, 0.0), (0.2, 1.0, 0.0), (1.0, 0.0, 0.0)])),
+                    .with_amp(Curve::new(&[
+                        (0.0, 0.0, 0.0),
+                        (0.2, 1.0, 0.0),
+                        (1.0, 0.0, 0.0),
+                    ])),
                     Layer::new("Wind", Source::noise(NoiseColor::White, 4000.0), 1.4)
-                        .with_amp(Curve::new(&[(0.0, 0.0, 0.0), (0.5, 0.9, 0.0), (1.0, 0.0, 0.0)]))
+                        .with_amp(Curve::new(&[
+                            (0.0, 0.0, 0.0),
+                            (0.5, 0.9, 0.0),
+                            (1.0, 0.0, 0.0),
+                        ]))
                         .with_filter(
                             FilterMode::BandPass,
                             Curve::new(&[(0.0, 0.3, 0.0), (1.0, 0.85, 0.0)]),
@@ -331,11 +382,21 @@ impl Recipe {
                 "Hum",
                 vec![
                     Layer::new("Drone", Source::osc(Wave::Saw, 55.0), 2.5)
-                        .with_amp(Curve::new(&[(0.0, 0.0, 0.0), (0.25, 0.8, 0.0), (0.75, 0.8, 0.0), (1.0, 0.0, 0.0)]))
+                        .with_amp(Curve::new(&[
+                            (0.0, 0.0, 0.0),
+                            (0.25, 0.8, 0.0),
+                            (0.75, 0.8, 0.0),
+                            (1.0, 0.0, 0.0),
+                        ]))
                         .with_filter(FilterMode::LowPass, Curve::flat(0.38), 0.4)
                         .with_pan(-0.4),
                     Layer::new("Beat", Source::osc(Wave::Saw, 55.4), 2.5)
-                        .with_amp(Curve::new(&[(0.0, 0.0, 0.0), (0.25, 0.8, 0.0), (0.75, 0.8, 0.0), (1.0, 0.0, 0.0)]))
+                        .with_amp(Curve::new(&[
+                            (0.0, 0.0, 0.0),
+                            (0.25, 0.8, 0.0),
+                            (0.75, 0.8, 0.0),
+                            (1.0, 0.0, 0.0),
+                        ]))
                         .with_filter(FilterMode::LowPass, Curve::flat(0.38), 0.4)
                         .with_pan(0.4),
                     Layer::new(
@@ -348,9 +409,19 @@ impl Recipe {
                         },
                         2.5,
                     )
-                    .with_amp(Curve::new(&[(0.0, 0.0, 0.0), (0.3, 0.6, 0.0), (0.7, 0.6, 0.0), (1.0, 0.0, 0.0)])),
+                    .with_amp(Curve::new(&[
+                        (0.0, 0.0, 0.0),
+                        (0.3, 0.6, 0.0),
+                        (0.7, 0.6, 0.0),
+                        (1.0, 0.0, 0.0),
+                    ])),
                     Layer::new("Air", Source::noise(NoiseColor::Brown, 4000.0), 2.5)
-                        .with_amp(Curve::new(&[(0.0, 0.0, 0.0), (0.3, 1.0, 0.0), (0.7, 1.0, 0.0), (1.0, 0.0, 0.0)]))
+                        .with_amp(Curve::new(&[
+                            (0.0, 0.0, 0.0),
+                            (0.3, 1.0, 0.0),
+                            (0.7, 1.0, 0.0),
+                            (1.0, 0.0, 0.0),
+                        ]))
                         .with_gain(0.3),
                 ],
                 vec![fx(FxKind::Chorus, &[])],
@@ -411,7 +482,10 @@ impl Style {
                         l.filter = FilterMode::Off;
                     }
                 }
-                p.fx.push(fx(FxKind::Bitcrusher, &[(0, 7.0), (1, 22_000.0), (2, 100.0)]));
+                p.fx.push(fx(
+                    FxKind::Bitcrusher,
+                    &[(0, 7.0), (1, 22_000.0), (2, 100.0)],
+                ));
                 m.space *= 0.3;
                 m.dirt = m.dirt.min(0.3);
             }
@@ -441,12 +515,20 @@ impl Style {
                 m.dirt = m.dirt.max(0.3);
                 m.energy = (m.energy + 0.1).min(1.0);
                 if p.layers.len() < MAX_LAYERS && !p.layers.iter().any(|l| l.name == "Weight") {
-                    let length = p.layers.iter().map(|l| l.start + l.length).fold(0.1, f32::max);
+                    let length = p
+                        .layers
+                        .iter()
+                        .map(|l| l.start + l.length)
+                        .fold(0.1, f32::max);
                     p.layers.push(
-                        Layer::new("Weight", Source::osc(Wave::Sine, 48.0), (length * 0.6).min(1.2))
-                            .with_pitch(Curve::new(&[(0.0, 7.0, -0.6), (1.0, -5.0, 0.0)]))
-                            .with_amp(decay(-0.3))
-                            .with_gain(0.8),
+                        Layer::new(
+                            "Weight",
+                            Source::osc(Wave::Sine, 48.0),
+                            (length * 0.6).min(1.2),
+                        )
+                        .with_pitch(Curve::new(&[(0.0, 7.0, -0.6), (1.0, -5.0, 0.0)]))
+                        .with_amp(decay(-0.3))
+                        .with_gain(0.8),
                     );
                 }
                 p.fx.push(fx(FxKind::Compressor, &[]));
@@ -454,7 +536,9 @@ impl Style {
             Style::SciFi => {
                 for l in &mut p.layers {
                     if let Source::Osc {
-                        vibrato_hz, vibrato, ..
+                        vibrato_hz,
+                        vibrato,
+                        ..
                     } = &mut l.source
                         && *vibrato == 0.0
                     {

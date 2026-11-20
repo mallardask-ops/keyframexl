@@ -650,11 +650,8 @@ impl App {
                                     Page::Midi => (panic, rescan) = self.midi_page(ui, &mut s),
                                     Page::Plugins => self.plugins_page(ui, &mut s),
                                     Page::General => {
-                                        check_updates_now = general_page(
-                                            ui,
-                                            &mut s,
-                                            self.updater.is_checking(),
-                                        );
+                                        check_updates_now =
+                                            general_page(ui, &mut s, self.updater.is_checking());
                                     }
                                 }
                                 if check_updates_now {
@@ -717,9 +714,7 @@ impl App {
             if let Some(m) = &self.midi_in {
                 m.set_prefs(&self.settings.midi);
             }
-            if midi_out_changed
-                && let Some(mo) = &mut self.midi_out
-            {
+            if midi_out_changed && let Some(mo) = &mut self.midi_out {
                 let prefs = &self.settings.midi;
                 mo.refresh(|p| prefs.is_out_on(p));
             }
@@ -1089,7 +1084,9 @@ impl App {
             row(
                 ui,
                 "MIDI Clock",
-                Some("Master sends 24 PPQN clock + Start/Stop to enabled outputs. Slave follows incoming clock."),
+                Some(
+                    "Master sends 24 PPQN clock + Start/Stop to enabled outputs. Slave follows incoming clock.",
+                ),
                 |ui| {
                     use crate::settings::MidiClockMode;
                     let labels: Vec<&str> = MidiClockMode::ALL.iter().map(|m| m.label()).collect();
@@ -1113,11 +1110,11 @@ impl App {
                 } else {
                     format!("Sending to {open} port(s) · {ticks} pulses sent")
                 };
-                ui.label(
-                    RichText::new(info)
-                        .font(t::sans(12.0))
-                        .color(if open == 0 { t::WAIT } else { t::FAINT }),
-                );
+                ui.label(RichText::new(info).font(t::sans(12.0)).color(if open == 0 {
+                    t::WAIT
+                } else {
+                    t::FAINT
+                }));
             }
         });
         card(ui, "notes in", |ui| {
@@ -1365,7 +1362,9 @@ fn general_page(ui: &mut egui::Ui, s: &mut Settings, checking_updates: bool) -> 
         row(
             ui,
             "Check automatically",
-            Some("Checks GitHub Releases at most once per day on startup. Set KFXL_NO_UPDATE_CHECK=1 to disable."),
+            Some(
+                "Checks GitHub Releases at most once per day on startup. Set KFXL_NO_UPDATE_CHECK=1 to disable.",
+            ),
             |ui| {
                 kit_switch(ui, &mut s.general.check_updates);
             },

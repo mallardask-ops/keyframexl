@@ -64,9 +64,21 @@ impl Curve {
     /// Keep the points sorted, inside 0..1 in time and `lo..hi` in value.
     pub fn tidy(&mut self, lo: f32, hi: f32) {
         for p in &mut self.points {
-            p.t = if p.t.is_finite() { p.t.clamp(0.0, 1.0) } else { 0.0 };
-            p.v = if p.v.is_finite() { p.v.clamp(lo, hi) } else { lo.max(0.0).min(hi) };
-            p.tension = if p.tension.is_finite() { p.tension.clamp(-1.0, 1.0) } else { 0.0 };
+            p.t = if p.t.is_finite() {
+                p.t.clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            p.v = if p.v.is_finite() {
+                p.v.clamp(lo, hi)
+            } else {
+                lo.max(0.0).min(hi)
+            };
+            p.tension = if p.tension.is_finite() {
+                p.tension.clamp(-1.0, 1.0)
+            } else {
+                0.0
+            };
         }
         self.points.sort_by(|a, b| a.t.total_cmp(&b.t));
         if self.points.is_empty() {

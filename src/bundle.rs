@@ -264,8 +264,7 @@ pub fn export_bundle(
 /// extracted, the project's references are rewired to them, and the restored
 /// project is saved as a normal `.kfxl` beside them.
 pub fn import_bundle(zip_path: &Path, extract_dir: &Path) -> Result<ImportedBundle, String> {
-    let file =
-        std::fs::File::open(zip_path).map_err(|e| format!("{}: {e}", zip_path.display()))?;
+    let file = std::fs::File::open(zip_path).map_err(|e| format!("{}: {e}", zip_path.display()))?;
     let mut archive = ZipArchive::new(file).map_err(|e| format!("Not a zip bundle: {e}"))?;
 
     // Validate every entry before anything touches the disk.
@@ -281,8 +280,8 @@ pub fn import_bundle(zip_path: &Path, extract_dir: &Path) -> Result<ImportedBund
         Ok(mut file) => {
             let mut buf = Vec::new();
             file.read_to_end(&mut buf).map_err(|e| e.to_string())?;
-            let manifest: BundleManifest = serde_json::from_slice(&buf)
-                .map_err(|e| format!("Bad bundle manifest: {e}"))?;
+            let manifest: BundleManifest =
+                serde_json::from_slice(&buf).map_err(|e| format!("Bad bundle manifest: {e}"))?;
             if manifest.format > BUNDLE_FORMAT {
                 return Err("Bundle is from a newer KeyFrameXL".into());
             }
@@ -301,9 +300,10 @@ pub fn import_bundle(zip_path: &Path, extract_dir: &Path) -> Result<ImportedBund
         })
         .or_else(|| {
             entries.iter().find(|(_, rel, dir)| {
-                !dir
-                    && rel.parent().is_some_and(|p| p.as_os_str().is_empty())
-                    && rel.extension().is_some_and(|e| e.eq_ignore_ascii_case("kfxl"))
+                !dir && rel.parent().is_some_and(|p| p.as_os_str().is_empty())
+                    && rel
+                        .extension()
+                        .is_some_and(|e| e.eq_ignore_ascii_case("kfxl"))
             })
         })
         .map(|(_, rel, _)| rel.clone())
@@ -323,8 +323,7 @@ pub fn import_bundle(zip_path: &Path, extract_dir: &Path) -> Result<ImportedBund
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         let mut src = archive.by_index(*i).map_err(|e| e.to_string())?;
-        let mut dst =
-            std::fs::File::create(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+        let mut dst = std::fs::File::create(&out).map_err(|e| format!("{}: {e}", out.display()))?;
         std::io::copy(&mut src, &mut dst).map_err(|e| format!("{}: {e}", out.display()))?;
     }
 
@@ -481,8 +480,7 @@ fn copy_entry<W: Write + Seek>(
 ) -> Result<(), String> {
     zip.start_file(name, entry_options())
         .map_err(|e| e.to_string())?;
-    let mut src =
-        std::fs::File::open(source).map_err(|e| format!("{}: {e}", source.display()))?;
+    let mut src = std::fs::File::open(source).map_err(|e| format!("{}: {e}", source.display()))?;
     std::io::copy(&mut src, zip).map_err(|e| format!("{}: {e}", source.display()))?;
     Ok(())
 }
@@ -529,7 +527,10 @@ fn readme_text(m: &BundleManifest, opts: &BundleOptions) -> String {
         .collect();
     text.push_str(&format!("\nImpulse responses: {} bundled\n", bundled.len()));
     for ir in bundled {
-        text.push_str(&format!("  {}  (was {})\n", ir.archive_path, ir.original_name));
+        text.push_str(&format!(
+            "  {}  (was {})\n",
+            ir.archive_path, ir.original_name
+        ));
     }
     if !m.missing_irs.is_empty() {
         text.push_str("\nMissing impulse responses (still referenced by the project):\n");
@@ -561,7 +562,10 @@ fn readme_text(m: &BundleManifest, opts: &BundleOptions) -> String {
         text.push_str(&format!("\nVoicebanks: {}\n", m.voicebanks.len()));
         for v in &m.voicebanks {
             if v.bundled {
-                text.push_str(&format!("  {} (channel \"{}\"), bundled\n", v.bank, v.channel));
+                text.push_str(&format!(
+                    "  {} (channel \"{}\"), bundled\n",
+                    v.bank, v.channel
+                ));
             } else {
                 text.push_str(&format!(
                     "  {} (channel \"{}\"), not bundled\n",
@@ -613,7 +617,10 @@ mod tests {
     fn read_zip_text(path: &Path, entry: &str) -> String {
         let mut zip = ZipArchive::new(std::fs::File::open(path).unwrap()).unwrap();
         let mut text = String::new();
-        zip.by_name(entry).unwrap().read_to_string(&mut text).unwrap();
+        zip.by_name(entry)
+            .unwrap()
+            .read_to_string(&mut text)
+            .unwrap();
         text
     }
 
@@ -636,8 +643,7 @@ mod tests {
         );
 
         let zip_path = dir.path().join("bundle.zip");
-        let report =
-            export_bundle(&song, "My Song", &zip_path, &BundleOptions::default()).unwrap();
+        let report = export_bundle(&song, "My Song", &zip_path, &BundleOptions::default()).unwrap();
         assert_eq!(report.bundled_irs, 1);
         assert_eq!(report.missing_irs.len(), 1);
         assert_eq!(report.plugins, 1);
@@ -676,10 +682,7 @@ mod tests {
         assert_eq!(imported.restored_irs, 1);
         assert_eq!(imported.manifest.as_ref(), Some(&manifest));
         let restored = imported.song.mixer[1].fx[0].ir.clone().unwrap();
-        assert_eq!(
-            restored,
-            out.path().join(&manifest.irs[0].archive_path)
-        );
+        assert_eq!(restored, out.path().join(&manifest.irs[0].archive_path));
         assert_eq!(std::fs::read(&restored).unwrap(), ir_bytes);
         // The missing IR keeps its original reference.
         assert_eq!(imported.song.mixer[1].fx[1].ir, Some(missing));
@@ -699,8 +702,7 @@ mod tests {
         song.mixer[2].fx.push(conv_slot(shared.clone()));
 
         let zip_path = dir.path().join("bundle.zip");
-        let report =
-            export_bundle(&song, "shared", &zip_path, &BundleOptions::default()).unwrap();
+        let report = export_bundle(&song, "shared", &zip_path, &BundleOptions::default()).unwrap();
         assert_eq!(report.bundled_irs, 1);
         assert_eq!(report.manifest.irs.len(), 2);
         assert_eq!(
@@ -792,7 +794,11 @@ mod tests {
         let report = export_bundle(&song, "vox", &plain, &BundleOptions::default()).unwrap();
         assert_eq!(report.voicebanks, 1);
         assert!(!report.manifest.voicebanks[0].bundled);
-        assert!(!zip_names(&plain).iter().any(|n| n.starts_with("voicebanks/")));
+        assert!(
+            !zip_names(&plain)
+                .iter()
+                .any(|n| n.starts_with("voicebanks/"))
+        );
 
         // Enabled: files travel, hidden ones stay out.
         let full = dir.path().join("full.zip");

@@ -543,9 +543,8 @@ impl App {
                 let ratio = f_hi / f_lo;
 
                 let cache_id = ui.make_persistent_id("deck_spec_bars");
-                let mut held: [f32; BARS] = ui
-                    .data_mut(|d| d.get_temp(cache_id))
-                    .unwrap_or([0.0; BARS]);
+                let mut held: [f32; BARS] =
+                    ui.data_mut(|d| d.get_temp(cache_id)).unwrap_or([0.0; BARS]);
 
                 let gap = 1.5;
                 let bw = ((inner.width() - gap * (BARS - 1) as f32) / BARS as f32).max(1.5);
@@ -590,7 +589,9 @@ impl App {
 
         let tip = match mode {
             DeckMonitor::Scope => "Master oscilloscope · click for spectrum, right-click for mode",
-            DeckMonitor::Spectrum => "Master spectrum · click for oscilloscope, right-click for mode",
+            DeckMonitor::Spectrum => {
+                "Master spectrum · click for oscilloscope, right-click for mode"
+            }
             DeckMonitor::Off => "",
         };
         let resp = kit::bar_hint(resp, tip);
@@ -605,10 +606,7 @@ impl App {
         resp.context_menu(|ui| {
             kit::menu_style(ui);
             for opt in DeckMonitor::ALL {
-                if ui
-                    .selectable_label(mode == opt, opt.label())
-                    .clicked()
-                {
+                if ui.selectable_label(mode == opt, opt.label()).clicked() {
                     self.set_deck_monitor(opt);
                     ui.close_menu();
                 }
@@ -905,7 +903,8 @@ impl App {
         } else if on {
             "Record is on: armed mixer tracks, MIDI notes, and tweaked controls record while playing  R · Right-click for filters".to_string()
         } else {
-            "Record audio, MIDI notes, and automation while playing  R · Right-click for filters".to_string()
+            "Record audio, MIDI notes, and automation while playing  R · Right-click for filters"
+                .to_string()
         };
         let r = kit::bar_hint(r, tip);
         if r.clicked() {

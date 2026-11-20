@@ -693,8 +693,16 @@ fn rmb_drag_selects_clips_survives_scroll_and_moves_all_together() {
 
     let sel_id = egui::Id::new("kfxl-playlist-selection");
     let sel: Vec<usize> = ctx.data(|d| d.get_temp(sel_id)).unwrap_or_default();
-    assert_eq!(sel, vec![0, 1], "RMB drag selects both clips inside the box");
-    assert_eq!(app.song.clips.len(), 3, "RMB drag selects instead of deleting");
+    assert_eq!(
+        sel,
+        vec![0, 1],
+        "RMB drag selects both clips inside the box"
+    );
+    assert_eq!(
+        app.song.clips.len(),
+        3,
+        "RMB drag selects instead of deleting"
+    );
 
     // Scroll right and back with Shift+wheel: selection must persist across scrolling.
     let shift = Modifiers {
@@ -762,6 +770,9 @@ fn rmb_drag_selects_clips_survives_scroll_and_moves_all_together() {
     let grab2 = pos2(grid.left() + 2.5 * bar_w, grid.top() + 1.5 * lane_h);
     let drop2 = pos2(grid.left() + 3.5 * bar_w, grid.top() + 1.5 * lane_h);
     drag_shift(&ctx, &mut app, grab2, drop2);
-    assert_eq!(app.song.clips.len(), 5, "Shift+drag duplicates all selected clips");
+    assert_eq!(
+        app.song.clips.len(),
+        5,
+        "Shift+drag duplicates all selected clips"
+    );
 }
-

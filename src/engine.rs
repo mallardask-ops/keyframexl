@@ -526,7 +526,10 @@ impl Voice {
         self.pos += self.ratio_cache.1 * r.rate as f64 / rate;
         self.t += 1.0 / rate;
         if self.pan != 0.0 {
-            [l * (1.0 - self.pan.max(0.0)), rr * (1.0 + self.pan.min(0.0))]
+            [
+                l * (1.0 - self.pan.max(0.0)),
+                rr * (1.0 + self.pan.min(0.0)),
+            ]
         } else {
             [l, rr]
         }
@@ -2396,8 +2399,7 @@ impl Engine {
                 // is automated and the state matches the slot, `slot.params`
                 // passes straight through.
                 if let Some(Some((kind, vals))) = self.fx_param_state.get_mut(si) {
-                    if *kind != slot.kind || (!vals.is_empty() && vals.len() != slot.params.len())
-                    {
+                    if *kind != slot.kind || (!vals.is_empty() && vals.len() != slot.params.len()) {
                         vals.clear();
                         *kind = slot.kind;
                     }
@@ -2533,7 +2535,13 @@ impl Engine {
                 }
                 self.scope.pos.store(at, Relaxed);
             }
-            if t == 0 && self.master_scope.track.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+            if t == 0
+                && self
+                    .master_scope
+                    .track
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    == 0
+            {
                 use std::sync::atomic::Ordering::Relaxed;
                 let mut at = self.master_scope.pos.load(Relaxed);
                 for f in bus.chunks_exact(2) {
@@ -2886,24 +2894,37 @@ impl Engine {
                                 {
                                     return None;
                                 }
-                                let highest = p.notes.iter().filter(|other| {
-                                    other.instrument == n.instrument && other.group == n.group
-                                        && !other.muted && other.start <= slide.start
-                                        && other.end() > slide.start
-                                }).map(|other| other.pitch).max().unwrap_or(n.pitch);
+                                let highest = p
+                                    .notes
+                                    .iter()
+                                    .filter(|other| {
+                                        other.instrument == n.instrument
+                                            && other.group == n.group
+                                            && !other.muted
+                                            && other.start <= slide.start
+                                            && other.end() > slide.start
+                                    })
+                                    .map(|other| other.pitch)
+                                    .max()
+                                    .unwrap_or(n.pitch);
                                 let delta = slide.start - n.start;
                                 let start = on + relative_frame(delta).round() as u64;
                                 let end = on + relative_frame(delta + slide.length).round() as u64;
                                 Some(crate::plugin::PitchSlide {
                                     start,
                                     end,
-                                    cents: f64::from(i16::from(slide.target) - i16::from(highest)) * 100.0,
+                                    cents: f64::from(i16::from(slide.target) - i16::from(highest))
+                                        * 100.0,
                                 })
                             })
                         });
                         pl.start_fl_pitch(
-                            on.saturating_sub(u64::from(at)), on, off, f64::from(n.fine),
-                            (self.rate as u64 / 240).max(1), slides,
+                            on.saturating_sub(u64::from(at)),
+                            on,
+                            off,
+                            f64::from(n.fine),
+                            (self.rate as u64 / 240).max(1),
+                            slides,
                         );
                     }
                     pl.notes.push((note_id, n.pitch, off));
@@ -2974,9 +2995,8 @@ impl Engine {
                 v.key_until = r.seconds();
                 v.pan = n.pan as f64;
                 v.fine = n.fine as f64 / 100.0;
-                v.slide = p.and_then(|p| {
-                    note_slide(p, n, self.sps_now(song), song.swing.clamp(0.0, 0.6))
-                });
+                v.slide = p
+                    .and_then(|p| note_slide(p, n, self.sps_now(song), song.swing.clamp(0.0, 0.6)));
                 self.push(v);
             }
             InstrumentKind::Drum { voice } => {
@@ -4954,7 +4974,11 @@ mod tests {
         // The export adds a silent tail block past the song; compare the song.
         let length = loop_frames(&still, 1, false, RATE) as usize;
         let live = render64(&still, false, length);
-        assert_eq!(live, offline[..length], "a stationary channel stays bit-exact");
+        assert_eq!(
+            live,
+            offline[..length],
+            "a stationary channel stays bit-exact"
+        );
         // The same channel automated: 1.0 -> 0.25 at bar 2.
         let mut moved = still.clone();
         moved
@@ -5017,11 +5041,24 @@ mod tests {
         for (id, target, from, to) in [
             (
                 7u64,
-                Target::FxParam { track: 1, slot: 0, param: 1 },
+                Target::FxParam {
+                    track: 1,
+                    slot: 0,
+                    param: 1,
+                },
                 10000.0f32,
                 200.0f32,
             ),
-            (8, Target::FxParam { track: 2, slot: 0, param: 0 }, 4.0, 1.0),
+            (
+                8,
+                Target::FxParam {
+                    track: 2,
+                    slot: 0,
+                    param: 0,
+                },
+                4.0,
+                1.0,
+            ),
         ] {
             let mut first = Pattern::new(id, "From");
             first.length = crate::sequence::BAR;
@@ -5038,7 +5075,9 @@ mod tests {
         let mut e = Engine::new(RATE);
         let mut buf = [0.0f32; 64 * 2];
         let mut pos = 0;
-        let rms = |b: &[f32]| (b.iter().map(|x| (*x as f64).powi(2)).sum::<f64>() / b.len() as f64).sqrt();
+        let rms = |b: &[f32]| {
+            (b.iter().map(|x| (*x as f64).powi(2)).sum::<f64>() / b.len() as f64).sqrt()
+        };
         let mut before = 0.0;
         for _ in 0..bar / 64 {
             pos = e.process(&song, 1, true, pos, &mut buf, true);
@@ -6102,18 +6141,15 @@ mod plugin_tests {
             unreachable!()
         };
         plugin.format = "fl-native".into();
-        song.patterns[0].slides = [
-            (STEP + STEP / 3, STEP / 3, 71),
-            (STEP + STEP, STEP / 3, 68),
-        ]
-        .map(|(start, length, target)| crate::sequence::Glide {
-            start,
-            length,
-            target,
-            instrument: inst,
-            group: 0,
-        })
-        .to_vec();
+        song.patterns[0].slides = [(STEP + STEP / 3, STEP / 3, 71), (STEP + STEP, STEP / 3, 68)]
+            .map(|(start, length, target)| crate::sequence::Glide {
+                start,
+                length,
+                target,
+                instrument: inst,
+                group: 0,
+            })
+            .to_vec();
         song.add_note(pat, Note::new(inst, 3 * STEP, STEP, 72, 100));
         let synth = TestSynth::default();
         let seen = synth.seen.clone();

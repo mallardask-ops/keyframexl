@@ -829,7 +829,11 @@ impl App {
         // the scrollbar never triggers a grid click or clears selection.
         let mut grid_seen = grid.intersect(view).intersect(rows_view);
         if max_scroll > 0.0 {
-            grid_seen.max.y = grid_seen.max.y.min(well.bottom() - 11.0).max(grid_seen.min.y);
+            grid_seen.max.y = grid_seen
+                .max
+                .y
+                .min(well.bottom() - 11.0)
+                .max(grid_seen.min.y);
         }
         // Rows and clips: drawn and clickable below the pinned top only.
         let painter = painter.with_clip_rect(painter.clip_rect().intersect(rows_view));
@@ -1863,7 +1867,8 @@ impl App {
                 let cur_tick = tick_at(cur_pos.x, grid_l, bar_w);
                 let cur_track = ((cur_pos.y - grid.top()) / lane_h).max(0.0);
                 let (t_min, t_max) = (b.origin_tick.min(cur_tick), b.origin_tick.max(cur_tick));
-                let (tr_min, tr_max) = (b.origin_track.min(cur_track), b.origin_track.max(cur_track));
+                let (tr_min, tr_max) =
+                    (b.origin_track.min(cur_track), b.origin_track.max(cur_track));
                 let a_screen = pos2(
                     grid_l + b.origin_tick as f32 / BAR as f32 * bar_w,
                     grid.top() + b.origin_track * lane_h,

@@ -313,7 +313,11 @@ impl Macros {
         [self.size, self.energy, self.dirt, self.space][i.min(3)]
     }
     pub fn set(&mut self, i: usize, v: f32) {
-        let v = if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.5 };
+        let v = if v.is_finite() {
+            v.clamp(0.0, 1.0)
+        } else {
+            0.5
+        };
         match i {
             0 => self.size = v,
             1 => self.energy = v,
@@ -422,9 +426,17 @@ fn tidy_fx(fx: &mut Vec<crate::fx::FxSlot>) {
             s.params.push(spec[s.params.len()].default);
         }
         for (v, p) in s.params.iter_mut().zip(spec) {
-            *v = if v.is_finite() { v.clamp(p.min, p.max) } else { p.default };
+            *v = if v.is_finite() {
+                v.clamp(p.min, p.max)
+            } else {
+                p.default
+            };
         }
-        s.mix = if s.mix.is_finite() { s.mix.clamp(0.0, 1.0) } else { 1.0 };
+        s.mix = if s.mix.is_finite() {
+            s.mix.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
         s.sidechain = None;
     }
 }
@@ -672,7 +684,10 @@ mod tests {
         let old = s.rendered.clone();
         s.edit(Recipe::Laser.patch());
         assert!(s.stale());
-        assert!(Arc::ptr_eq(&s.rendered, &old), "the old audio plays meanwhile");
+        assert!(
+            Arc::ptr_eq(&s.rendered, &old),
+            "the old audio plays meanwhile"
+        );
         let v1 = s.version();
         let r1 = Arc::new(render::render(&s.patch));
         s.edit(Recipe::Hit.patch());
@@ -684,18 +699,28 @@ mod tests {
         assert!(!s.stale() && s.rendered == r2);
 
         let (mut song, id) = song_with(Recipe::Coin.patch());
-        if let Some(InstrumentKind::Forge { sound }) = song.instruments.iter_mut().find(|i| i.id == id).map(|i| &mut i.kind) {
+        if let Some(InstrumentKind::Forge { sound }) = song
+            .instruments
+            .iter_mut()
+            .find(|i| i.id == id)
+            .map(|i| &mut i.kind)
+        {
             sound.edit(Recipe::Step.patch());
         }
         refresh_all(&mut song);
-        let InstrumentKind::Forge { sound } = &song.instrument(id).unwrap().kind else { unreachable!() };
+        let InstrumentKind::Forge { sound } = &song.instrument(id).unwrap().kind else {
+            unreachable!()
+        };
         assert!(!sound.stale());
         assert_eq!(*sound.rendered, render::render(&Recipe::Step.patch()));
     }
 
     #[test]
     fn a_patch_with_missing_fields_opens() {
-        let p: ForgePatch = serde_json::from_str(r#"{"name":"Old","layers":[{"name":"A","source":{"Osc":{"wave":"Saw","hz":220.0}}}]}"#).unwrap();
+        let p: ForgePatch = serde_json::from_str(
+            r#"{"name":"Old","layers":[{"name":"A","source":{"Osc":{"wave":"Saw","hz":220.0}}}]}"#,
+        )
+        .unwrap();
         assert_eq!(p.layers.len(), 1);
         assert_eq!(p.macros, Macros::default());
         assert!(ForgeSound::new(p).rendered.peak > 0.05);

@@ -201,14 +201,22 @@ impl App {
         if self.export.is_none() {
             return;
         }
-        if let Some(error) = self.song.instruments.iter().filter(|i| !i.muted)
+        if let Some(error) = self
+            .song
+            .instruments
+            .iter()
+            .filter(|i| !i.muted)
             .filter_map(|i| i.plugin().map(|p| (i, p)))
             .filter(|(_, p)| crate::fl_native::slot(&p.path).is_some())
             .find_map(|(i, p)| {
                 let live = self.plugins.live.get(&p.id);
                 live.is_none_or(|l| l.proc.is_none()).then(|| {
-                    format!("{} — {}", i.name, live.and_then(|l| l.error.as_deref())
-                        .unwrap_or("waiting for the FL Studio bridge"))
+                    format!(
+                        "{} — {}",
+                        i.name,
+                        live.and_then(|l| l.error.as_deref())
+                            .unwrap_or("waiting for the FL Studio bridge")
+                    )
                 })
             })
         {

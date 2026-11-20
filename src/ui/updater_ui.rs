@@ -404,8 +404,10 @@ impl App {
                             .color(t::MUTED),
                     );
                     ui.add_space(12.0);
-                    if super::settings_ui::kit_switch(ui, &mut self.settings.general.nightly_updates)
-                    {
+                    if super::settings_ui::kit_switch(
+                        ui,
+                        &mut self.settings.general.nightly_updates,
+                    ) {
                         action_save_prefs = true;
                         action_retry = true;
                     }

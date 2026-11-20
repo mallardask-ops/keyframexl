@@ -1,7 +1,7 @@
 //! Variations and mutations: the same sound nudged at random, so a game's
 //! footsteps never repeat like a robot, and new ideas grow from one you like.
 
-use super::{ForgePatch, NoiseColor, Rng, Source, Wave, PITCH_RANGE};
+use super::{ForgePatch, NoiseColor, PITCH_RANGE, Rng, Source, Wave};
 
 /// How far "Make variations" moves a sound: same sound, a little different.
 pub const VARIATION: f32 = 0.15;
@@ -44,8 +44,8 @@ pub fn mutate(p: &ForgePatch, seed: u64, amount: f32) -> ForgePatch {
                 }
                 Source::Noise { color, hz } => {
                     if rng.unit() < a * 0.2 {
-                        *color =
-                            NoiseColor::ALL[(rng.next_u64() % NoiseColor::ALL.len() as u64) as usize];
+                        *color = NoiseColor::ALL
+                            [(rng.next_u64() % NoiseColor::ALL.len() as u64) as usize];
                     }
                     *hz *= 2f32.powf(rng.signed() * a * 0.5);
                 }

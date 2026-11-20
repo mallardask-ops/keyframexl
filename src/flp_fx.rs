@@ -164,7 +164,11 @@ fn clip_threshold(r: f32) -> f32 {
     db(r / 127.0)
 }
 fn clip_output(r: f32) -> f32 {
-    if r > 128.0 { (r - 128.0) * 0.176 } else { db((r / 128.0).powi(2)) }
+    if r > 128.0 {
+        (r - 128.0) * 0.176
+    } else {
+        db((r / 128.0).powi(2))
+    }
 }
 fn flanger_delay(r: f32) -> f32 {
     1.0 + r / 1024.0 * 9.0
@@ -460,7 +464,10 @@ fn delay_bank(data: &[u8], slot: &mut FxSlot, notes: &mut Vec<String>) -> bool {
         return true;
     };
     if active.next().is_some() {
-        notes.push(format!("Delay Bank: playing active bank {}; additional banks are retained in the FL state", bank + 1));
+        notes.push(format!(
+            "Delay Bank: playing active bank {}; additional banks are retained in the FL state",
+            bank + 1
+        ));
     }
     let flags = bank_flags(bank);
     if flags[31] == 0 {
@@ -469,8 +476,11 @@ fn delay_bank(data: &[u8], slot: &mut FxSlot, notes: &mut Vec<String>) -> bool {
     let at = 5 + 16 * bank;
     let feedback = raw(at + 6) / 128.0 * (raw(4) / 128.0);
     let first_echo = if flags[30] == 0 { feedback } else { 1.0 };
-    let wet = of_128(raw(2)) * (raw(3) / 128.0)
-        * (raw(at + 1) / 128.0) * (raw(at + 14) / 128.0) * first_echo;
+    let wet = of_128(raw(2))
+        * (raw(3) / 128.0)
+        * (raw(at + 1) / 128.0)
+        * (raw(at + 14) / 128.0)
+        * first_echo;
     for (param, value) in [
         (0, raw(at + 8) / 480.0),
         (1, feedback * 100.0),

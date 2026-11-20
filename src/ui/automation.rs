@@ -193,7 +193,10 @@ impl App {
             let text = self.auto_value_text(target, value);
             self.say(
                 Tone::Quiet,
-                format!("Pasted {text} to {}. Ctrl+Z undoes.", self.auto_label(target)),
+                format!(
+                    "Pasted {text} to {}. Ctrl+Z undoes.",
+                    self.auto_label(target)
+                ),
             );
         }
     }
@@ -212,7 +215,10 @@ impl App {
             let text = self.auto_value_text(target, def);
             self.say(
                 Tone::Quiet,
-                format!("Reset {} to {text}. Ctrl+Z undoes.", self.auto_label(target)),
+                format!(
+                    "Reset {} to {text}. Ctrl+Z undoes.",
+                    self.auto_label(target)
+                ),
             );
         }
     }
@@ -955,9 +961,9 @@ mod tests {
         assert!((app.song.mixer[2].pan - (-0.6)).abs() < 1e-6);
 
         // Cross-target paste maps through normalized travel (pan -1..1 -> FxMix 0..1).
-        app.song.mixer[1].fx.push(keyframexl::fx::FxSlot::new(
-            keyframexl::fx::FxKind::Reverb,
-        ));
+        app.song.mixer[1]
+            .fx
+            .push(keyframexl::fx::FxSlot::new(keyframexl::fx::FxKind::Reverb));
         let mix = Target::FxMix { track: 1, slot: 0 };
         app.on_target_tweaked(mix);
         app.paste_last_tweaked();
@@ -1034,7 +1040,11 @@ mod tests {
         }
         app.commit_auto_take();
 
-        assert_eq!(app.history.len(), base_history + 1, "one undo step per take");
+        assert_eq!(
+            app.history.len(),
+            base_history + 1,
+            "one undo step per take"
+        );
         assert!(app.auto_take.lanes.is_empty());
 
         let auto_pat = app

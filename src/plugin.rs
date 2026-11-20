@@ -238,7 +238,9 @@ impl Instance {
         pitch.cents = cents;
         let limit = pitch.pending.capacity();
         pitch.pending.extend(slides.take(limit));
-        pitch.pending.sort_unstable_by_key(|slide| std::cmp::Reverse(slide.start));
+        pitch
+            .pending
+            .sort_unstable_by_key(|slide| std::cmp::Reverse(slide.start));
         pitch.next = pitch.pending.last().map(|slide| slide.start);
         if let Some(event) = pitch.event(on.saturating_sub(block_clock) as u32) {
             self.push(event);
@@ -246,7 +248,11 @@ impl Instance {
     }
 
     pub(crate) fn flush_fl_pitch(&mut self, block_clock: u64, until: u64, interval: u64) {
-        while let Some(at) = self.native_pitch.next.filter(|&t| t < until.min(self.native_pitch.off)) {
+        while let Some(at) = self
+            .native_pitch
+            .next
+            .filter(|&t| t < until.min(self.native_pitch.off))
+        {
             let pitch = &mut self.native_pitch;
             if let Some((slide, from)) = &pitch.active {
                 let progress = (at - slide.start) as f64 / (slide.end - slide.start).max(1) as f64;

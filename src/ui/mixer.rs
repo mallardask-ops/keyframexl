@@ -861,7 +861,10 @@ impl App {
         if changed {
             let v = pan as f32;
             self.song.mixer[i].pan = v;
-            self.publish_param(keyframexl::automation::Target::MixerPan { track: i as u16 }, v);
+            self.publish_param(
+                keyframexl::automation::Target::MixerPan { track: i as u16 },
+                v,
+            );
         }
         // Fader and meter.
         // The fader travels along the shared volume taper; `v` is its position.
@@ -2248,12 +2251,7 @@ impl App {
             self.checkpoint();
         }
         if changed {
-            if let Some(slot) = self
-                .song
-                .mixer
-                .get_mut(track)
-                .and_then(|m| m.fx.get_mut(k))
-            {
+            if let Some(slot) = self.song.mixer.get_mut(track).and_then(|m| m.fx.get_mut(k)) {
                 slot.params = params;
             }
             self.publish();

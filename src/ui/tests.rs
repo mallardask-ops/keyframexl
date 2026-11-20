@@ -550,7 +550,11 @@ fn reopening_closed_playlist_uses_focused_main_pane() {
     // Reopening closed Playlist lands in the focused main pane (with Mixer).
     app.win(Cmd::Show(Tab::Playlist));
     app.apply_win_cmds(area);
-    let (ps, pn, _) = app.ws.dock().find_tab(&Tab::Playlist).expect("playlist reopened");
+    let (ps, pn, _) = app
+        .ws
+        .dock()
+        .find_tab(&Tab::Playlist)
+        .expect("playlist reopened");
     let (ms2, mn2, _) = app.ws.dock().find_tab(&Tab::Mixer).unwrap();
     assert_eq!((ps, pn), (ms2, mn2));
     assert!(ps.is_main() && ms.is_main());
@@ -559,9 +563,11 @@ fn reopening_closed_playlist_uses_focused_main_pane() {
 #[test]
 fn group_move_node_and_surface_keeps_combined_tabs_together() {
     let mut dock = egui_dock::DockState::new(vec![Tab::Rack]);
-    let [_, right] = dock
-        .main_surface_mut()
-        .split_right(egui_dock::NodeIndex::root(), 0.5, vec![Tab::Mixer, Tab::Playlist]);
+    let [_, right] = dock.main_surface_mut().split_right(
+        egui_dock::NodeIndex::root(),
+        0.5,
+        vec![Tab::Mixer, Tab::Playlist],
+    );
 
     // Tear the entire Mixer + Playlist group out into a single floating window.
     dock.move_node(
@@ -574,7 +580,11 @@ fn group_move_node_and_surface_keeps_combined_tabs_together() {
     let (ms, mn, _) = dock.find_tab(&Tab::Mixer).expect("mixer floated");
     let (ps, pn, _) = dock.find_tab(&Tab::Playlist).expect("playlist floated");
     assert!(!ms.is_main());
-    assert_eq!((ms, mn), (ps, pn), "Mixer and Playlist float together in one window");
+    assert_eq!(
+        (ms, mn),
+        (ps, pn),
+        "Mixer and Playlist float together in one window"
+    );
 
     // Dock the entire floating surface back onto the main Rack pane as one group.
     let (rs, rn, _) = dock.find_tab(&Tab::Rack).unwrap();
@@ -604,7 +614,10 @@ fn push_silence_scopes_drains_frozen_waveform() {
     // Draining silence clears the buffer so the deck monitor settles to 0.
     engine.push_silence_scopes(keyframexl::engine::SCOPE_LEN);
     scope.read(&mut buf);
-    assert!(buf.iter().all(|&v| v == 0.0), "scope must settle to 0.0 after silence");
+    assert!(
+        buf.iter().all(|&v| v == 0.0),
+        "scope must settle to 0.0 after silence"
+    );
 }
 
 #[test]
@@ -643,7 +656,10 @@ fn welcome_modal_blocks_background_rack_clicks_so_new_project_does_not_prompt() 
             ui.add_enabled_ui(!app.welcome_open, |ui| app.rack(ui));
         });
     });
-    assert!(!app.dirty(), "clicks behind Welcome modal must not dirty the project");
+    assert!(
+        !app.dirty(),
+        "clicks behind Welcome modal must not dirty the project"
+    );
     app.request(super::project::Pending::New);
     assert!(
         app.pending.is_none(),

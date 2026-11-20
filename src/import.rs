@@ -901,10 +901,7 @@ mod tests {
                 (z.adsr.sustain, s),
                 (z.adsr.release, r),
             ] {
-                assert!(
-                    (actual - expected).abs() < 1e-5,
-                    "{actual} != {expected}"
-                );
+                assert!((actual - expected).abs() < 1e-5, "{actual} != {expected}");
             }
         }
         for (key, vel, index) in [

@@ -1561,7 +1561,10 @@ impl App {
             if changed && let Some(i) = self.song.instruments.iter_mut().find(|i| i.id == id) {
                 let (target, sent) = if k == 0 {
                     i.pan = val as f32;
-                    (keyframexl::automation::Target::ChannelPan { inst: id }, i.pan)
+                    (
+                        keyframexl::automation::Target::ChannelPan { inst: id },
+                        i.pan,
+                    )
                 } else {
                     i.volume = keyframexl::sequence::volume_gain(val as f32);
                     (

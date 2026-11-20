@@ -305,8 +305,13 @@ impl App {
             _ => false,
         };
         if !same {
-            let old = self.plugins.live.iter().filter(|(_, l)| slot(&l.path).is_some())
-                .map(|(&id, _)| id).collect::<Vec<_>>();
+            let old = self
+                .plugins
+                .live
+                .iter()
+                .filter(|(_, l)| slot(&l.path).is_some())
+                .map(|(&id, _)| id)
+                .collect::<Vec<_>>();
             for id in old {
                 self.unload_plugin(id);
             }
@@ -320,7 +325,10 @@ impl App {
             for msg in session.rx.try_iter() {
                 match msg {
                     Message::Ready(outputs) => {
-                        notice = Some((Tone::Done, format!("FL Studio connected {} instrument channels.", outputs.len())));
+                        notice = Some((
+                            Tone::Done,
+                            format!("FL Studio connected {} instrument channels.", outputs.len()),
+                        ));
                         session.outputs = outputs;
                     }
                     Message::Error(error) => {
@@ -337,43 +345,63 @@ impl App {
         let mut used = [false; 16];
         for r in wanted {
             let Some(index) = slot(&r.path) else { continue };
-            let duplicate = used.get_mut(index).is_some_and(|seen| std::mem::replace(seen, true));
+            let duplicate = used
+                .get_mut(index)
+                .is_some_and(|seen| std::mem::replace(seen, true));
             let (proc, error) = if duplicate {
-                (None, Some("This FL Studio output already belongs to another channel.".into()))
+                (
+                    None,
+                    Some("This FL Studio output already belongs to another channel.".into()),
+                )
             } else if let Some(session) = &self.plugins.native_fl {
                 (
                     session.outputs.get(index).cloned(),
                     session.error.clone().or_else(|| {
-                        (index >= session.source.channels.len()).then(|| "Invalid FL Studio output.".into())
+                        (index >= session.source.channels.len())
+                            .then(|| "Invalid FL Studio output.".into())
                     }),
                 )
             } else {
-                (None, Some("This project has no saved state for the FL Studio instruments.".into()))
+                (
+                    None,
+                    Some("This project has no saved state for the FL Studio instruments.".into()),
+                )
             };
             let old = self.plugins.live.get(&r.id);
             let unchanged = old.is_some_and(|l| {
-                l.path == r.path && l.error == error && match (&l.proc, &proc) {
-                    (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
-                    (None, None) => true,
-                    _ => false,
-                }
+                l.path == r.path
+                    && l.error == error
+                    && match (&l.proc, &proc) {
+                        (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+                        (None, None) => true,
+                        _ => false,
+                    }
             });
             if unchanged {
                 continue;
             }
             self.unload_plugin(r.id);
-            self.plugins.live.insert(r.id, Live {
-                path: r.path.clone(),
-                proc: None,
-                name: r.name.clone(),
-                gui: false,
-                editor: false,
-                error,
-                show_when_loaded: false,
-                outs: 0,
-            });
+            self.plugins.live.insert(
+                r.id,
+                Live {
+                    path: r.path.clone(),
+                    proc: None,
+                    name: r.name.clone(),
+                    gui: false,
+                    editor: false,
+                    error,
+                    show_when_loaded: false,
+                    outs: 0,
+                },
+            );
             if let Some(proc) = proc {
-                self.plugin_reply(Reply::Loaded { id: r.id, proc, name: r.name.clone(), gui: false, outs: 0 });
+                self.plugin_reply(Reply::Loaded {
+                    id: r.id,
+                    proc,
+                    name: r.name.clone(),
+                    gui: false,
+                    outs: 0,
+                });
             }
         }
     }
@@ -1158,7 +1186,11 @@ impl App {
             return;
         }
         if crate::fl_native::slot(&l.path).is_some() {
-            ui.label(RichText::new("FLEX runs in standalone FL Studio.").font(t::sans(13.0)).color(t::TEXT));
+            ui.label(
+                RichText::new("FLEX runs in standalone FL Studio.")
+                    .font(t::sans(13.0))
+                    .color(t::TEXT),
+            );
             return;
         }
         if !l.gui {

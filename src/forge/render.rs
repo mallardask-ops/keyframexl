@@ -45,7 +45,11 @@ pub fn render(p: &ForgePatch) -> Rendered {
         .min(MAX_SECONDS * 1.8);
     let ringing = |fx: &[FxSlot]| fx.iter().any(|s| s.enabled);
     let any_fx = ringing(&p.fx) || p.audible().any(|(_, l)| ringing(&l.fx));
-    let tail = if any_fx || m.space > 0.01 { MAX_TAIL } else { 0.0 };
+    let tail = if any_fx || m.space > 0.01 {
+        MAX_TAIL
+    } else {
+        0.0
+    };
     let total = ((end + tail) * rate as f32) as usize + 1;
     let mut mix = vec![0.0f32; total * 2];
     for (i, l) in p.audible() {
@@ -83,7 +87,13 @@ pub fn render(p: &ForgePatch) -> Rendered {
     let mut frames: Vec<[f32; 2]> = mix
         .chunks_exact(2)
         .map(|c| {
-            let ok = |v: f32| if v.is_finite() { v.clamp(-1.0, 1.0) } else { 0.0 };
+            let ok = |v: f32| {
+                if v.is_finite() {
+                    v.clamp(-1.0, 1.0)
+                } else {
+                    0.0
+                }
+            };
             [ok(c[0]), ok(c[1])]
         })
         .collect();
@@ -117,7 +127,12 @@ fn character(m: super::Macros) -> Vec<FxSlot> {
     if m.dirt > 0.01 {
         let mut drive = FxSlot::new(FxKind::Drive);
         // Drive, Tone, Output, Mix.
-        drive.params = vec![m.dirt * 30.0, 14_000.0 - m.dirt * 8_000.0, -m.dirt * 9.0, 100.0];
+        drive.params = vec![
+            m.dirt * 30.0,
+            14_000.0 - m.dirt * 8_000.0,
+            -m.dirt * 9.0,
+            100.0,
+        ];
         v.push(drive);
     }
     if m.dirt > 0.5 {
@@ -217,12 +232,17 @@ mod tests {
             assert!(out.peak <= 1.0, "{r:?} clips");
             assert!(rms(&out) > 0.003, "{r:?} too quiet");
             assert!(
-                out.frames.iter().all(|f| f[0].is_finite() && f[1].is_finite()),
+                out.frames
+                    .iter()
+                    .all(|f| f[0].is_finite() && f[1].is_finite()),
                 "{r:?} NaN"
             );
             // The sound ends quietly (faded), never on a click.
             let last = out.frames.last().unwrap();
-            assert!(last[0].abs() < 0.01 && last[1].abs() < 0.01, "{r:?} ends loud");
+            assert!(
+                last[0].abs() < 0.01 && last[1].abs() < 0.01,
+                "{r:?} ends loud"
+            );
         }
     }
 

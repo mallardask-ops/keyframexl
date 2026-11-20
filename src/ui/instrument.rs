@@ -63,7 +63,9 @@ impl App {
         }
         if ui
             .button("Forge (game sounds)")
-            .on_hover_text("Build jumps, coins, hits and lasers from layers, then export them for your game")
+            .on_hover_text(
+                "Build jumps, coins, hits and lasers from layers, then export them for your game",
+            )
             .clicked()
         {
             self.add_forge();

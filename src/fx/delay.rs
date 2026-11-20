@@ -59,7 +59,13 @@ impl Effect for Delay {
     fn process(&mut self, p: &[f32], buf: &mut [f32], ctx: &Ctx) {
         let rate = ctx.rate;
         let tempo = ctx.tempo;
-        let Self { buf: line, i, tone, input_delay, input_at } = self;
+        let Self {
+            buf: line,
+            i,
+            tone,
+            input_delay,
+            input_at,
+        } = self;
         let step_s = 60.0 / tempo.clamp(40.0, 300.0) / 4.0;
         let stereo = !input_delay.is_empty();
         let delay_frames = if stereo {
@@ -72,7 +78,11 @@ impl Effect for Delay {
         let pp = p[2] / 100.0;
         tone.set(p[3], rate);
         let (wet, dry) = (p[4] / 100.0, p[5] / 100.0);
-        let (offset, pan, sep) = if stereo { (p[6], p[7] / 100.0, p[8] / 100.0) } else { (0.0, 0.0, 0.0) };
+        let (offset, pan, sep) = if stereo {
+            (p[6], p[7] / 100.0, p[8] / 100.0)
+        } else {
+            (0.0, 0.0, 0.0)
+        };
         let left_offset = ((-offset).max(0.0) * step_s * rate).round() as usize;
         let right_offset = (offset.max(0.0) * step_s * rate).round() as usize;
         let n = line.len();
@@ -80,7 +90,11 @@ impl Effect for Delay {
             let r = line[(*i + n - d) % n];
             let mid = (r[0] + r[1]) * 0.5 * (1.0 + sep.min(0.0) * 0.5);
             let side = (r[0] - r[1]) * 0.5 * (1.0 - sep.max(0.0));
-            let echo = if sep == 0.0 { r } else { [mid + side, mid - side] };
+            let echo = if sep == 0.0 {
+                r
+            } else {
+                [mid + side, mid - side]
+            };
             let (dl, dr) = (tone.tick(0, echo[0]), tone.tick(1, echo[1]));
             let dry_in = [f[0], f[1]];
             let input = if stereo {

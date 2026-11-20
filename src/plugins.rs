@@ -822,7 +822,10 @@ pub fn clap_files(dirs: &[PathBuf]) -> Vec<PathBuf> {
                 if depth < 6 {
                     stack.push((p, depth + 1));
                 }
-            } else if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("clap")) {
+            } else if p
+                .extension()
+                .is_some_and(|x| x.eq_ignore_ascii_case("clap"))
+            {
                 out.push(p);
             }
         }
@@ -849,9 +852,7 @@ pub fn scan(extra: &[PathBuf], force: bool, progress: impl Fn(usize, usize, &str
         let st = stamp(&p);
         let cached: Vec<Scanned> = cache
             .iter()
-            .filter(|c| {
-                c.stamp == st && (c.path == p || crate::clap::split_path(&c.path).0 == p)
-            })
+            .filter(|c| c.stamp == st && (c.path == p || crate::clap::split_path(&c.path).0 == p))
             .cloned()
             .collect();
         if !cached.is_empty() {
@@ -1086,7 +1087,15 @@ fn probe_clap_instance(path: &Path) -> Result<ProbeOut, String> {
         if i == 30 && instrument {
             p.queue_note_off(0, 60);
         }
-        if !p.process(&mut ins, &mut outs, 512, 48_000, 120.0, true, (i * 512) as u64) {
+        if !p.process(
+            &mut ins,
+            &mut outs,
+            512,
+            48_000,
+            120.0,
+            true,
+            (i * 512) as u64,
+        ) {
             return Err("CLAP process failed".into());
         }
     }
@@ -1752,13 +1761,14 @@ struct ClapProc {
 
 impl ClapProc {
     fn new(plugin: Arc<Mutex<ClapPlugin>>, effect: bool) -> Self {
-        let layout = plugin
-            .lock()
-            .map(|p| p.bus_layout().clone())
-            .unwrap_or(crate::clap::ClapBusLayout {
-                inputs: if effect { vec![2] } else { vec![] },
-                outputs: vec![2],
-            });
+        let layout =
+            plugin
+                .lock()
+                .map(|p| p.bus_layout().clone())
+                .unwrap_or(crate::clap::ClapBusLayout {
+                    inputs: if effect { vec![2] } else { vec![] },
+                    outputs: vec![2],
+                });
         let mut pairs = Vec::new();
         if !effect {
             for (b, &ch) in layout.outputs.iter().enumerate().skip(1) {

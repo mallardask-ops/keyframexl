@@ -46,7 +46,8 @@ pub(super) fn dry(layer: &Layer, ctx: &LayerCtx) -> Vec<f32> {
                 vibrato,
             } => {
                 let vib = if *vibrato > 0.0 {
-                    let v = (t * *vibrato_hz as f64 * std::f64::consts::TAU).sin() * *vibrato as f64;
+                    let v =
+                        (t * *vibrato_hz as f64 * std::f64::consts::TAU).sin() * *vibrato as f64;
                     2f64.powf(v / 12.0)
                 } else {
                     1.0

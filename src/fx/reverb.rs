@@ -98,9 +98,7 @@ impl Effect for Reverb {
                 *last_high = p[7];
             }
             let predelay = (p[8] * rate / 1000.0) as usize;
-            let feedback = COMBS.map(|n| {
-                10f32.powf(-3.0 * (n as f32 / 44_100.0) / (p[6] / 800.0))
-            });
+            let feedback = COMBS.map(|n| 10f32.powf(-3.0 * (n as f32 / 44_100.0) / (p[6] / 800.0)));
             (predelay, p[9] / 100.0, feedback)
         } else {
             (0, 0.0, [room; COMBS.len()])
@@ -115,7 +113,11 @@ impl Effect for Reverb {
             let x = if room_model {
                 let len = room_input.len();
                 let input = |ch, sample| {
-                    let sample = if p[3] > 0.0 { low.tick(ch, sample) } else { sample };
+                    let sample = if p[3] > 0.0 {
+                        low.tick(ch, sample)
+                    } else {
+                        sample
+                    };
                     high.tick(ch, sample)
                 };
                 let mut input = input;

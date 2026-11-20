@@ -74,7 +74,10 @@ impl Drop for Display {
 }
 
 /// Mapped top-level windows: (title, x, y, width, height).
-pub(crate) fn windows(conn: &xcb::Connection, root: xcb::x::Window) -> Vec<(String, i16, i16, u16, u16)> {
+pub(crate) fn windows(
+    conn: &xcb::Connection,
+    root: xcb::x::Window,
+) -> Vec<(String, i16, i16, u16, u16)> {
     let Ok(tree) = conn.wait_for_reply(conn.send_request(&xcb::x::QueryTree { window: root }))
     else {
         return vec![];

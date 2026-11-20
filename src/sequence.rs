@@ -533,14 +533,17 @@ impl NativeFlProject {
     pub fn new(project: &[u8], channels: Vec<u32>) -> Self {
         use base64::Engine as _;
         Self {
-            project: base64::engine::general_purpose::STANDARD.encode(project).into(),
+            project: base64::engine::general_purpose::STANDARD
+                .encode(project)
+                .into(),
             channels,
         }
     }
 
     pub fn bytes(&self) -> Result<Vec<u8>, String> {
         use base64::Engine as _;
-        base64::engine::general_purpose::STANDARD.decode(&*self.project)
+        base64::engine::general_purpose::STANDARD
+            .decode(&*self.project)
             .map_err(|e| format!("Invalid FL bridge project: {e}"))
     }
 }

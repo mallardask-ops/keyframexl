@@ -248,7 +248,13 @@ impl App {
     }
 
     fn forge_sound_mut(&mut self, id: u64) -> Option<&mut ForgeSound> {
-        match self.song.instruments.iter_mut().find(|i| i.id == id).map(|i| &mut i.kind) {
+        match self
+            .song
+            .instruments
+            .iter_mut()
+            .find(|i| i.id == id)
+            .map(|i| &mut i.kind)
+        {
             Some(InstrumentKind::Forge { sound }) => Some(sound),
             _ => None,
         }
@@ -280,18 +286,23 @@ impl App {
     /// Every frame: take finished work, start renders for stale sounds.
     pub(super) fn poll_forge(&mut self, ctx: &egui::Context) {
         let mut done = Vec::new();
-        self.forge_jobs.renders.retain(|(inst, ver, rx)| match rx.try_recv() {
-            Ok(r) => {
-                done.push((*inst, *ver, r));
-                false
-            }
-            Err(mpsc::TryRecvError::Empty) => true,
-            Err(mpsc::TryRecvError::Disconnected) => false,
-        });
+        self.forge_jobs
+            .renders
+            .retain(|(inst, ver, rx)| match rx.try_recv() {
+                Ok(r) => {
+                    done.push((*inst, *ver, r));
+                    false
+                }
+                Err(mpsc::TryRecvError::Empty) => true,
+                Err(mpsc::TryRecvError::Disconnected) => false,
+            });
         let mut changed = false;
         for (inst, ver, r) in done {
             let r = Arc::new(r);
-            if self.forge_sound_mut(inst).is_some_and(|s| s.install(ver, r.clone())) {
+            if self
+                .forge_sound_mut(inst)
+                .is_some_and(|s| s.install(ver, r.clone()))
+            {
                 changed = true;
                 if self.forge_jobs.play_when_ready == Some(inst) {
                     self.forge_jobs.play_when_ready = None;
@@ -335,7 +346,12 @@ impl App {
             self.forge_jobs.ideas = None;
         }
         let growing = self.forge_jobs.ideas.as_ref().is_some_and(|j| j.0 == id);
-        let bouncing = self.forge_jobs.bounce.as_ref().filter(|j| j.0 == id).map(|j| (j.1, j.2));
+        let bouncing = self
+            .forge_jobs
+            .bounce
+            .as_ref()
+            .filter(|j| j.0 == id)
+            .map(|j| (j.1, j.2));
         let channels: Vec<(u64, String)> = self
             .song
             .instruments
@@ -577,7 +593,9 @@ impl App {
             self.checkpoint();
             self.song.game_style = style;
             self.publish();
-            let what = style.map_or("any style".to_string(), |s| format!("the {} style", s.label()));
+            let what = style.map_or("any style".to_string(), |s| {
+                format!("the {} style", s.label())
+            });
             self.say(Tone::Quiet, format!("Recipes and new Forge channels now start in {what}. MAKE IT turns this sound too."));
         }
         if mutate_now {
@@ -627,7 +645,9 @@ impl App {
         let mut song = self.song.clone();
         let pid = song.patterns.iter().map(|p| p.id).max().unwrap_or(0) + 1;
         let mut pat = Pattern::new(pid, "Forge bounce");
-        let ticks = ((b.hold as f64 * song.tempo / 60.0) * PPQ as f64).round().max(1.0) as i64;
+        let ticks = ((b.hold as f64 * song.tempo / 60.0) * PPQ as f64)
+            .round()
+            .max(1.0) as i64;
         pat.notes.push(Note::new(b.channel, 0, ticks, b.key, 100));
         song.patterns.push(pat);
         if let Some(i) = song.instruments.iter_mut().find(|i| i.id == b.channel) {
@@ -667,14 +687,19 @@ impl App {
             if let Some(h) = hold {
                 h.store(false, std::sync::atomic::Ordering::Relaxed);
             }
-            let _ = tx.send(out.map(|f| (rate, f)).ok_or_else(|| "the render stopped".to_string()));
+            let _ = tx.send(
+                out.map(|f| (rate, f))
+                    .ok_or_else(|| "the render stopped".to_string()),
+            );
         });
         self.forge_jobs.bounce = Some((forge, into, b, rx));
     }
 
     /// A finished bounce becomes a layer (one undo step).
     fn poll_bounce(&mut self) {
-        let Some((forge_id, into, b, rx)) = &self.forge_jobs.bounce else { return };
+        let Some((forge_id, into, b, rx)) = &self.forge_jobs.bounce else {
+            return;
+        };
         let (forge_id, into, b) = (*forge_id, *into, *b);
         let result = match rx.try_recv() {
             Ok(r) => r,
@@ -682,7 +707,11 @@ impl App {
             Err(mpsc::TryRecvError::Disconnected) => Err("the render stopped".into()),
         };
         self.forge_jobs.bounce = None;
-        let name = format!("{} {}", self.instrument_name(b.channel), super::roll::note_name(b.key));
+        let name = format!(
+            "{} {}",
+            self.instrument_name(b.channel),
+            super::roll::note_name(b.key)
+        );
         let (rate, mut frames) = match result {
             Ok(v) => v,
             Err(e) => {
@@ -691,14 +720,23 @@ impl App {
             }
         };
         // From the first sound, at most as long as a layer may be.
-        let first = frames.iter().position(|f| f[0].abs().max(f[1].abs()) > 1e-4);
+        let first = frames
+            .iter()
+            .position(|f| f[0].abs().max(f[1].abs()) > 1e-4);
         let Some(first) = first else {
-            self.say(Tone::Bad, format!("{name} played silence. Load a sound into that channel, or pick another note."));
+            self.say(
+                Tone::Bad,
+                format!(
+                    "{name} played silence. Load a sound into that channel, or pick another note."
+                ),
+            );
             return;
         };
         frames.drain(..first);
         frames.truncate((forge::MAX_SECONDS * rate as f32) as usize);
-        let Some(mut p) = self.forge_patch(forge_id) else { return };
+        let Some(mut p) = self.forge_patch(forge_id) else {
+            return;
+        };
         let length = (frames.len() as f32 / rate.max(1) as f32).clamp(0.01, forge::MAX_SECONDS);
         let source = Source::Sample {
             name: name.clone(),
@@ -719,13 +757,19 @@ impl App {
                 p.layers.push(l);
             }
             _ => {
-                self.say(Tone::Bad, "Six layers is the most: delete one, then bounce again.");
+                self.say(
+                    Tone::Bad,
+                    "Six layers is the most: delete one, then bounce again.",
+                );
                 return;
             }
         }
         self.checkpoint();
         self.commit_forge(forge_id, p);
-        self.say(Tone::Quiet, format!("{name} bounced into the sound. Ctrl+Z undoes."));
+        self.say(
+            Tone::Quiet,
+            format!("{name} bounced into the sound. Ctrl+Z undoes."),
+        );
     }
 
     /// Live check: `KFXL_CAPTURE_FORGE_BOUNCE=out.wav` bounces C5 of the last
@@ -735,32 +779,77 @@ impl App {
         use std::sync::atomic::{AtomicU8, Ordering};
         // 0 waiting for the plugin, 1 bouncing, 2 written.
         static STATE: AtomicU8 = AtomicU8::new(0);
-        let Ok(out) = std::env::var("KFXL_CAPTURE_FORGE_BOUNCE") else { return };
+        let Ok(out) = std::env::var("KFXL_CAPTURE_FORGE_BOUNCE") else {
+            return;
+        };
         started();
-        let forge_id = self.song.instruments.iter().find(|i| matches!(i.kind, InstrumentKind::Forge { .. })).map(|i| i.id);
-        let plugin = self.song.instruments.iter().rev().find_map(|i| i.plugin().map(|p| (i.id, p.id)));
-        let (Some(forge_id), Some((channel, pid))) = (forge_id, plugin) else { return };
+        let forge_id = self
+            .song
+            .instruments
+            .iter()
+            .find(|i| matches!(i.kind, InstrumentKind::Forge { .. }))
+            .map(|i| i.id);
+        let plugin = self
+            .song
+            .instruments
+            .iter()
+            .rev()
+            .find_map(|i| i.plugin().map(|p| (i.id, p.id)));
+        let (Some(forge_id), Some((channel, pid))) = (forge_id, plugin) else {
+            return;
+        };
         match STATE.load(Ordering::Relaxed) {
             // A plugin under Wine reads its samples for a while after it loads
             // (KFXL_CAPTURE_FORGE_BOUNCE_AFTER seconds from start, default 25).
-            0 if self.plugins.live.get(&pid).is_some_and(|l| l.proc.is_some())
+            0 if self
+                .plugins
+                .live
+                .get(&pid)
+                .is_some_and(|l| l.proc.is_some())
                 && started().elapsed().as_secs_f64()
-                    >= std::env::var("KFXL_CAPTURE_FORGE_BOUNCE_AFTER").ok().and_then(|v| v.parse().ok()).unwrap_or(25.0) =>
+                    >= std::env::var("KFXL_CAPTURE_FORGE_BOUNCE_AFTER")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(25.0) =>
             {
                 STATE.store(1, Ordering::Relaxed);
-                self.forge_bounce(forge_id, Into::NewLayer, forge::Bounce { channel, key: 60, hold: 0.6 });
+                self.forge_bounce(
+                    forge_id,
+                    Into::NewLayer,
+                    forge::Bounce {
+                        channel,
+                        key: 60,
+                        hold: 0.6,
+                    },
+                );
             }
             1 if self.forge_jobs.bounce.is_none() => {
                 STATE.store(2, Ordering::Relaxed);
                 let p = self.forge_patch(forge_id);
-                let frames = p.as_ref().and_then(|p| p.layers.iter().rev().find_map(|l| match &l.source {
-                    Source::Sample { frames, rate, from: Some(_), .. } => Some((*rate, frames.clone())),
-                    _ => None,
-                }));
+                let frames = p.as_ref().and_then(|p| {
+                    p.layers.iter().rev().find_map(|l| match &l.source {
+                        Source::Sample {
+                            frames,
+                            rate,
+                            from: Some(_),
+                            ..
+                        } => Some((*rate, frames.clone())),
+                        _ => None,
+                    })
+                });
                 match frames {
                     Some((rate, f)) => {
-                        let r = keyframexl::render::write_wav_at(std::path::Path::new(&out), &f, keyframexl::render::Format::Wav32Float, false, rate);
-                        eprintln!("forge bounce: {} frames at {rate} Hz -> {out} {r:?}", f.len());
+                        let r = keyframexl::render::write_wav_at(
+                            std::path::Path::new(&out),
+                            &f,
+                            keyframexl::render::Format::Wav32Float,
+                            false,
+                            rate,
+                        );
+                        eprintln!(
+                            "forge bounce: {} frames at {rate} Hz -> {out} {r:?}",
+                            f.len()
+                        );
                     }
                     None => eprintln!("forge bounce: no bounced layer"),
                 }
@@ -777,18 +866,29 @@ impl App {
     }
 
     fn forge_save(&mut self, ctx: &egui::Context, id: u64) {
-        let Some(p) = self.forge_patch(id) else { return };
+        let Some(p) = self.forge_patch(id) else {
+            return;
+        };
         match forge::save_user(&p) {
             Ok(path) => {
                 ctx.data_mut(|d| d.remove::<Arc<Vec<ForgePatch>>>(egui::Id::new("forge-user")));
-                self.say(Tone::Quiet, format!("Saved {} to {}. It is in Start from now.", p.name, path.display()));
+                self.say(
+                    Tone::Quiet,
+                    format!(
+                        "Saved {} to {}. It is in Start from now.",
+                        p.name,
+                        path.display()
+                    ),
+                );
             }
             Err(e) => self.say(Tone::Bad, format!("Could not save the sound: {e}")),
         }
     }
 
     fn forge_export(&mut self, id: u64, view: &View) {
-        let Some(p) = self.forge_patch(id) else { return };
+        let Some(p) = self.forge_patch(id) else {
+            return;
+        };
         let Some(dir) = rfd::FileDialog::new()
             .set_title("Export sounds into this folder")
             .pick_folder()
@@ -797,7 +897,11 @@ impl App {
         };
         let opt = export::Options {
             count: view.count as usize,
-            format: if view.ogg { export::FileFormat::Ogg } else { export::FileFormat::Wav },
+            format: if view.ogg {
+                export::FileFormat::Ogg
+            } else {
+                export::FileFormat::Wav
+            },
             rate: if view.rate_44 { 44_100 } else { 48_000 },
             normalize: view.normalize,
             stem: p.name.clone(),
@@ -805,10 +909,24 @@ impl App {
         };
         match export::export(&p, &dir, &opt) {
             Ok(paths) => {
-                let first = paths.first().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                self.say(Tone::Quiet, format!("Exported {} files ({first} …) to {}.", paths.len(), dir.display()));
+                let first = paths
+                    .first()
+                    .and_then(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                self.say(
+                    Tone::Quiet,
+                    format!(
+                        "Exported {} files ({first} …) to {}.",
+                        paths.len(),
+                        dir.display()
+                    ),
+                );
             }
-            Err(e) => self.say(Tone::Bad, format!("Export stopped: {e}. Files written before it are kept.")),
+            Err(e) => self.say(
+                Tone::Bad,
+                format!("Export stopped: {e}. Files written before it are kept."),
+            ),
         }
     }
 
@@ -829,10 +947,15 @@ impl App {
             }
         };
         frames.truncate((forge::MAX_SECONDS * rate as f32) as usize);
-        let Some(mut p) = self.forge_patch(id) else { return };
-        let Some(l) = p.layers.get_mut(layer) else { return };
+        let Some(mut p) = self.forge_patch(id) else {
+            return;
+        };
+        let Some(l) = p.layers.get_mut(layer) else {
+            return;
+        };
         let name = super::instrument::file_name(&path.to_string_lossy());
-        l.length = (frames.len() as f32 / rate.max(1) as f32).clamp(0.01, forge::MAX_SECONDS - l.start);
+        l.length =
+            (frames.len() as f32 / rate.max(1) as f32).clamp(0.01, forge::MAX_SECONDS - l.start);
         l.source = Source::Sample {
             name: name.clone(),
             rate,
@@ -840,11 +963,16 @@ impl App {
             reverse: false,
             from: None,
         };
-        l.name = name.rsplit_once('.').map_or(name.clone(), |(s, _)| s.to_string());
+        l.name = name
+            .rsplit_once('.')
+            .map_or(name.clone(), |(s, _)| s.to_string());
         l.pitch = Curve::flat(0.0);
         self.checkpoint();
         self.commit_forge(id, p);
-        self.say(Tone::Quiet, format!("{name} loaded into the layer. Ctrl+Z undoes."));
+        self.say(
+            Tone::Quiet,
+            format!("{name} loaded into the layer. Ctrl+Z undoes."),
+        );
     }
 }
 
@@ -902,17 +1030,31 @@ fn layers_panel(
                         ed.started = true;
                         ed.changed = true;
                     }
-                    let solo = egui::Button::new(egui::RichText::new("S").font(t::mono(12.0)).color(if l.solo { t::WAIT } else { t::MUTED }))
-                        .min_size(vec2(24.0, 22.0));
-                    if ui.add(solo).on_hover_text("Solo: hear only soloed layers").clicked() {
+                    let solo = egui::Button::new(
+                        egui::RichText::new("S")
+                            .font(t::mono(12.0))
+                            .color(if l.solo { t::WAIT } else { t::MUTED }),
+                    )
+                    .min_size(vec2(24.0, 22.0));
+                    if ui
+                        .add(solo)
+                        .on_hover_text("Solo: hear only soloed layers")
+                        .clicked()
+                    {
                         l.solo = !l.solo;
                         ed.started = true;
                         ed.changed = true;
                     }
                     let audible = if solo_any { l.solo } else { l.enabled };
                     let text = format!("{:02}  {}", i + 1, l.name);
-                    let label = egui::RichText::new(text).font(t::sans(14.0)).color(if audible { t::TEXT } else { t::MUTED });
-                    if ui.selectable_label(view.layer == i, label).on_hover_text("Edit this layer below").clicked() {
+                    let label = egui::RichText::new(text)
+                        .font(t::sans(14.0))
+                        .color(if audible { t::TEXT } else { t::MUTED });
+                    if ui
+                        .selectable_label(view.layer == i, label)
+                        .on_hover_text("Edit this layer below")
+                        .clicked()
+                    {
                         view.layer = i;
                     }
                     let what = match &l.source {
@@ -921,8 +1063,16 @@ fn layers_panel(
                         Source::Sample { name, .. } => name.clone(),
                         Source::Synth { .. } => "Tide synth".into(),
                     };
-                    ui.label(egui::RichText::new(what).font(t::sans(12.5)).color(t::FAINT));
-                    if ui.small_button("×").on_hover_text("Delete this layer").clicked() {
+                    ui.label(
+                        egui::RichText::new(what)
+                            .font(t::sans(12.5))
+                            .color(t::FAINT),
+                    );
+                    if ui
+                        .small_button("×")
+                        .on_hover_text("Delete this layer")
+                        .clicked()
+                    {
                         remove = Some(i);
                     }
                 });
@@ -939,10 +1089,22 @@ fn layers_panel(
                 Into::NewLayer => "a new layer".to_string(),
                 Into::Layer(i) => format!("layer {:02}", i + 1),
             };
-            ui.label(egui::RichText::new(format!("Bouncing {} · {} into {what}…", jobs.name(b.channel), super::roll::note_name(b.key))).color(t::WAIT));
+            ui.label(
+                egui::RichText::new(format!(
+                    "Bouncing {} · {} into {what}…",
+                    jobs.name(b.channel),
+                    super::roll::note_name(b.key)
+                ))
+                .color(t::WAIT),
+            );
         }
         if p.layers.is_empty() {
-            ui.label(egui::RichText::new("No layers: the sound is silent. Add one, or pick a recipe in Start from.").color(t::MUTED));
+            ui.label(
+                egui::RichText::new(
+                    "No layers: the sound is silent. Add one, or pick a recipe in Start from.",
+                )
+                .color(t::MUTED),
+            );
         }
         ui.horizontal(|ui| {
             let full = p.layers.len() >= MAX_LAYERS;
@@ -1018,7 +1180,11 @@ fn layer_editor(
     let c = t::ENC_BLUE;
     let salt = format!("forge-{id}-{}", view.layer);
     let mut name = l.name.clone();
-    let r = ui.add(egui::TextEdit::singleline(&mut name).desired_width(220.0).hint_text("Layer name"));
+    let r = ui.add(
+        egui::TextEdit::singleline(&mut name)
+            .desired_width(220.0)
+            .hint_text("Layer name"),
+    );
     if r.changed() {
         if kit::first_edit(ui, &r) {
             ed.started = true;
@@ -1051,24 +1217,92 @@ fn layer_editor(
         }
     }
     match &mut l.source {
-        Source::Osc { wave, hz: f, vibrato_hz, vibrato } => {
-            chips(ui, ed, &format!("{salt}-wave"), &Wave::ALL, &Wave::ALL.map(Wave::label), wave);
+        Source::Osc {
+            wave,
+            hz: f,
+            vibrato_hz,
+            vibrato,
+        } => {
+            chips(
+                ui,
+                ed,
+                &format!("{salt}-wave"),
+                &Wave::ALL,
+                &Wave::ALL.map(Wave::label),
+                wave,
+            );
             ui.horizontal_wrapped(|ui| {
-                knob(ui, ed, "PITCH", c, f, (20.0, 8000.0, 440.0), true, &hz, "Frequency where the pitch line is at 0");
-                knob(ui, ed, "VIBRATO", c, vibrato, (0.0, 4.0, 0.0), false, &|v| format!("{v:.2} st"), "How far the pitch wobbles");
-                knob(ui, ed, "RATE", c, vibrato_hz, (0.0, 30.0, 6.0), false, &|v| format!("{v:.1} Hz"), "How fast it wobbles");
+                knob(
+                    ui,
+                    ed,
+                    "PITCH",
+                    c,
+                    f,
+                    (20.0, 8000.0, 440.0),
+                    true,
+                    &hz,
+                    "Frequency where the pitch line is at 0",
+                );
+                knob(
+                    ui,
+                    ed,
+                    "VIBRATO",
+                    c,
+                    vibrato,
+                    (0.0, 4.0, 0.0),
+                    false,
+                    &|v| format!("{v:.2} st"),
+                    "How far the pitch wobbles",
+                );
+                knob(
+                    ui,
+                    ed,
+                    "RATE",
+                    c,
+                    vibrato_hz,
+                    (0.0, 30.0, 6.0),
+                    false,
+                    &|v| format!("{v:.1} Hz"),
+                    "How fast it wobbles",
+                );
             });
         }
         Source::Noise { color, hz: f } => {
-            chips(ui, ed, &format!("{salt}-noise"), &NoiseColor::ALL, &NoiseColor::ALL.map(NoiseColor::label), color);
+            chips(
+                ui,
+                ed,
+                &format!("{salt}-noise"),
+                &NoiseColor::ALL,
+                &NoiseColor::ALL.map(NoiseColor::label),
+                color,
+            );
             if matches!(color, NoiseColor::Digital | NoiseColor::Crackle) {
-                let hint = if *color == NoiseColor::Digital { "Clock of the chip noise: low is gritty, high is hiss" } else { "Pops per second" };
+                let hint = if *color == NoiseColor::Digital {
+                    "Clock of the chip noise: low is gritty, high is hiss"
+                } else {
+                    "Pops per second"
+                };
                 ui.horizontal_wrapped(|ui| {
-                    knob(ui, ed, "RATE", c, f, (10.0, 48_000.0, 4000.0), true, &hz, hint);
+                    knob(
+                        ui,
+                        ed,
+                        "RATE",
+                        c,
+                        f,
+                        (10.0, 48_000.0, 4000.0),
+                        true,
+                        &hz,
+                        hint,
+                    );
                 });
             }
         }
-        Source::Sample { name, reverse, from, .. } => {
+        Source::Sample {
+            name,
+            reverse,
+            from,
+            ..
+        } => {
             if let Some(b) = from {
                 // Bounced from a channel: which one, the note, how long it is held.
                 let mut nb = *b;
@@ -1113,7 +1347,8 @@ fn layer_editor(
         Source::Synth { patch, key } => {
             ui.horizontal(|ui| {
                 let names = keyframexl::synth::SynthPatch::PRESETS;
-                let now = (0..names.len()).find(|&i| **patch == keyframexl::synth::SynthPatch::factory(i));
+                let now = (0..names.len())
+                    .find(|&i| **patch == keyframexl::synth::SynthPatch::factory(i));
                 egui::ComboBox::from_id_salt(format!("{salt}-tide"))
                     .width(160.0)
                     .selected_text(now.map_or("Edited patch", |i| names[i]))
@@ -1128,7 +1363,16 @@ fn layer_editor(
                         }
                     });
                 let mut k = *key as f64;
-                ed.knob(ui, "NOTE", c, &mut k, (24.0, 96.0, 60.0), false, &|v| super::roll::note_name(v.round() as u8), "The synth note this layer plays");
+                ed.knob(
+                    ui,
+                    "NOTE",
+                    c,
+                    &mut k,
+                    (24.0, 96.0, 60.0),
+                    false,
+                    &|v| super::roll::note_name(v.round() as u8),
+                    "The synth note this layer plays",
+                );
                 *key = k.round().clamp(0.0, 127.0) as u8;
             });
         }
@@ -1136,28 +1380,115 @@ fn layer_editor(
 
     // Timing and level.
     ui.horizontal_wrapped(|ui| {
-        knob(ui, ed, "START", c, &mut l.start, (0.0, 2.0, 0.0), false, &|v| secs(v), "When the layer comes in");
-        knob(ui, ed, "LENGTH", c, &mut l.length, (0.01, forge::MAX_SECONDS as f64, 0.3), true, &|v| secs(v), "How long it lasts; its lines stretch with it");
-        knob(ui, ed, "GAIN", c, &mut l.gain, (0.0, 2.0, 1.0), false, &pct, "Layer level");
-        knob(ui, ed, "PAN", c, &mut l.pan, (-1.0, 1.0, 0.0), false, &signed, "Left .. right");
+        knob(
+            ui,
+            ed,
+            "START",
+            c,
+            &mut l.start,
+            (0.0, 2.0, 0.0),
+            false,
+            &|v| secs(v),
+            "When the layer comes in",
+        );
+        knob(
+            ui,
+            ed,
+            "LENGTH",
+            c,
+            &mut l.length,
+            (0.01, forge::MAX_SECONDS as f64, 0.3),
+            true,
+            &|v| secs(v),
+            "How long it lasts; its lines stretch with it",
+        );
+        knob(
+            ui,
+            ed,
+            "GAIN",
+            c,
+            &mut l.gain,
+            (0.0, 2.0, 1.0),
+            false,
+            &pct,
+            "Layer level",
+        );
+        knob(
+            ui,
+            ed,
+            "PAN",
+            c,
+            &mut l.pan,
+            (-1.0, 1.0, 0.0),
+            false,
+            &signed,
+            "Left .. right",
+        );
     });
 
     // The lines.
     let lines = [Line::Pitch, Line::Volume, Line::Filter];
     let at = lines.iter().position(|v| *v == view.line).unwrap_or(0);
-    if let (Some(i), _) = kit::chips(ui, &format!("{salt}-line"), &["Pitch", "Volume", "Filter"], at, None) {
+    if let (Some(i), _) = kit::chips(
+        ui,
+        &format!("{salt}-line"),
+        &["Pitch", "Volume", "Filter"],
+        at,
+        None,
+    ) {
         view.line = lines[i];
     }
     let length = l.length as f64;
     match view.line {
-        Line::Pitch => curve_editor(ui, ed, &format!("{salt}-pitch"), &mut l.pitch, Line::Pitch, t::ENC_BLUE, length),
-        Line::Volume => curve_editor(ui, ed, &format!("{salt}-amp"), &mut l.amp, Line::Volume, t::ENC_GREEN, length),
+        Line::Pitch => curve_editor(
+            ui,
+            ed,
+            &format!("{salt}-pitch"),
+            &mut l.pitch,
+            Line::Pitch,
+            t::ENC_BLUE,
+            length,
+        ),
+        Line::Volume => curve_editor(
+            ui,
+            ed,
+            &format!("{salt}-amp"),
+            &mut l.amp,
+            Line::Volume,
+            t::ENC_GREEN,
+            length,
+        ),
         Line::Filter => {
-            chips(ui, ed, &format!("{salt}-fmode"), &FilterMode::ALL, &FilterMode::ALL.map(FilterMode::label), &mut l.filter);
+            chips(
+                ui,
+                ed,
+                &format!("{salt}-fmode"),
+                &FilterMode::ALL,
+                &FilterMode::ALL.map(FilterMode::label),
+                &mut l.filter,
+            );
             if l.filter != FilterMode::Off {
-                curve_editor(ui, ed, &format!("{salt}-cut"), &mut l.cutoff, Line::Filter, t::ENC_ORANGE, length);
+                curve_editor(
+                    ui,
+                    ed,
+                    &format!("{salt}-cut"),
+                    &mut l.cutoff,
+                    Line::Filter,
+                    t::ENC_ORANGE,
+                    length,
+                );
                 ui.horizontal_wrapped(|ui| {
-                    knob(ui, ed, "RESO", t::ENC_ORANGE, &mut l.resonance, (0.0, 1.0, 0.0), false, &pct, "Ring at the cutoff: a whistle on sweeps");
+                    knob(
+                        ui,
+                        ed,
+                        "RESO",
+                        t::ENC_ORANGE,
+                        &mut l.resonance,
+                        (0.0, 1.0, 0.0),
+                        false,
+                        &pct,
+                        "Ring at the cutoff: a whistle on sweeps",
+                    );
                 });
             }
         }
@@ -1165,13 +1496,28 @@ fn layer_editor(
 
     ui.add_space(4.0);
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 16.0), Sense::hover());
-    kit::caps(ui.painter(), r.left_center(), Align2::LEFT_CENTER, "LAYER EFFECTS", 10.0, t::MUTED);
+    kit::caps(
+        ui.painter(),
+        r.left_center(),
+        Align2::LEFT_CENTER,
+        "LAYER EFFECTS",
+        10.0,
+        t::MUTED,
+    );
     fx_list(ui, ed, &format!("{salt}-fx"), &mut l.fx);
 }
 
 /// A drawn line: drag points, double-click to add or remove one, drag the
 /// line between two points to bend it. Pitch snaps to semitones (Alt: free).
-fn curve_editor(ui: &mut Ui, ed: &mut Edit, salt: &str, c: &mut Curve, kind: Line, color: Color32, length: f64) {
+fn curve_editor(
+    ui: &mut Ui,
+    ed: &mut Edit,
+    salt: &str,
+    c: &mut Curve,
+    kind: Line,
+    color: Color32,
+    length: f64,
+) {
     let (lo, hi) = match kind {
         Line::Pitch => {
             let most = c.points.iter().map(|p| p.v.abs()).fold(0.0, f32::max);
@@ -1180,7 +1526,8 @@ fn curve_editor(ui: &mut Ui, ed: &mut Edit, salt: &str, c: &mut Curve, kind: Lin
         }
         _ => (0.0, 1.0),
     };
-    let (area, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 150.0), Sense::click_and_drag());
+    let (area, resp) =
+        ui.allocate_exact_size(vec2(ui.available_width(), 150.0), Sense::click_and_drag());
     let painter = ui.painter().clone();
     let r = kit::sunken(&painter, area, 6.0).shrink(10.0);
     let x = |t: f32| r.left() + t * r.width();
@@ -1193,16 +1540,34 @@ fn curve_editor(ui: &mut Ui, ed: &mut Edit, salt: &str, c: &mut Curve, kind: Lin
         Line::Pitch => {
             let mut v = lo;
             while v <= hi + 0.1 {
-                let s = if v == 0.0 { Stroke::new(1.0_f32, t::LINE) } else { guide };
+                let s = if v == 0.0 {
+                    Stroke::new(1.0_f32, t::LINE)
+                } else {
+                    guide
+                };
                 painter.line_segment([pos2(r.left(), y(v)), pos2(r.right(), y(v))], s);
-                kit::caps(&painter, pos2(r.left() + 2.0, y(v) - 1.0), Align2::LEFT_BOTTOM, &format!("{v:+.0}"), 9.0, t::FAINT);
+                kit::caps(
+                    &painter,
+                    pos2(r.left() + 2.0, y(v) - 1.0),
+                    Align2::LEFT_BOTTOM,
+                    &format!("{v:+.0}"),
+                    9.0,
+                    t::FAINT,
+                );
                 v += 12.0;
             }
         }
         Line::Filter => {
             for (u, label) in [(1.0f32 / 3.0, "200 HZ"), (2.0 / 3.0, "2 KHZ")] {
                 painter.line_segment([pos2(r.left(), y(u)), pos2(r.right(), y(u))], guide);
-                kit::caps(&painter, pos2(r.left() + 2.0, y(u) - 1.0), Align2::LEFT_BOTTOM, label, 9.0, t::FAINT);
+                kit::caps(
+                    &painter,
+                    pos2(r.left() + 2.0, y(u) - 1.0),
+                    Align2::LEFT_BOTTOM,
+                    label,
+                    9.0,
+                    t::FAINT,
+                );
             }
         }
         Line::Volume => {
@@ -1236,7 +1601,9 @@ fn curve_editor(ui: &mut Ui, ed: &mut Edit, salt: &str, c: &mut Curve, kind: Lin
     let over = hover.and_then(|h| near(c, h));
     // Where the button went down, not where the drag was recognised.
     if resp.drag_started()
-        && let Some(pos) = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos())
+        && let Some(pos) = ui
+            .input(|i| i.pointer.press_origin())
+            .or(resp.interact_pointer_pos())
     {
         let g = match near(c, pos) {
             Some(i) => Some(Grab::Point(i)),
@@ -1293,7 +1660,14 @@ fn curve_editor(ui: &mut Ui, ed: &mut Edit, salt: &str, c: &mut Curve, kind: Lin
                 }
                 let tt = to_t(pos.x);
                 let at = c.points.partition_point(|p| p.t <= tt);
-                c.points.insert(at, CurvePoint { t: tt, v, tension: 0.0 });
+                c.points.insert(
+                    at,
+                    CurvePoint {
+                        t: tt,
+                        v,
+                        tension: 0.0,
+                    },
+                );
             }
         }
         ed.started = true;
@@ -1308,9 +1682,20 @@ fn curve_editor(ui: &mut Ui, ed: &mut Edit, salt: &str, c: &mut Curve, kind: Lin
         let at = pos2(x(p.t), y(p.v.clamp(lo, hi)));
         let lit = over == Some(i) || matches!(grab, Some(Grab::Point(g)) if g == i);
         painter.circle_filled(at, if lit { 5.5 } else { 4.0 }, color);
-        painter.circle_stroke(at, if lit { 5.5 } else { 4.0 }, Stroke::new(1.0_f32, t::EDGE));
+        painter.circle_stroke(
+            at,
+            if lit { 5.5 } else { 4.0 },
+            Stroke::new(1.0_f32, t::EDGE),
+        );
         if lit {
-            kit::caps(&painter, at + vec2(8.0, -8.0), Align2::LEFT_BOTTOM, &format!("{} · {}", secs(p.t as f64 * length), value(p.v)), 10.0, t::TEXT);
+            kit::caps(
+                &painter,
+                at + vec2(8.0, -8.0),
+                Align2::LEFT_BOTTOM,
+                &format!("{} · {}", secs(p.t as f64 * length), value(p.v)),
+                10.0,
+                t::TEXT,
+            );
         }
     }
     resp.on_hover_text(match kind {
@@ -1330,17 +1715,37 @@ fn fx_list(ui: &mut Ui, ed: &mut Edit, salt: &str, fx: &mut Vec<FxSlot>) {
                     ed.changed = true;
                 }
                 let (r, _) = ui.allocate_exact_size(vec2(96.0, 20.0), Sense::hover());
-                kit::caps(ui.painter(), r.left_center(), Align2::LEFT_CENTER, slot.kind.label(), 10.0, if slot.enabled { t::TEXT } else { t::MUTED });
+                kit::caps(
+                    ui.painter(),
+                    r.left_center(),
+                    Align2::LEFT_CENTER,
+                    slot.kind.label(),
+                    10.0,
+                    if slot.enabled { t::TEXT } else { t::MUTED },
+                );
                 let specs = slot.kind.params();
                 for (n, spec) in specs.iter().enumerate() {
                     let mut v = slot.params[n] as f64;
                     let fmt = |x: f64| keyframexl::fx::format(spec, x as f32);
                     ui.add_enabled_ui(slot.enabled, |ui| {
-                        ed.knob(ui, &spec.name.to_uppercase(), t::ENC_WHITE, &mut v, (spec.min as f64, spec.max as f64, spec.default as f64), spec.log, &fmt, spec.name);
+                        ed.knob(
+                            ui,
+                            &spec.name.to_uppercase(),
+                            t::ENC_WHITE,
+                            &mut v,
+                            (spec.min as f64, spec.max as f64, spec.default as f64),
+                            spec.log,
+                            &fmt,
+                            spec.name,
+                        );
                     });
                     slot.params[n] = v as f32;
                 }
-                if ui.small_button("×").on_hover_text("Remove this effect").clicked() {
+                if ui
+                    .small_button("×")
+                    .on_hover_text("Remove this effect")
+                    .clicked()
+                {
                     remove = Some(i);
                 }
             });
@@ -1353,7 +1758,11 @@ fn fx_list(ui: &mut Ui, ed: &mut Edit, salt: &str, fx: &mut Vec<FxSlot>) {
     }
     egui::ComboBox::from_id_salt((salt, "add"))
         .width(150.0)
-        .selected_text(egui::RichText::new("+ Add effect").font(t::sans(12.5)).color(t::FAINT))
+        .selected_text(
+            egui::RichText::new("+ Add effect")
+                .font(t::sans(12.5))
+                .color(t::FAINT),
+        )
         .show_ui(ui, |ui| {
             kit::menu_style(ui);
             for k in FX_MENU {
@@ -1372,7 +1781,13 @@ mod tests {
     use eframe::egui::{Event, Modifiers, PointerButton, Pos2};
 
     /// Run one frame of the curve editor; returns the drawing rect it used.
-    fn frame(ctx: &egui::Context, c: &mut Curve, kind: Line, ed: &mut Edit, events: Vec<Event>) -> Rect {
+    fn frame(
+        ctx: &egui::Context,
+        c: &mut Curve,
+        kind: Line,
+        ed: &mut Edit,
+        events: Vec<Event>,
+    ) -> Rect {
         // Each frame 50 ms later, so clicks far apart in the test are not one double-click.
         let now = ctx.input(|i| i.time) + 0.05;
         let input = egui::RawInput {
@@ -1393,14 +1808,25 @@ mod tests {
     }
 
     fn press(pos: Pos2, down: bool) -> Event {
-        Event::PointerButton { pos, button: PointerButton::Primary, pressed: down, modifiers: Modifiers::default() }
+        Event::PointerButton {
+            pos,
+            button: PointerButton::Primary,
+            pressed: down,
+            modifiers: Modifiers::default(),
+        }
     }
 
     fn drag(ctx: &egui::Context, c: &mut Curve, kind: Line, a: Pos2, b: Pos2) -> Edit {
         let mut ed = Edit::default();
         frame(ctx, c, kind, &mut ed, vec![Event::PointerMoved(a)]);
         frame(ctx, c, kind, &mut ed, vec![press(a, true)]);
-        frame(ctx, c, kind, &mut ed, vec![Event::PointerMoved(a + (b - a) * 0.5)]);
+        frame(
+            ctx,
+            c,
+            kind,
+            &mut ed,
+            vec![Event::PointerMoved(a + (b - a) * 0.5)],
+        );
         frame(ctx, c, kind, &mut ed, vec![Event::PointerMoved(b)]);
         frame(ctx, c, kind, &mut ed, vec![press(b, false)]);
         ed
@@ -1412,7 +1838,10 @@ mod tests {
         let mut c = Curve::new(&[(0.0, 0.0, 0.0), (1.0, 0.0, 0.0)]);
         let r = frame(&ctx, &mut c, Line::Pitch, &mut Edit::default(), vec![]);
         // ±12 shown: 7.3 semitones up, half way along (the first point stays before the second).
-        let to = pos2(r.left() + r.width() * 0.5, r.center().y - r.height() * 7.3 / 24.0);
+        let to = pos2(
+            r.left() + r.width() * 0.5,
+            r.center().y - r.height() * 7.3 / 24.0,
+        );
         let ed = drag(&ctx, &mut c, Line::Pitch, r.left_center(), to);
         assert!(ed.started && ed.changed);
         assert!((c.points[0].t - 0.5).abs() < 0.02, "{:?}", c.points);
@@ -1440,7 +1869,11 @@ mod tests {
         let ed = dbl(&mut c, at);
         assert!(ed.started);
         assert_eq!(c.points.len(), 3);
-        assert!((c.points[1].t - 0.25).abs() < 0.02 && (c.points[1].v - 0.9).abs() < 0.03, "{:?}", c.points);
+        assert!(
+            (c.points[1].t - 0.25).abs() < 0.02 && (c.points[1].v - 0.9).abs() < 0.03,
+            "{:?}",
+            c.points
+        );
         dbl(&mut c, at);
         assert_eq!(c.points.len(), 2, "double-click on a point removes it");
         dbl(&mut c, r.left_top());
@@ -1499,11 +1932,18 @@ mod tests {
         let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
             app.poll_forge(&ctx);
-            let stale = app.song.instruments.iter().any(|i| matches!(&i.kind, InstrumentKind::Forge { sound } if sound.stale()));
+            let stale = app
+                .song
+                .instruments
+                .iter()
+                .any(|i| matches!(&i.kind, InstrumentKind::Forge { sound } if sound.stale()));
             if !app.forge_jobs.busy() && !stale {
                 return;
             }
-            assert!(std::time::Instant::now() < until, "forge work never finished");
+            assert!(
+                std::time::Instant::now() < until,
+                "forge work never finished"
+            );
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
     }
@@ -1516,7 +1956,10 @@ mod tests {
         app.checkpoint();
         app.commit_forge(id, Recipe::Laser.patch());
         let s = sound(&app, id);
-        assert!(s.stale() && Arc::ptr_eq(&s.rendered, &before), "the edit returns before rendering");
+        assert!(
+            s.stale() && Arc::ptr_eq(&s.rendered, &before),
+            "the edit returns before rendering"
+        );
         // A second edit while the first renders: only the last one is installed.
         app.poll_forge(&egui::Context::default());
         app.commit_forge(id, Recipe::Hit.patch());
@@ -1544,10 +1987,19 @@ mod tests {
     #[test]
     fn a_channel_note_bounces_into_a_layer() {
         let mut app = app();
-        let tide = app.song.add_channel("Tide", InstrumentKind::Synth { patch: keyframexl::synth::SynthPatch::factory(2) });
+        let tide = app.song.add_channel(
+            "Tide",
+            InstrumentKind::Synth {
+                patch: keyframexl::synth::SynthPatch::factory(2),
+            },
+        );
         let id = app.add_forge();
         let layers = sound(&app, id).patch.layers.len();
-        let b = forge::Bounce { channel: tide, key: 60, hold: 0.3 };
+        let b = forge::Bounce {
+            channel: tide,
+            key: 60,
+            hold: 0.3,
+        };
         app.forge_bounce(id, Into::NewLayer, b);
         settle(&mut app);
         let s = sound(&app, id);
@@ -1556,14 +2008,31 @@ mod tests {
             panic!("not a sample layer");
         };
         assert_eq!(*from, Some(b));
-        assert!(frames.len() > 4800, "the note and its release: {}", frames.len());
-        assert!(frames[0][0].abs() + frames[0][1].abs() > 0.0, "starts on the sound");
+        assert!(
+            frames.len() > 4800,
+            "the note and its release: {}",
+            frames.len()
+        );
+        assert!(
+            frames[0][0].abs() + frames[0][1].abs() > 0.0,
+            "starts on the sound"
+        );
         assert!(s.rendered.peak > 0.05);
         // Bounce again into the same layer, an octave up and shorter.
-        app.forge_bounce(id, Into::Layer(layers), forge::Bounce { key: 72, hold: 0.1, ..b });
+        app.forge_bounce(
+            id,
+            Into::Layer(layers),
+            forge::Bounce {
+                key: 72,
+                hold: 0.1,
+                ..b
+            },
+        );
         settle(&mut app);
         let s2 = sound(&app, id);
         assert_eq!(s2.patch.layers.len(), layers + 1);
-        assert!(matches!(&s2.patch.layers[layers].source, Source::Sample { from: Some(f), .. } if f.key == 72));
+        assert!(
+            matches!(&s2.patch.layers[layers].source, Source::Sample { from: Some(f), .. } if f.key == 72)
+        );
     }
 }

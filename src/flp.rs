@@ -267,12 +267,15 @@ pub fn native_host_flp(bytes: &[u8], channels: &[u32]) -> Result<(Vec<u8>, Vec<u
             !matches!(*id, PAT_NEW | CH_NEW | ARR_NEW) && !MIXER_START.contains(id)
         });
         if events.clone().any(|(id, value, _)| {
-            *id == PLUGIN_INTERNAL && matches!(value, Value::Data(d) if text(d).eq_ignore_ascii_case("FLEX"))
+            *id == PLUGIN_INTERNAL
+                && matches!(value, Value::Data(d) if text(d).eq_ignore_ascii_case("FLEX"))
         }) {
             initial[4] = 2;
             for (id, value, range) in events {
                 match (*id, value) {
-                    (PLUGIN_INTERNAL | PLUGIN_DATA, _) => initial.extend_from_slice(&bytes[range.clone()]),
+                    (PLUGIN_INTERNAL | PLUGIN_DATA, _) => {
+                        initial.extend_from_slice(&bytes[range.clone()])
+                    }
                     (PLUGIN_WRAPPER, Value::Data(data)) if data.len() >= 20 => {
                         write_hidden_wrapper(&mut initial, data);
                     }
@@ -297,7 +300,9 @@ pub fn native_host_flp(bytes: &[u8], channels: &[u32]) -> Result<(Vec<u8>, Vec<u
                 if ordinal == 0 {
                     body.extend_from_slice(&initial);
                 }
-                ordinal = ordinal.checked_add(1).ok_or("Too many channels for the FL bridge")?;
+                ordinal = ordinal
+                    .checked_add(1)
+                    .ok_or("Too many channels for the FL bridge")?;
                 body.push(CH_NEW);
                 body.extend_from_slice(&ordinal.to_le_bytes());
                 if let Some(slot) = slot {
@@ -318,8 +323,10 @@ pub fn native_host_flp(bytes: &[u8], channels: &[u32]) -> Result<(Vec<u8>, Vec<u
             }
             _ => {}
         }
-        if matches!(id, PAT_EVENTS | INITIALIZED_CONTROLS | AUTO_LINK | PAT_NOTES | PLAYLIST)
-            || matches!(channel, Some(None))
+        if matches!(
+            id,
+            PAT_EVENTS | INITIALIZED_CONTROLS | AUTO_LINK | PAT_NOTES | PLAYLIST
+        ) || matches!(channel, Some(None))
         {
             continue;
         }
@@ -365,7 +372,9 @@ pub fn native_host_flp(bytes: &[u8], channels: &[u32]) -> Result<(Vec<u8>, Vec<u
                         let addr = le16(r, 6);
                         let gain = if addr == 0x4000 && r[4..6] == [0, 0] {
                             Some(12800i32)
-                        } else if mixer_address(addr).is_some_and(|(i, _)| i as usize <= channels.len()) {
+                        } else if mixer_address(addr)
+                            .is_some_and(|(i, _)| i as usize <= channels.len())
+                        {
                             match r[4] {
                                 192 => Some(12800),
                                 193 | 194 | 208..=210 => Some(0),
@@ -390,7 +399,9 @@ pub fn native_host_flp(bytes: &[u8], channels: &[u32]) -> Result<(Vec<u8>, Vec<u
         return Err("The source project does not have the channels or mixer outputs needed by the FL bridge".into());
     }
     let mut project = bytes[..data_start - 4].to_vec();
-    let count = ordinal.checked_add(1).ok_or("Too many channels for the FL bridge")?;
+    let count = ordinal
+        .checked_add(1)
+        .ok_or("Too many channels for the FL bridge")?;
     project[10..12].copy_from_slice(&count.to_le_bytes());
     project.extend_from_slice(&(body.len() as u32).to_le_bytes());
     project.extend(body);
@@ -534,7 +545,8 @@ impl FlpChannel {
     pub fn in_native_bridge(&self) -> bool {
         self.kind == ChannelKind::Generator
             && self.vst.is_none()
-            && (self.plugin.eq_ignore_ascii_case("FLEX") || self.plugin.eq_ignore_ascii_case("Sakura"))
+            && (self.plugin.eq_ignore_ascii_case("FLEX")
+                || self.plugin.eq_ignore_ascii_case("Sakura"))
     }
 
     /// A generator that plays inside FL Studio VSTi, which reads the
@@ -908,7 +920,7 @@ impl FlpReport {
                         c.pitch % 100
                     )
                 } else {
-                        format!(" · pitch {:+} cents moved into the notes", c.pitch)
+                    format!(" · pitch {:+} cents moved into the notes", c.pitch)
                 }
             } else {
                 String::new()
@@ -1360,7 +1372,9 @@ pub fn read_flp(bytes: &[u8]) -> Result<(Song, FlpReport), String> {
                 .iter()
                 .enumerate()
                 .filter(|(_, n)| {
-                    n.instrument == inst && n.start <= start && n.end() > start
+                    n.instrument == inst
+                        && n.start <= start
+                        && n.end() > start
                         && (!native.contains(&inst) || n.group == group)
                 })
                 .map(|(i, _)| i)
@@ -2355,7 +2369,11 @@ fn build_automation(
             } else {
                 Playback::Hold
             };
-            p.automation = Some(Envelope { target, points, playback });
+            p.automation = Some(Envelope {
+                target,
+                points,
+                playback,
+            });
             song.patterns.push(p);
             made.entry(c.index).or_default().push(next);
             report.automations += 1;
@@ -2520,12 +2538,17 @@ mod tests {
         assert!(!report.channels[2].enabled);
         assert!(report.channels[2].data.is_empty());
         let (_, evs) = events(&hosted).unwrap();
-        assert!(!evs.iter().any(|(id, _)| matches!(*id, PAT_NOTES | PLAYLIST)));
+        assert!(
+            !evs.iter()
+                .any(|(id, _)| matches!(*id, PAT_NOTES | PLAYLIST))
+        );
         assert_eq!(
-            evs.into_iter().filter_map(|(id, v)| match (id, v) {
-                (INSERT_OUTPUT, Value::Num(n)) => Some(n),
-                _ => None,
-            }).collect::<Vec<_>>(),
+            evs.into_iter()
+                .filter_map(|(id, v)| match (id, v) {
+                    (INSERT_OUTPUT, Value::Num(n)) => Some(n),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
             vec![u32::MAX, 1, 2],
         );
     }
@@ -3049,8 +3072,15 @@ mod tests {
         assert!(song.mixer[0].volume < 1.0);
         assert!(song.mixer[4].volume > 1.0);
         assert_eq!(report.inserts[0].slots[1].mix, 0.0);
-        let phone_eq = song.mixer[0].fx.iter().position(|fx| fx.kind == FxKind::ParamEq).unwrap();
-        let mix = crate::automation::Target::FxMix { track: 0, slot: phone_eq as u8 };
+        let phone_eq = song.mixer[0]
+            .fx
+            .iter()
+            .position(|fx| fx.kind == FxKind::ParamEq)
+            .unwrap();
+        let mix = crate::automation::Target::FxMix {
+            track: 0,
+            slot: phone_eq as u8,
+        };
         assert_eq!(mix.current(&song), Some(0.0));
         let mut values = Vec::with_capacity(16);
         let master_mix = |raw_tick, values: &mut Vec<_>| {

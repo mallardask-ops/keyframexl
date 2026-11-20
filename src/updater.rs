@@ -283,7 +283,10 @@ pub fn parse_releases_list_json(
         .filter(|r| !r.get("draft").and_then(|b| b.as_bool()).unwrap_or(false))
         .filter_map(|r| {
             let ver = Version::parse(r.get("tag_name")?.as_str()?)?;
-            let pre = r.get("prerelease").and_then(|b| b.as_bool()).unwrap_or(false)
+            let pre = r
+                .get("prerelease")
+                .and_then(|b| b.as_bool())
+                .unwrap_or(false)
                 || ver.is_prerelease();
             (allow_pre || !pre).then_some((ver, r))
         })
@@ -1162,7 +1165,10 @@ mod tests {
             panic!("nightly expected");
         };
         assert_eq!(info.version, "0.1.3-nightly.202611211200");
-        assert_eq!(info.linux_asset_url.as_deref(), Some("https://example.com/n"));
+        assert_eq!(
+            info.linux_asset_url.as_deref(),
+            Some("https://example.com/n")
+        );
         // Stable channel ignores nightlies.
         assert_eq!(
             parse_releases_list_json(list, &stable, false).unwrap(),

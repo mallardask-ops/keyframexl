@@ -1978,19 +1978,34 @@ impl App {
                         .map(|i| i.id),
                     _ => None,
                 };
-                self.load_welcome_song(song, format!("Started template: {title}"), with_kit, open_inst);
+                self.load_welcome_song(
+                    song,
+                    format!("Started template: {title}"),
+                    with_kit,
+                    open_inst,
+                );
             }
             welcome::WelcomeAction::LoadTidePreset(idx) => {
                 let song = welcome::build_tide_preset_song(idx);
                 let open_inst = song.instruments.first().map(|i| i.id);
                 let name = song.info.title.clone();
-                self.load_welcome_song(song, format!("Loaded Tide preset: {name}"), false, open_inst);
+                self.load_welcome_song(
+                    song,
+                    format!("Loaded Tide preset: {name}"),
+                    false,
+                    open_inst,
+                );
             }
             welcome::WelcomeAction::LoadForgeRecipe(idx) => {
                 let song = welcome::build_forge_recipe_song(idx);
                 let open_inst = song.instruments.first().map(|i| i.id);
                 let name = song.info.title.clone();
-                self.load_welcome_song(song, format!("Loaded Forge recipe: {name}"), false, open_inst);
+                self.load_welcome_song(
+                    song,
+                    format!("Loaded Forge recipe: {name}"),
+                    false,
+                    open_inst,
+                );
             }
         }
     }
@@ -2055,7 +2070,9 @@ impl App {
         bytes: &[u8],
     ) -> Result<usize, String> {
         use keyframexl::sequence::{InstrumentKind, NativeFlProject, PluginRef};
-        let mut instruments: Vec<_> = report.channels.iter()
+        let mut instruments: Vec<_> = report
+            .channels
+            .iter()
             .filter(|c| c.in_native_bridge())
             .filter_map(|c| c.instrument.map(|id| (c, id)))
             .collect();
@@ -2095,7 +2112,10 @@ impl App {
                 };
             }
         }
-        song.native_fl = Some(std::sync::Arc::new(NativeFlProject::new(&data, midi_channels)));
+        song.native_fl = Some(std::sync::Arc::new(NativeFlProject::new(
+            &data,
+            midi_channels,
+        )));
         Ok(instruments.len())
     }
 
@@ -2322,7 +2342,11 @@ impl App {
             .filter(|c| c.enabled && c.in_fl_vsti())
         {
             let Some(id) = c.instrument else { continue };
-            if song.instrument(id).and_then(|i| i.plugin()).is_some_and(|p| p.format == "fl-native") {
+            if song
+                .instrument(id)
+                .and_then(|i| i.plugin())
+                .is_some_and(|p| p.format == "fl-native")
+            {
                 continue;
             }
             if !song.clips.iter().filter(|clip| !clip.muted).any(|clip| {
@@ -3327,7 +3351,11 @@ impl eframe::App for App {
             // Remember the OS logical window size (inner_rect is in egui points,
             // which divide by zoom_factor, so multiply back by z for ViewportBuilder).
             let (inner_rect, maximized, now) = ctx.input(|i| {
-                (i.viewport().inner_rect, i.viewport().maximized.unwrap_or(false), i.time)
+                (
+                    i.viewport().inner_rect,
+                    i.viewport().maximized.unwrap_or(false),
+                    i.time,
+                )
             });
             let mut geom_dirty = false;
             if maximized != self.settings.general.window_maximized {
@@ -3341,11 +3369,9 @@ impl eframe::App for App {
                 && r.height() > 200.0
             {
                 let logical = [(r.width() * z).round(), (r.height() * z).round()];
-                let changed = self
-                    .settings
-                    .general
-                    .window_size
-                    .is_none_or(|old| (old[0] - logical[0]).abs() >= 2.0 || (old[1] - logical[1]).abs() >= 2.0);
+                let changed = self.settings.general.window_size.is_none_or(|old| {
+                    (old[0] - logical[0]).abs() >= 2.0 || (old[1] - logical[1]).abs() >= 2.0
+                });
                 if changed {
                     self.settings.general.window_size = Some(logical);
                     geom_dirty = true;
