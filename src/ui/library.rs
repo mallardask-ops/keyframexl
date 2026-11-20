@@ -112,43 +112,10 @@ pub fn default_mounts(home: &Path) -> Vec<PathBuf> {
     v
 }
 
-/// The first file in `dir` whose name contains every word, preferring `first`.
-fn pick(dir: &Path, first: &str, words: &[&str]) -> Option<PathBuf> {
-    let exact = dir.join(first);
-    if exact.is_file() {
-        return Some(exact);
-    }
-    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
-        .ok()?
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.is_file())
-        .collect();
-    files.sort();
-    files.into_iter().find(|p| {
-        let n = p
-            .file_name()
-            .map(|n| n.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        words.iter().all(|w| n.contains(w)) && super::files::is_audio(p)
-    })
-}
-
-/// What a new project loads: (channel name, file).
+/// What a new project loads from the user's libraries: (channel name,
+/// file). The drums come from the built-in kit (`keyframexl::kits`).
 pub fn default_kit(libs: &Libraries) -> Vec<(&'static str, PathBuf)> {
     let mut kit = Vec::new();
-    if let Some(packs) = &libs.fl_packs {
-        let drums = packs.join("Drums");
-        for (name, dir, file, words) in [
-            ("Kick", "Kicks", "909 Kick.wav", &["kick"][..]),
-            ("Snare", "Snares", "909 Snare.wav", &["snare"][..]),
-            ("Hat", "Hats", "909 CH.wav", &["ch"][..]),
-        ] {
-            if let Some(p) = pick(&drums.join(dir), file, words) {
-                kit.push((name, p));
-            }
-        }
-    }
     for lib in &libs.dwp {
         let bass = ["Bass/Fingered Bass.dwp", "Bass/Acoustic Bass.dwp"]
             .iter()
@@ -169,6 +136,21 @@ impl App {
         if !self.settings.general.default_kit {
             return;
         }
+        // Drums: the built-in Core kit, for channels still on the plain voices.
+        for (name, id) in keyframexl::kits::STARTER {
+            let Some(piece) = keyframexl::kits::Kit::Core.piece(id) else {
+                continue;
+            };
+            if let Some(i) = self.song.instruments.iter_mut().find(|i| {
+                i.name == name
+                    && matches!(i.kind, keyframexl::sequence::InstrumentKind::Drum { .. })
+            }) {
+                i.kind = keyframexl::sequence::InstrumentKind::Forge {
+                    sound: keyframexl::forge::ForgeSound::new(piece.patch),
+                };
+            }
+        }
+        self.publish();
         let kit = default_kit(&self.libraries);
         for (name, path) in kit {
             if let Some(id) = self
@@ -185,6 +167,27 @@ impl App {
                 self.load_preset_with(id, path, true);
             }
         }
+    }
+
+    /// Add every sound of a built-in kit as a Forge channel.
+    pub(crate) fn add_kit(&mut self, kit: keyframexl::kits::Kit) {
+        self.checkpoint();
+        let pieces = kit.pieces();
+        let count = pieces.len();
+        for p in pieces {
+            let name = self.song.free_name(p.name);
+            self.song.add_channel(
+                &name,
+                keyframexl::sequence::InstrumentKind::Forge {
+                    sound: keyframexl::forge::ForgeSound::new(p.patch),
+                },
+            );
+        }
+        self.publish();
+        self.say(
+            super::Tone::Done,
+            format!("{}: {count} channels added. Ctrl+Z undoes.", kit.label()),
+        );
     }
 
     /// Found libraries join the Files browser once.
@@ -241,13 +244,8 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            [
-                ("Kick", "909 Kick.wav".into()),
-                ("Snare", "707 Snare.wav".into()),
-                ("Hat", "808 CH.wav".into()),
-                ("Bass", "Fingered Bass.dwp".into())
-            ],
-            "exact names first, else the first matching file"
+            [("Bass", "Fingered Bass.dwp".into())],
+            "drums are built in; FL's packs are not borrowed"
         );
         assert_eq!(
             find(disk.path(), &[]),

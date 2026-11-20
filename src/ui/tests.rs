@@ -1683,3 +1683,29 @@ fn sampler_renders_empty_and_multizone_pages_cleanly() {
         }
     }
 }
+
+#[test]
+fn a_new_project_gets_the_built_in_drums_and_kits_add_as_channels() {
+    let mut app = app();
+    app.settings.general.default_kit = true;
+    app.new_project();
+    for name in ["Kick", "Snare", "Hat"] {
+        let i = app
+            .song
+            .instruments
+            .iter()
+            .find(|i| i.name == name)
+            .unwrap();
+        let keyframexl::sequence::InstrumentKind::Forge { sound } = &i.kind else {
+            panic!("{name} is {:?}", i.kind);
+        };
+        assert!(sound.rendered.peak > 0.3, "{name} sounds");
+    }
+    assert!(!app.dirty(), "the starter sounds are not an edit");
+    let before = app.song.instruments.len();
+    app.add_kit(keyframexl::kits::Kit::Chip);
+    assert_eq!(app.song.instruments.len(), before + 8);
+    assert!(app.song.instruments.iter().any(|i| i.name == "Chip Kick"));
+    app.undo();
+    assert_eq!(app.song.instruments.len(), before);
+}

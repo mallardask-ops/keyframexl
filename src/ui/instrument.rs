@@ -71,6 +71,19 @@ impl App {
             self.add_forge();
             ui.close_menu();
         }
+        ui.menu_button("Drum kit", |ui| {
+            kit::menu_style(ui);
+            for k in keyframexl::kits::Kit::ALL {
+                if ui
+                    .button(k.label())
+                    .on_hover_text("Every sound of the kit as its own channel, built in Forge (edit any of them there)")
+                    .clicked()
+                {
+                    self.add_kit(k);
+                    ui.close_menu();
+                }
+            }
+        });
         if ui
             .button("Vocal (singing voice)")
             .on_hover_text("Notes with lyrics, sung from a UTAU voicebank such as Kasane Teto")
