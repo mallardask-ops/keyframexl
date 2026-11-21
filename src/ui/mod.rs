@@ -33,6 +33,7 @@ mod settings_ui;
 mod shortcuts;
 mod show;
 mod synth;
+mod tap;
 mod tempo_lane;
 mod updater_ui;
 mod vocal;
@@ -262,7 +263,7 @@ pub struct App {
     pub(crate) follow: bool,
     status: (Tone, String),
     roll_gesture: Option<(u64, roll::Gesture)>,
-    taps: Vec<std::time::Instant>,
+    pub(crate) tap_win: Option<tap::TapWindow>,
     audio: Option<Audio>,
     capture: Option<(std::path::PathBuf, u32)>,
     /// Scripted input for live checks (`KFXL_CAPTURE_SCRIPT`).
@@ -632,6 +633,10 @@ impl App {
             if let Ok(q) = std::env::var("KFXL_CAPTURE_SEARCH") {
                 cc.egui_ctx
                     .data_mut(|d| d.insert_temp(egui::Id::new("kfxl-browser-search"), q));
+            }
+            // KFXL_CAPTURE_TAP=1 opens the tap tempo window with a steady run.
+            if std::env::var("KFXL_CAPTURE_TAP").is_ok() {
+                app.tap_win = Some(tap::TapWindow::demo());
             }
             // KFXL_CAPTURE_INFO=1 fills in Project info and opens its window.
             if std::env::var("KFXL_CAPTURE_INFO").is_ok() {
@@ -1271,7 +1276,7 @@ impl App {
             follow: true,
             status: (Tone::Quiet, String::new()),
             roll_gesture: None,
-            taps: Vec::new(),
+            tap_win: None,
             audio,
             capture: None,
             script: None,
@@ -1767,44 +1772,6 @@ impl App {
 
     pub(crate) fn focus_kind(&self) -> Option<Kind> {
         self.focus.as_ref().map(Tab::kind)
-    }
-
-    pub(crate) fn tap(&mut self) {
-        let tr = self.tr();
-        let now = std::time::Instant::now();
-        self.taps
-            .retain(|x| now.duration_since(*x).as_secs_f64() < 2.5);
-        self.taps.push(now);
-        if self.taps.len() < 3 {
-            self.say(
-                Tone::Quiet,
-                crate::i18n::fill(
-                    tr.status_tap_progress,
-                    &[("n", &self.taps.len().to_string())],
-                ),
-            );
-            return;
-        }
-        let mut iv: Vec<f64> = self
-            .taps
-            .windows(2)
-            .map(|w| w[1].duration_since(w[0]).as_secs_f64())
-            .collect();
-        iv.sort_by(|a, b| a.total_cmp(b));
-        let med = iv[iv.len() / 2];
-        if med > 0.05 {
-            // One undo step per run of taps: the first tempo it sets.
-            if self.taps.len() == 3 {
-                self.checkpoint();
-            }
-            self.set_edited_tempo(((60.0 / med).clamp(40.0, 300.0) * 10.0).round() / 10.0);
-            self.publish();
-            let bpm_s = format!("{:.1}", self.edited_tempo());
-            self.say(
-                Tone::Quiet,
-                crate::i18n::fill(tr.status_tempo_from_taps, &[("bpm", &bpm_s)]),
-            );
-        }
     }
 
     // ------------------------------------------------------------ files
@@ -3662,6 +3629,7 @@ impl eframe::App for App {
         self.dropped_files(ctx);
         // Rebuilt as the rack and rolls draw below.
         self.midi_zones.clear();
+        self.tap_keys(ctx);
         self.shortcuts(ctx);
         // The desktop's frame follows the setting, also when it changes.
         if self.capture.is_none() {
@@ -3744,6 +3712,7 @@ impl eframe::App for App {
         self.manual_window(ctx);
         self.rename_window(ctx);
         self.export_window(ctx);
+        self.tap_window(ctx);
         self.import_window(ctx);
         self.fx_windows_ui(ctx);
         self.automation_frame(ctx);

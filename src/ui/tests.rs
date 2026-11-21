@@ -2028,3 +2028,83 @@ fn manual_window_edge_drag_keeps_other_axis() {
     app.show_manual = true;
     edge_drag_keeps_other_axis("kfxl-manual-window", |ctx| app.manual_window(ctx));
 }
+
+#[test]
+fn tap_window_takes_space_from_play_and_counts_it() {
+    let (ctx, mut app) = setup();
+    app.tap();
+    assert_eq!(app.tap_win.as_ref().map(|w| w.meter.tap_count()), Some(1));
+    // A second tap within 80 ms is a bounce, so start the count afresh.
+    app.tap_win.as_mut().unwrap().meter.reset();
+    let space = |pressed| Event::Key {
+        key: egui::Key::Space,
+        physical_key: None,
+        pressed,
+        repeat: false,
+        modifiers: Modifiers::default(),
+    };
+    let mut leaked = true;
+    let input = egui::RawInput {
+        events: vec![space(true), Event::Text(" ".into()), space(false)],
+        ..Default::default()
+    };
+    let _ = ctx.run(input, |ctx| {
+        app.tap_keys(ctx);
+        leaked = ctx.input(|i| i.key_pressed(egui::Key::Space));
+    });
+    assert!(!leaked, "Space must not reach play / stop");
+    assert_eq!(app.tap_win.as_ref().map(|w| w.meter.tap_count()), Some(1));
+    // Escape closes the window.
+    let esc = egui::RawInput {
+        events: vec![Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::default(),
+        }],
+        ..Default::default()
+    };
+    let _ = ctx.run(esc, |ctx| app.tap_keys(ctx));
+    assert!(app.tap_win.is_none());
+}
+
+#[test]
+fn midi_notes_tap_on_the_device_clock_and_set_the_tempo() {
+    use crate::midi_in::{Event as Midi, Incoming};
+    let mut app = app();
+    app.tap();
+    app.tap_win.as_mut().unwrap().meter.reset();
+    let t0 = std::time::Instant::now();
+    // 125 BPM on the driver's clock (0.48 s), while the UI saw them jittered.
+    let events: Vec<Incoming> = (0..5u64)
+        .flat_map(|k| {
+            let note = Incoming {
+                port: "Keys".into(),
+                stamp_us: 1_000_000 + k * 480_000,
+                received_at: t0 + std::time::Duration::from_millis(k * 480 + (k % 2) * 30),
+                event: Midi::On {
+                    pitch: 60,
+                    velocity: 100,
+                    frame: 0,
+                },
+            };
+            let off = Incoming {
+                event: Midi::Off {
+                    pitch: 60,
+                    frame: 0,
+                },
+                ..note.clone()
+            };
+            [note, off]
+        })
+        .collect();
+    app.tap_midi(&events);
+    let w = app.tap_win.as_ref().unwrap();
+    assert_eq!(w.meter.tap_count(), 5, "note-offs do not tap");
+    assert_eq!(w.meter.bpm(), Some(125.0));
+    assert_eq!(app.edited_tempo(), 125.0, "applied while tapping");
+    // The whole run is one undo step.
+    app.undo();
+    assert_ne!(app.edited_tempo(), 125.0);
+}

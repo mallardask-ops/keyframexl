@@ -1,6 +1,6 @@
 [package]
 name = "keyframexl"
-version = "0.2.0-nightly.rc.2"
+version = "0.2.0-nightly.rc.3"
 edition = "2024"
 description = "Native Linux pattern sequencer prototype"
 license = "MIT"

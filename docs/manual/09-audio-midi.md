@@ -26,6 +26,19 @@ outputs; *Slave* follows the clock of another device.
 `Ctrl+T` plays the active channel from the computer keyboard. `Ctrl+H`
 stops every sound (MIDI panic).
 
+## Tap tempo
+
+**Tap** on the deck (or *Tools → Tap tempo*) opens the tap window. Tap on
+the beat by clicking its pad, pressing `Space`, `Enter` or `T`, or playing
+any note (or the sustain pedal) on a MIDI device. MIDI taps are timed by
+the device's own clock, so they are steadier than mouse clicks; the notes
+still play. The window shows the measured tempo, how far each recent tap
+was from it, and sets the project tempo while you tap (one `Ctrl+Z` undoes
+the whole run). Choose how many taps make the average (4, 8 or 16), whole
+or one-decimal BPM, and which inputs tap. A pause of over two seconds
+starts a new run; `Esc` closes the window. While it is open, `Space` taps
+instead of starting playback.
+
 ## Recording
 
 `R` switches recording on; recording starts when you press Play.

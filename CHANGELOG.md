@@ -6,6 +6,18 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 
 ## Unreleased (0.2.0)
 
+### Nightly RC3
+
+- Tap tempo is a window (*Tools → Tap tempo*, **Tap** on the deck): tap
+  with the mouse, `Space`/`Enter`/`T`, or any MIDI note or sustain pedal,
+  timed by the device clock. Shows the tempo and the spread of recent taps,
+  averages 4/8/16 taps, and sets the project tempo as one undo step.
+- Export audio and Project info keep their height when a side edge is
+  dragged; Export's estimate, progress and buttons stay pinned at the
+  bottom, and the file name is an editable field.
+- Track and pattern colours are picked from swatches instead of hex codes.
+- The whole interface and the manual are in English and Ukrainian.
+
 ### Nightly RC2
 
 - Open the Welcome screen from File. The movable Import dialog previews where

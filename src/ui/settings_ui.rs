@@ -245,6 +245,7 @@ impl App {
             if events.iter().any(|e| matches!(e.event, Event::On { .. })) {
                 self.input_arrived();
             }
+            self.tap_midi(&events);
             let recording = self.rec.on && self.is_playing();
             if !recording && !self.midi_rec.is_empty() {
                 self.midi_rec.clear();
