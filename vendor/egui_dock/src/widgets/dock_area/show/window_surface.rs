@@ -67,8 +67,72 @@ fn keep_inside(r: Rect, area: Rect) -> Rect {
     Rect::from_min_size(pos2(x, y), size)
 }
 
-/// What the pointer started on a window: moving it or one of its edges.
 #[derive(Clone, Copy)]
+enum SharedEdge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+impl SharedEdge {
+    fn from_handles(edges: [bool; 4]) -> Option<Self> {
+        match edges {
+            [true, false, false, false] => Some(Self::Left),
+            [false, true, false, false] => Some(Self::Right),
+            [false, false, true, false] => Some(Self::Top),
+            [false, false, false, true] => Some(Self::Bottom),
+            _ => None,
+        }
+    }
+
+    fn opposite(self) -> Self {
+        match self {
+            Self::Left => Self::Right,
+            Self::Right => Self::Left,
+            Self::Top => Self::Bottom,
+            Self::Bottom => Self::Top,
+        }
+    }
+
+    fn at(self, rect: Rect) -> f32 {
+        match self {
+            Self::Left => rect.left(),
+            Self::Right => rect.right(),
+            Self::Top => rect.top(),
+            Self::Bottom => rect.bottom(),
+        }
+    }
+
+    fn set(self, rect: &mut Rect, value: f32) {
+        match self {
+            Self::Left => rect.min.x = value,
+            Self::Right => rect.max.x = value,
+            Self::Top => rect.min.y = value,
+            Self::Bottom => rect.max.y = value,
+        }
+    }
+
+    fn touches(self, rect: Rect, other: Rect) -> bool {
+        let overlap = match self {
+            Self::Left | Self::Right => rect.bottom().min(other.bottom()) - rect.top().max(other.top()),
+            Self::Top | Self::Bottom => rect.right().min(other.right()) - rect.left().max(other.left()),
+        };
+        overlap > 12.0 && (self.at(rect) - self.opposite().at(other)).abs() < 2.0
+    }
+
+    fn limit(self, rect: Rect, min: Vec2, boundary: f32) -> f32 {
+        match self {
+            Self::Left => boundary.min(rect.right() - min.x),
+            Self::Right => boundary.max(rect.left() + min.x),
+            Self::Top => boundary.min(rect.bottom() - min.y),
+            Self::Bottom => boundary.max(rect.top() + min.y),
+        }
+    }
+}
+
+/// What the pointer started on a window: moving it or one of its edges.
+#[derive(Clone)]
 struct Grab {
     start: Pos2,
     rect: Rect,
@@ -76,6 +140,7 @@ struct Grab {
     edges: [bool; 4],
     /// The sector the pointer is over now (moves only).
     sector: Option<Snap>,
+    linked: Vec<(SurfaceIndex, Rect)>,
 }
 
 impl<Tab> DockArea<'_, Tab> {
@@ -110,14 +175,18 @@ impl<Tab> DockArea<'_, Tab> {
             None => (1.0, None),
         };
 
-        let others: Vec<Rect> = self
+        let neighbors: Vec<(SurfaceIndex, Rect)> = self
             .dock_state
             .valid_surface_indices()
             .iter()
             .filter(|s| **s != surf_index && !s.is_main())
-            .filter_map(|s| self.dock_state.get_window_state(*s).map(|w| w.rect()))
-            .filter(|r| r.is_finite() && r.is_positive())
+            .filter_map(|&s| {
+                let w = self.dock_state.get_window_state(s)?;
+                let rect = w.snap().map_or_else(|| w.rect(), |snap| snap.rect(bounds));
+                (!w.is_minimized() && rect.is_finite() && rect.is_positive()).then_some((s, rect))
+            })
             .collect();
+        let others: Vec<Rect> = neighbors.iter().map(|(_, r)| *r).collect();
 
         let ws = self.dock_state.get_window_state_mut(surf_index).unwrap();
         let mut rect = ws.resolve(bounds, min);
@@ -160,6 +229,7 @@ impl<Tab> DockArea<'_, Tab> {
         let ctx = ui.ctx().clone();
         let grab_id = id.with("grab");
         let mut moved: Option<Rect> = None;
+        let mut linked_resize = Vec::new();
         let mut snap_to: Option<Option<Snap>> = None;
         // Room around the window for the resize handles and the shadow.
         let pad = 8.0;
@@ -222,7 +292,11 @@ impl<Tab> DockArea<'_, Tab> {
                     for (k, (edges, hit, icon)) in handles.iter().enumerate() {
                         let r = ui.interact(*hit, id.with(("resize", k)), Sense::drag()).on_hover_cursor(*icon);
                         if let (true, Some(p)) = (r.drag_started(), pointer) {
-                            grab = Some(Grab { start: p, rect, edges: *edges, sector: None });
+                            let shared = if free { None } else { SharedEdge::from_handles(*edges) };
+                            let linked = neighbors.iter().copied().filter(|(_, neighbor)| {
+                                shared.is_some_and(|edge| edge.touches(rect, *neighbor))
+                            }).collect();
+                            grab = Some(Grab { start: p, rect, edges: *edges, sector: None, linked });
                         }
                         if r.dragged() {
                             ctx.set_cursor_icon(*icon);
@@ -259,7 +333,7 @@ impl<Tab> DockArea<'_, Tab> {
                         let fx = ((p.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                         start = Rect::from_min_size(pos2(p.x - fx * size.x, rect.top()), size);
                     }
-                    grab = Some(Grab { start: p, rect: start, edges: [false; 4], sector: None });
+                    grab = Some(Grab { start: p, rect: start, edges: [false; 4], sector: None, linked: Vec::new() });
                 }
 
                 let active = ctx.dragged_id().is_some_and(|d| d == mover.id || (0..8).any(|k| d == id.with(("resize", k))));
@@ -274,7 +348,7 @@ impl<Tab> DockArea<'_, Tab> {
                     } else {
                         let [l, rt, t, b] = g.edges;
                         let mut r = g.rect;
-                        let edge = |v: f32, set: &[f32]| if free { v } else { stick(v, set).unwrap_or(v) };
+                        let edge = |v: f32, set: &[f32]| if free || !g.linked.is_empty() { v } else { stick(v, set).unwrap_or(v) };
                         if l {
                             r.min.x = edge(r.min.x + d.x, &xs).max(bounds.left()).min(r.max.x - min.x);
                         }
@@ -286,6 +360,20 @@ impl<Tab> DockArea<'_, Tab> {
                         }
                         if b {
                             r.max.y = edge(r.max.y + d.y, &ys).min(bounds.bottom()).max(r.min.y + min.y);
+                        }
+                        if !g.linked.is_empty() {
+                            let side = SharedEdge::from_handles(g.edges).expect("linked straight edge");
+                            let opposite = side.opposite();
+                            let mut shared = side.at(r);
+                            for (_, neighbor) in &g.linked {
+                                shared = opposite.limit(*neighbor, min.min(neighbor.size()), shared);
+                            }
+                            side.set(&mut r, shared);
+                            linked_resize.extend(g.linked.iter().map(|(surface, neighbor)| {
+                                let mut neighbor = *neighbor;
+                                opposite.set(&mut neighbor, shared);
+                                (*surface, neighbor)
+                            }));
                         }
                         r
                     };
@@ -303,7 +391,7 @@ impl<Tab> DockArea<'_, Tab> {
                         p.rect_stroke(plate, CornerRadius::same(8), Stroke::new(1.0_f32, accent.gamma_multiply(0.7)), StrokeKind::Inside);
                         p.galley(plate.center() - galley.size() / 2.0, galley, accent);
                     }
-                    ctx.data_mut(|d| d.insert_temp(grab_id, *g));
+                    ctx.data_mut(|d| d.insert_temp(grab_id, g.clone()));
                 } else if let Some(g) = grab.take() {
                     // Released: into the sector it was over, else where it is.
                     if let Some(sector) = g.sector {
@@ -330,9 +418,18 @@ impl<Tab> DockArea<'_, Tab> {
                 }
             });
 
+        for (surface, rect) in linked_resize {
+            if let Some(ws) = self.dock_state.get_window_state_mut(surface) {
+                if ws.rect() != rect {
+                    ws.set_rect_in(rect, bounds);
+                    ctx.request_repaint();
+                }
+            }
+        }
         let ws = self.dock_state.get_window_state_mut(surf_index).unwrap();
-        if let Some(r) = moved {
+        if let Some(r) = moved.filter(|r| *r != rect) {
             ws.set_rect_in(r, bounds);
+            ctx.request_repaint();
         }
         match snap_to {
             Some(Some(sector)) => {

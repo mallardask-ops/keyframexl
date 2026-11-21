@@ -46,6 +46,36 @@ pub enum WrapPage {
     Settings,
 }
 
+fn uncovered_regions(rect: egui::Rect, cover: egui::Rect) -> Vec<egui::Rect> {
+    let overlap = rect.intersect(cover);
+    if !overlap.is_positive() {
+        return vec![rect];
+    }
+    let pos = egui::pos2;
+    [
+        egui::Rect::from_min_max(rect.min, pos(rect.right(), overlap.top())),
+        egui::Rect::from_min_max(pos(rect.left(), overlap.bottom()), rect.max),
+        egui::Rect::from_min_max(
+            pos(rect.left(), overlap.top()),
+            pos(overlap.left(), overlap.bottom()),
+        ),
+        egui::Rect::from_min_max(
+            pos(overlap.right(), overlap.top()),
+            pos(rect.right(), overlap.bottom()),
+        ),
+    ]
+    .into_iter()
+    .filter(|r| r.is_positive())
+    .collect()
+}
+
+#[derive(Clone, PartialEq)]
+struct EditorPlacement {
+    rect: [i32; 4],
+    clip: [i32; 4],
+    regions: Vec<[i32; 4]>,
+}
+
 #[derive(Default)]
 pub struct PluginState {
     pub host: Option<crate::plugins::HostHandle>,
@@ -58,10 +88,9 @@ pub struct PluginState {
     pub parent: Option<u32>,
     /// Editor size in pixels as the plugin reports it.
     pub editor_size: HashMap<u64, (i32, i32)>,
-    /// Where each embedded editor was put last: (rect, visible).
-    pub placed: HashMap<u64, ([i32; 4], [i32; 4], bool)>,
-    /// Editors drawn this frame (the rest are hidden at the frame's end).
-    pub seen: Vec<u64>,
+    placed: HashMap<u64, EditorPlacement>,
+    /// Editor bounds and egui layer collected before the frame is composited.
+    editors: Vec<(u64, egui::LayerId, egui::Rect, [i32; 4])>,
     /// Page per plugin window, parameter lists (with when they were read), filter text.
     pub page: HashMap<u64, WrapPage>,
     pub params: HashMap<u64, (Vec<crate::plugins::ParamRow>, f64)>,
@@ -1193,7 +1222,7 @@ impl App {
             ui.label(RichText::new("This plugin has no editor of its own. Its controls are on the Parameters page.").font(t::sans(13.0)).color(t::muted()));
             return;
         }
-        let Some(parent) = self.plugins.parent else {
+        if self.plugins.parent.is_none() {
             ui.label(RichText::new("The editor opens in its own window here (Wayland). Settings → General → \"Run as an X11 window\" puts it inside this window, like FL.").font(t::sans(12.0)).color(t::faint()));
             let open = l.editor;
             if kit::button(
@@ -1207,7 +1236,7 @@ impl App {
                 self.show_editor(id);
             }
             return;
-        };
+        }
         let ppp = ui.ctx().pixels_per_point();
         let (w, h) = self
             .plugins
@@ -1252,36 +1281,13 @@ impl App {
         let (screen, work) = (ui.ctx().screen_rect(), ui.ctx().available_rect());
         let band = egui::Rect::from_x_y_ranges(screen.x_range(), work.y_range());
         let shown = rect.intersect(ui.clip_rect()).intersect(band);
-        let popup = ui.ctx().memory(|m| m.any_popup_open());
-        let visible = shown.width() > 4.0 && shown.height() > 4.0 && !popup;
-        let px = |r: egui::Rect| {
-            [
-                (r.left() * ppp).round() as i32,
-                (r.top() * ppp).round() as i32,
-                (r.width() * ppp).round().max(1.0) as i32,
-                (r.height() * ppp).round().max(1.0) as i32,
-            ]
-        };
-        // The editor keeps its own size; the frame around it cuts off what is hidden.
-        let full = [px(rect)[0], px(rect)[1], w, h];
-        let clip = if visible { px(shown) } else { full };
-        self.plugins.seen.push(id);
-        if self.plugins.placed.get(&id) != Some(&(full, clip, visible)) {
-            self.plugins.placed.insert(id, (full, clip, visible));
-            if let Some(h) = &self.plugins.host {
-                h.send(Req::Embed {
-                    id,
-                    parent,
-                    rect: full,
-                    clip,
-                    visible,
-                });
-            }
-            // The host moves the X window after this frame: paint again so the
-            // spot it left does not keep a stale picture of the editor.
-            ui.ctx()
-                .request_repaint_after(std::time::Duration::from_millis(60));
-        }
+        let full = [
+            (rect.left() * ppp).round() as i32,
+            (rect.top() * ppp).round() as i32,
+            w,
+            h,
+        ];
+        self.plugins.editors.push((id, ui.layer_id(), shown, full));
     }
 
     fn parameters_page(&mut self, ui: &mut egui::Ui, id: u64) {
@@ -1467,29 +1473,94 @@ impl App {
         self.edits += 1;
     }
 
-    /// End of frame: editors whose window was not drawn this frame are hidden.
-    pub(crate) fn plugins_end_frame(&mut self) {
-        let seen = std::mem::take(&mut self.plugins.seen);
-        let hide: Vec<u64> = self
-            .plugins
-            .placed
-            .iter()
-            .filter(|(id, (_, _, vis))| *vis && !seen.contains(id))
-            .map(|(id, _)| *id)
-            .collect();
-        for id in hide {
-            if let Some((rect, clip, _)) = self.plugins.placed.get(&id).copied() {
-                self.plugins.placed.insert(id, (rect, clip, false));
-                if let (Some(h), Some(parent)) = (&self.plugins.host, self.plugins.parent) {
-                    h.send(Req::Embed {
-                        id,
-                        parent,
-                        rect,
-                        clip,
-                        visible: false,
-                    });
+    /// Native child windows sit above egui's framebuffer, so apply egui's
+    /// window occlusion before mapping them.
+    pub(crate) fn plugins_end_frame(&mut self, ctx: &egui::Context) {
+        let drawn = std::mem::take(&mut self.plugins.editors);
+        let (Some(parent), Some(host)) = (self.plugins.parent, &self.plugins.host) else {
+            return;
+        };
+        let popup = self.welcome_open
+            || self.pending.is_some()
+            || ctx.memory(|m| m.any_popup_open() || m.top_modal_layer().is_some());
+        let layers = ctx.memory(|m| {
+            m.layer_ids()
+                .filter(|layer| m.areas().is_visible(layer))
+                .filter_map(|layer| m.area_rect(layer.id).map(|rect| (layer, rect)))
+                .collect::<Vec<_>>()
+        });
+        let ppp = ctx.pixels_per_point();
+        let px = |r: egui::Rect| {
+            let x = (r.left() * ppp).ceil() as i32;
+            let y = (r.top() * ppp).ceil() as i32;
+            [
+                x,
+                y,
+                ((r.right() * ppp).floor() as i32 - x).max(1),
+                ((r.bottom() * ppp).floor() as i32 - y).max(1),
+            ]
+        };
+        let mut placements = Vec::new();
+        for &(id, layer, rect, full) in &drawn {
+            let covering = layers
+                .iter()
+                .rev()
+                .take_while(|(other, _)| *other != layer)
+                .filter(|(other, _)| {
+                    other.order > layer.order
+                        || (other.order == layer.order && other.order >= egui::Order::Middle)
+                });
+            let mut visible = Vec::new();
+            if !popup && rect.width() > 4.0 && rect.height() > 4.0 {
+                visible.push(rect);
+                for (_, cover) in covering {
+                    visible = visible
+                        .into_iter()
+                        .flat_map(|r| uncovered_regions(r, *cover))
+                        .collect();
                 }
             }
+            let regions = visible
+                .into_iter()
+                .filter(|r| r.width() >= 1.0 && r.height() >= 1.0)
+                .map(px)
+                .collect();
+            placements.push((
+                id,
+                EditorPlacement {
+                    rect: full,
+                    clip: px(rect),
+                    regions,
+                },
+            ));
+        }
+        for (&id, placed) in &self.plugins.placed {
+            if !placed.regions.is_empty() && !drawn.iter().any(|(drawn_id, ..)| *drawn_id == id) {
+                placements.push((
+                    id,
+                    EditorPlacement {
+                        rect: placed.rect,
+                        clip: placed.clip,
+                        regions: Vec::new(),
+                    },
+                ));
+            }
+        }
+        for (id, placement) in placements {
+            if self.plugins.placed.get(&id) == Some(&placement)
+                || (placement.regions.is_empty() && !self.plugins.placed.contains_key(&id))
+            {
+                continue;
+            }
+            host.send(Req::Embed {
+                id,
+                parent,
+                rect: placement.rect,
+                clip: placement.clip,
+                regions: placement.regions.clone(),
+            });
+            self.plugins.placed.insert(id, placement);
+            ctx.request_repaint_after(std::time::Duration::from_millis(60));
         }
     }
 

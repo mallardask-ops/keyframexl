@@ -351,7 +351,7 @@ pub fn eq(
             } else {
                 1.0
             };
-            let d = response.drag_delta() * fine;
+            let d = kit::captured_drag(ui, &response) * fine;
             let x = (fx(params[i]) + d.x - r.left()) / r.width();
             params[i] = (20.0 * 1000f32.powf(x.clamp(0.0, 1.0))).clamp(specs[i].min, specs[i].max);
             params[i + 1] =
@@ -718,13 +718,13 @@ pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
                 .font(t::sans(13.0))
                 .color(t::muted()),
         );
-        if ui
-            .add(
-                egui::DragValue::new(&mut steps)
-                    .range(1..=TIME_STEPS)
-                    .suffix(" steps"),
-            )
-            .changed()
+        if kit::drag_value(
+            ui,
+            egui::DragValue::new(&mut steps)
+                .range(1..=TIME_STEPS)
+                .suffix(" steps"),
+        )
+        .changed()
         {
             params[0] = steps as f32;
             started = true;

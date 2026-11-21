@@ -185,8 +185,8 @@ fn syncsafe(n: usize) -> [u8; 4] {
     ]
 }
 
-/// An ID3v2.4 tag with the project's title, author, genre and comments in
-/// UTF-8, plus the encoder; empty fields are left out.
+/// An ID3v2.4 tag with the project's metadata in UTF-8, plus the encoder;
+/// empty fields are left out.
 pub fn id3(info: &ProjectInfo) -> Vec<u8> {
     let mut frames = Vec::new();
     let mut frame = |id: &[u8; 4], body: Vec<u8>| {
@@ -199,11 +199,20 @@ pub fn id3(info: &ProjectInfo) -> Vec<u8> {
     for (id, s) in [
         (b"TIT2", &info.title),
         (b"TPE1", &info.author),
+        (b"TALB", &info.album),
         (b"TCON", &info.genre),
+        (b"TDRC", &info.year),
+        (b"TCOP", &info.copyright),
     ] {
         if !s.trim().is_empty() {
             frame(id, text(s.trim()));
         }
+    }
+    if !info.url.trim().is_empty() {
+        // WXXX: text encoding (UTF-8 = 3), empty description (0-terminated), URL bytes.
+        let mut body = vec![3u8, 0];
+        body.extend_from_slice(info.url.trim().as_bytes());
+        frame(b"WXXX", body);
     }
     if !info.comments.trim().is_empty() {
         // Encoding, language, empty description (terminated), text.
@@ -230,15 +239,30 @@ mod tests {
         let info = ProjectInfo {
             title: "Нічне місто".into(),
             author: "Me".into(),
+            album: "Midnight EP".into(),
             genre: String::new(),
+            year: "2026".into(),
+            copyright: "CC0".into(),
+            url: "https://example.com/track".into(),
             comments: "808 з Kit 3".into(),
+            ..Default::default()
         };
         let tag = id3(&info);
         assert_eq!(&tag[..5], b"ID3\x04\x00");
         let size = tag[6..10].iter().fold(0usize, |n, b| n << 7 | *b as usize);
         assert_eq!(size + 10, tag.len());
         let has = |needle: &[u8]| tag.windows(needle.len()).any(|w| w == needle);
-        assert!(has("Нічне місто".as_bytes()) && has(b"TIT2") && has(b"TPE1") && has(b"COMM"));
+        assert!(
+            has("Нічне місто".as_bytes())
+                && has(b"TIT2")
+                && has(b"TPE1")
+                && has(b"TALB")
+                && has(b"TDRC")
+                && has(b"TCOP")
+                && has(b"WXXX")
+                && has(b"COMM")
+        );
+        assert!(has(b"https://example.com/track"));
         assert!(!has(b"TCON"), "an empty genre is left out");
     }
 

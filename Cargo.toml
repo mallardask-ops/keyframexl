@@ -1,6 +1,6 @@
 [package]
 name = "keyframexl"
-version = "0.1.2"
+version = "0.2.0-nightly.rc.2"
 edition = "2024"
 description = "Native Linux pattern sequencer prototype"
 license = "MIT"
@@ -28,7 +28,7 @@ vorbis_rs = "0.5"
 midir = "0.10"
 vst3-host = { version = "0.11.1", path = "vendor/vst3-host", default-features = false }
 base64 = "0.22"
-xcb = { version = "1", features = ["xtest"] }
+xcb = { version = "1", features = ["shape", "xtest"] }
 raw-window-handle = "0.6"
 rsworld-sys = "0.1.0"
 encoding_rs = "0.8"

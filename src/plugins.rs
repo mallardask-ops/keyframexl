@@ -2301,14 +2301,14 @@ pub enum Req {
     Rate(u32),
     /// Put the editor inside our own X11 window `parent` (FL's wrapper window):
     /// `rect` = x, y, width, height of the whole editor in window pixels, `clip`
-    /// = the part of it that shows (the rest is cut off, not moved). Hidden
-    /// while `visible` is off.
+    /// = the base viewport. `regions` are the visible parts after subtracting
+    /// overlapping UI, in the same window coordinates. Empty regions hide it.
     Embed {
         id: u64,
         parent: u32,
         rect: [i32; 4],
         clip: [i32; 4],
-        visible: bool,
+        regions: Vec<[i32; 4]>,
     },
     /// Reply with the plugin's parameters (MIDI-controller stand-ins left out).
     Params(u64),
@@ -2496,6 +2496,35 @@ fn place(conn: &xcb::Connection, e: &mut Embedded, rect: [i32; 4], clip: [i32; 4
         }
         e.visible = visible;
     }
+    let _ = conn.flush();
+}
+
+fn shape_editor(
+    conn: &xcb::Connection,
+    frame: xcb::x::Window,
+    clip: [i32; 4],
+    regions: &[[i32; 4]],
+) {
+    use xcb::{shape, x};
+    let visible: Vec<_> = regions
+        .iter()
+        .map(|r| x::Rectangle {
+            x: (r[0] - clip[0]) as i16,
+            y: (r[1] - clip[1]) as i16,
+            width: r[2] as u16,
+            height: r[3] as u16,
+        })
+        .collect();
+    // The bounding shape limits both painting and input for the child windows.
+    conn.send_request(&shape::Rectangles {
+        operation: shape::So::Set,
+        destination_kind: shape::Sk::Bounding,
+        ordering: x::ClipOrdering::Unsorted,
+        destination_window: frame,
+        x_offset: 0,
+        y_offset: 0,
+        rectangles: &visible,
+    });
     let _ = conn.flush();
 }
 
@@ -2782,8 +2811,9 @@ fn host_thread(
                 parent,
                 rect,
                 clip,
-                visible,
+                regions,
             }) => {
+                let visible = !regions.is_empty();
                 let Some(l) = loaded.get_mut(&id) else {
                     continue;
                 };
@@ -2798,7 +2828,12 @@ fn host_thread(
                     continue;
                 };
                 match &mut l.embed {
-                    Some(e) => place(conn, e, rect, clip, visible),
+                    Some(e) => {
+                        if visible {
+                            shape_editor(conn, e.frame, clip, &regions);
+                        }
+                        place(conn, e, rect, clip, visible);
+                    }
                     None if visible => {
                         if let Some(mut w) = l.window.take() {
                             w.close();
@@ -2806,6 +2841,7 @@ fn host_thread(
                         let res = l.plugin.embed(conn, parent, rect, clip);
                         match res {
                             Ok((frame, win, w, h)) => {
+                                shape_editor(conn, frame, clip, &regions);
                                 l.embed = Some(Embedded {
                                     frame,
                                     win,

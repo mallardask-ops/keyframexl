@@ -272,7 +272,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         _ if args.len() <= 3
             && args.get(1).is_none_or(|a| {
-                a == "--demo" || a.starts_with("--capture-") || is_project_arg(a)
+                a == "--demo" || a == "--show" || a.starts_with("--capture-") || is_project_arg(a)
+            })
+            && args.get(2).is_none_or(|a| {
+                a == "--show"
+                    || args
+                        .get(1)
+                        .is_some_and(|first| first.starts_with("--capture-"))
             }) =>
         {
             if !args.iter().any(|a| a.starts_with("--capture-")) {

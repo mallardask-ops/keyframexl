@@ -820,20 +820,43 @@ pub struct Song {
     pub game_style: Option<crate::forge::recipes::Style>,
 }
 
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 /// What the project is (FL: Options → Project info).
 #[derive(Clone, Serialize, Deserialize, Debug, Default, PartialEq)]
 pub struct ProjectInfo {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub title: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub author: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub album: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub genre: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub year: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub copyright: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub comments: String,
+    /// Open Project info automatically when this project file is loaded.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub show_on_open: bool,
+    /// Project musical key/scale; synced with piano roll scale highlighting on load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<crate::scale::Scale>,
 }
 
 impl ProjectInfo {
+    pub const MAX_FIELD: usize = 200;
+    pub const MAX_YEAR: usize = 32;
+    pub const MAX_URL: usize = 500;
+    pub const MAX_COMMENTS: usize = 20_000;
+
     pub fn is_empty(&self) -> bool {
         *self == Self::default()
     }
@@ -1209,12 +1232,17 @@ impl Song {
             return Err("Bad loop range");
         }
         let i = &self.info;
-        if [&i.title, &i.author, &i.genre]
+        if [&i.title, &i.author, &i.album, &i.genre, &i.copyright]
             .iter()
-            .any(|s| s.chars().count() > 200)
-            || i.comments.chars().count() > 20_000
+            .any(|s| s.chars().count() > ProjectInfo::MAX_FIELD)
+            || i.year.chars().count() > ProjectInfo::MAX_YEAR
+            || i.url.chars().count() > ProjectInfo::MAX_URL
+            || i.comments.chars().count() > ProjectInfo::MAX_COMMENTS
         {
             return Err("Project info too long");
+        }
+        if i.scale.is_some_and(|sc| sc.root >= 12) {
+            return Err("Bad project scale");
         }
         if self
             .markers
@@ -1699,11 +1727,201 @@ pub(crate) fn drum(voice: usize, t: f64) -> f64 {
 }
 
 /// Late offset (seconds) for a note starting exactly on an odd 16th step.
-pub(crate) fn swing_offset(t: Tick, sps: f64, swing: f64) -> f64 {
+pub fn swing_offset(t: Tick, sps: f64, swing: f64) -> f64 {
     if t.rem_euclid(2 * STEP) == STEP {
         swing.clamp(0.0, 0.6) * sps
     } else {
         0.0
+    }
+}
+
+/// One audible note occurrence placed on the song (or pattern) timeline,
+/// matching [`crate::engine::Engine`]'s clip window, repeat, and mute rules.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClipNote {
+    /// Index in `song.clips` (`usize::MAX` in Pattern mode).
+    pub clip: usize,
+    /// Source pattern id (for looking up lyrics and pitch curves).
+    pub pattern: u64,
+    /// Original note data.
+    pub note: Note,
+    /// Timeline start tick (playlist tick in Song mode, pattern tick in Pattern mode).
+    pub start: Tick,
+    /// Timeline end tick: full note length for synths/samplers, clipped to clip
+    /// window and next vocal note on the same channel for vocals.
+    pub end: Tick,
+    /// Local tick within the clip, used for swing alignment matching the engine.
+    pub local_tick: Tick,
+    /// Clip window end on the timeline.
+    pub window_end: Tick,
+}
+
+/// Longest note length across the song's patterns, capped at 16 bars for fast lookback.
+pub fn song_max_note_len(song: &Song) -> Tick {
+    let mut best: Tick = BAR;
+    for p in &song.patterns {
+        for n in &p.notes {
+            if n.length > best {
+                best = n.length;
+            }
+        }
+    }
+    best.min(16 * BAR)
+}
+
+/// Collect audible note occurrences overlapping `[from, to)` in Song mode.
+///
+/// Mirrors `Engine::collect_hits`: clip offset/length/repeats decide note starts,
+/// mute is checked across clip, track, note, and instrument, synth/sampler notes
+/// ring for their full length past clip end, and vocal notes clip to the clip
+/// window and monophonic phrase boundaries.
+pub fn clip_notes(song: &Song, from: Tick, to: Tick, max_lookback: Tick) -> Vec<ClipNote> {
+    if to <= from {
+        return Vec::new();
+    }
+    let lookback = max_lookback.clamp(0, 16 * BAR);
+    let mut out = Vec::new();
+    for (ci, c) in song.clips.iter().enumerate() {
+        if c.muted || song.track_muted(c.track) {
+            continue;
+        }
+        let Some(pat) = song.pattern(c.pattern) else {
+            continue;
+        };
+        if pat.notes.is_empty() {
+            continue;
+        }
+        let len = song.clip_len(c);
+        let clip_end = c.start.saturating_add(len);
+        if c.start >= to || clip_end.saturating_add(lookback) <= from {
+            continue;
+        }
+        let plen = pat.length.max(1);
+        let w0 = c.offset;
+        let w1 = w0.saturating_add(len);
+        if w1 <= w0 {
+            continue;
+        }
+        let clip_first = w0.div_euclid(plen);
+        let clip_last = (w1 - 1).div_euclid(plen);
+        let q_lo = (from.saturating_sub(lookback) - c.start).max(0);
+        let q_hi = (to - c.start).min(len);
+        if q_hi <= q_lo {
+            continue;
+        }
+        let t_lo = w0.saturating_add(q_lo);
+        let t_hi = w0.saturating_add(q_hi);
+        let pass_lo = (t_lo - plen + 1).div_euclid(plen).max(clip_first);
+        let pass_hi = (t_hi - 1).div_euclid(plen).min(clip_last);
+        if pass_hi < pass_lo {
+            continue;
+        }
+        // Guard against degenerate 1-tick patterns stretched over hundreds of bars.
+        let pass_hi = pass_hi.min(pass_lo.saturating_add(4096));
+
+        for n in &pat.notes {
+            if n.muted {
+                continue;
+            }
+            let Some(inst) = song.instrument(n.instrument) else {
+                continue;
+            };
+            if inst.muted {
+                continue;
+            }
+            let is_vocal = matches!(inst.kind, InstrumentKind::Vocal { .. });
+            for k in pass_lo..=pass_hi {
+                let t = n.start.saturating_add(k.saturating_mul(plen));
+                if t < w0 || t >= w1 {
+                    continue;
+                }
+                let local = t - w0;
+                let start = c.start.saturating_add(local);
+                let raw_end = start.saturating_add(n.length.max(1));
+                let end = if is_vocal {
+                    raw_end.min(clip_end)
+                } else {
+                    raw_end
+                };
+                if end <= from || start >= to {
+                    continue;
+                }
+                out.push(ClipNote {
+                    clip: ci,
+                    pattern: c.pattern,
+                    note: *n,
+                    start,
+                    end,
+                    local_tick: local,
+                    window_end: clip_end,
+                });
+            }
+        }
+    }
+    finalize_clip_notes(song, &mut out);
+    out
+}
+
+/// Collect audible note occurrences overlapping `[from, to)` for a single pattern
+/// (Pattern mode fallback when the song has no playlist clips yet).
+pub fn pattern_notes(song: &Song, pattern_id: u64, from: Tick, to: Tick) -> Vec<ClipNote> {
+    if to <= from {
+        return Vec::new();
+    }
+    let Some(pat) = song.pattern(pattern_id) else {
+        return Vec::new();
+    };
+    let plen = pat.length.max(1);
+    let mut out = Vec::new();
+    for n in &pat.notes {
+        if n.muted {
+            continue;
+        }
+        let Some(inst) = song.instrument(n.instrument) else {
+            continue;
+        };
+        if inst.muted {
+            continue;
+        }
+        let start = n.start;
+        let end = start.saturating_add(n.length.max(1)).min(plen);
+        if end <= from || start >= to {
+            continue;
+        }
+        out.push(ClipNote {
+            clip: usize::MAX,
+            pattern: pattern_id,
+            note: *n,
+            start,
+            end,
+            local_tick: start,
+            window_end: plen,
+        });
+    }
+    finalize_clip_notes(song, &mut out);
+    out
+}
+
+fn finalize_clip_notes(song: &Song, out: &mut [ClipNote]) {
+    out.sort_by_key(|cn| (cn.start, cn.note.instrument, cn.note.pitch, cn.clip));
+    // Monophonic vocal clipping: each vocal note ends no later than the next note
+    // on the same vocal channel, matching `vocal::plan`.
+    let mut last_vocal: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+    for i in 0..out.len() {
+        let inst_id = out[i].note.instrument;
+        let is_vocal = song
+            .instrument(inst_id)
+            .is_some_and(|ins| matches!(ins.kind, InstrumentKind::Vocal { .. }));
+        if !is_vocal {
+            continue;
+        }
+        if let Some(&prev) = last_vocal.get(&inst_id) {
+            let next_start = out[i].start;
+            if out[prev].end > next_start {
+                out[prev].end = next_start.max(out[prev].start + 1);
+            }
+        }
+        last_vocal.insert(inst_id, i);
     }
 }
 
@@ -2113,13 +2331,45 @@ mod tests {
         song.info = ProjectInfo {
             title: "Нічне місто".into(),
             author: "Me".into(),
+            album: "Night Sessions".into(),
             genre: "House".into(),
+            year: "2026".into(),
+            copyright: "CC0".into(),
+            url: "https://example.com/night".into(),
             comments: "808 from kit 3".into(),
+            show_on_open: true,
+            scale: Some(crate::scale::Scale {
+                root: 9,
+                kind: crate::scale::Kind::Minor,
+            }),
         };
         let back: Song = serde_json::from_str(&serde_json::to_string(&song).unwrap()).unwrap();
         assert_eq!(back.info, song.info);
         assert!(back.validate().is_ok());
-        song.info.title = "x".repeat(201);
+
+        // Older 4-field JSON still deserializes cleanly with defaults for new fields.
+        let legacy: ProjectInfo = serde_json::from_str(
+            r#"{"title":"Old","author":"A","genre":"Ambient","comments":"Note"}"#,
+        )
+        .unwrap();
+        assert_eq!(legacy.title, "Old");
+        assert!(legacy.album.is_empty());
+        assert!(!legacy.show_on_open);
+        assert_eq!(legacy.scale, None);
+
+        song.info.title = "x".repeat(ProjectInfo::MAX_FIELD + 1);
+        assert!(song.validate().is_err());
+        song.info.title = "ok".into();
+        song.info.year = "2".repeat(ProjectInfo::MAX_YEAR + 1);
+        assert!(song.validate().is_err());
+        song.info.year = "2026".into();
+        song.info.url = "h".repeat(ProjectInfo::MAX_URL + 1);
+        assert!(song.validate().is_err());
+        song.info.url.clear();
+        song.info.scale = Some(crate::scale::Scale {
+            root: 12,
+            kind: crate::scale::Kind::Major,
+        });
         assert!(song.validate().is_err());
     }
 

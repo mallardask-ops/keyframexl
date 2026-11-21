@@ -637,7 +637,8 @@ impl App {
                     ui.add_space(6.);
                     ui.horizontal(|ui| {
                         ui.label("Length");
-                        ui.add(
+                        kit::drag_value(
+                            ui,
                             egui::DragValue::new(&mut s.recipe.bars)
                                 .range(1..=16)
                                 .suffix(" bars"),
@@ -645,7 +646,7 @@ impl App {
                     });
                     ui.horizontal(|ui| {
                         ui.label("Seed");
-                        ui.add(egui::DragValue::new(&mut s.recipe.seed));
+                        kit::drag_value(ui, egui::DragValue::new(&mut s.recipe.seed));
                     });
                     ui.add_enabled(
                         !s.source.is_empty(),

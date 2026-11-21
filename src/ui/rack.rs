@@ -9,6 +9,9 @@ use eframe::egui::{self, Align2, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 use keyframexl::sequence::{Note, STEP, STEP_PITCH, Tick};
 
 const NAME_W: f32 = 230.0;
+
+#[derive(Clone, Copy)]
+struct ChannelDrag(u64);
 const MIN_PAD_W: f32 = 22.0;
 /// Pads stay near-square like FL's; extra width is left empty, not stretched.
 const MAX_PAD_W: f32 = 34.0;
@@ -572,13 +575,13 @@ impl App {
                 ui.label(egui::RichText::new("Shifts velocity (and a touch of timing) by random amounts. The same seed gives the same result.").font(t::sans(12.0)).color(t::faint()));
                 egui::Grid::new("rack-humanize-grid").num_columns(2).spacing(vec2(14.0, 8.0)).show(ui, |ui| {
                     ui.label(egui::RichText::new("Velocity ±").font(t::sans(13.0)).color(t::text()));
-                    ui.add(egui::DragValue::new(amount).range(0..=64));
+                    kit::drag_value(ui, egui::DragValue::new(amount).range(0..=64));
                     ui.end_row();
                     ui.label(egui::RichText::new("Timing ±").font(t::sans(13.0)).color(t::text()));
-                    ui.add(egui::DragValue::new(timing).range(0..=12).custom_formatter(|x, _| format!("{x:.0} ticks")).custom_parser(|s| s.trim().trim_end_matches("ticks").trim().parse::<f64>().ok()));
+                    kit::drag_value(ui, egui::DragValue::new(timing).range(0..=12).custom_formatter(|x, _| format!("{x:.0} ticks")).custom_parser(|s| s.trim().trim_end_matches("ticks").trim().parse::<f64>().ok()));
                     ui.end_row();
                     ui.label(egui::RichText::new("Seed").font(t::sans(13.0)).color(t::text()));
-                    ui.add(egui::DragValue::new(seed));
+                    kit::drag_value(ui, egui::DragValue::new(seed));
                     ui.end_row();
                 });
                 ui.label(egui::RichText::new(format!("Applies to the steps of {name}. Ctrl+Z undoes.")).font(t::sans(12.0)).color(t::faint()));
@@ -641,6 +644,36 @@ impl App {
         let idx = self.pattern_index(self.selected) + 1;
         let sub = format!("{idx:02}  {}", self.pattern().name);
         self.rack_header(ui, &sub);
+        egui::ScrollArea::vertical()
+            .id_salt("rack-rows")
+            .auto_shrink([false, true])
+            .drag_to_scroll(false)
+            .show(ui, |ui| {
+                let area = ui.available_rect_before_wrap();
+                let mut pane = area;
+                pane.min.x += NAME_W.min(pane.width() * 0.78);
+                let mut pins =
+                    ui.new_child(egui::UiBuilder::new().id_salt("rack-pins").max_rect(area));
+                let output = ui.scope_builder(egui::UiBuilder::new().max_rect(pane), |ui| {
+                    egui::ScrollArea::horizontal()
+                        .id_salt("rack-steps")
+                        .min_scrolled_width(0.0)
+                        .auto_shrink([false, true])
+                        .drag_to_scroll(false)
+                        .show(ui, |ui| {
+                            self.rack_grid(ui, &mut pins, area.left(), pane.left(), area.right())
+                        })
+                });
+                ui.advance_cursor_after_rect(output.response.rect);
+                self.rack_add_channel(ui);
+            });
+        if self.focus == Some(Tab::Rack) {
+            self.rack_keys(ui);
+        }
+        self.rack_humanize_dialog(ui);
+    }
+
+    fn rack_grid(&mut self, ui: &mut Ui, pins: &mut Ui, left: f32, fixed_grid_l: f32, right: f32) {
         let pat = self.pattern().clone();
         let steps = pat.step_count();
         let beats = steps.div_ceil(4).max(1);
@@ -650,21 +683,15 @@ impl App {
             .iter()
             .map(|i| (i.id, i.name.clone(), i.muted, i.is_sampler()))
             .collect();
-        // Reserve the full content height so a short window scrolls; long patterns scroll sideways.
         let graph_h = if self.rack_graph { GRAPH_H + 10.0 } else { 0.0 };
-        let need = 26.0 + STEP_NUM_H + LED_ROW + channels.len() as f32 * ROW_H + 64.0 + graph_h;
+        let need = 22.0 + STEP_NUM_H + LED_ROW + channels.len() as f32 * ROW_H + graph_h;
         let min_tray = 4.0 * MIN_PAD_W + 4.0 * PAD_GAP;
-        let min_w = NAME_W + beats as f32 * min_tray + (beats - 1) as f32 * TRAY_GAP + 24.0;
-        let (body, _) = ui.allocate_exact_size(
-            vec2(
-                ui.available_width().max(min_w),
-                need.max(ui.available_height()),
-            ),
-            Sense::hover(),
-        );
+        let min_w = beats as f32 * min_tray + (beats - 1) as f32 * TRAY_GAP + 24.0;
+        let (body, _) =
+            ui.allocate_exact_size(vec2(ui.available_width().max(min_w), need), Sense::hover());
         let p = ui.painter().clone();
 
-        let grid_l = body.left() + NAME_W;
+        let grid_l = body.left();
         let grid_w = body.right() - grid_l;
         let max_tray = 4.0 * MAX_PAD_W + 4.0 * PAD_GAP;
         let tray_w =
@@ -779,23 +806,41 @@ impl App {
         let mut stroke: Option<PadStroke> = ui.data(|d| d.get_temp(stroke_id)).flatten();
         // Step pads as drawn, for the stroke's hit test after the rows.
         let mut pads: Vec<(u64, usize, Rect)> = Vec::new();
+        let fixed_painter = pins.painter().clone();
+        let mut channels_ui = pins.new_child(egui::UiBuilder::new().id_salt("channel-controls"));
+        let mut channel_clip = channels_ui.clip_rect();
+        channel_clip.max.x = channel_clip.max.x.min(fixed_grid_l);
+        channels_ui.set_clip_rect(channel_clip);
+        let channel_painter = channels_ui.painter().clone();
+        let mut move_channel = None;
         for (n, (id, name, muted, _)) in channels.iter().enumerate() {
             let id = *id;
             let y = tray_top + STEP_NUM_H + LED_ROW + n as f32 * ROW_H + (ROW_H - PAD_H) / 2.0;
             let mid = y + PAD_H / 2.0;
             let audible = !*muted;
             let soloed = self.song.is_solo(id);
-            let row_rect = Rect::from_min_max(pos2(body.left(), y), pos2(grid_r, y + PAD_H));
+            let row_rect = Rect::from_min_max(pos2(left, y), pos2(right, y + PAD_H));
             // The whole row slot (pads, name, the gaps around) takes drops.
             let slot = Rect::from_min_max(
-                pos2(body.left(), y - (ROW_H - PAD_H) / 2.0),
-                pos2(body.right(), y - (ROW_H - PAD_H) / 2.0 + ROW_H),
+                pos2(left, y - (ROW_H - PAD_H) / 2.0),
+                pos2(right, y - (ROW_H - PAD_H) / 2.0 + ROW_H),
             );
-            let row_drop = ui.interact(slot, ui.id().with(("plugin-row-drop", id)), Sense::hover());
+            let row_drop =
+                pins.interact(slot, ui.id().with(("plugin-row-drop", id)), Sense::hover());
             // A MIDI clip dropped from outside (a plugin's groove) lands here too.
-            let shown = slot.intersect(ui.clip_rect());
+            let shown = slot.intersect(pins.clip_rect());
             if shown.is_positive() {
                 self.midi_zones.push((shown, id));
+            }
+            if row_drop.dnd_hover_payload::<ChannelDrag>().is_some()
+                && let Some(pos) = ui.ctx().pointer_interact_pos()
+            {
+                let after = pos.y >= slot.center().y;
+                let y = if after { slot.bottom() } else { slot.top() };
+                fixed_painter.hline(slot.x_range(), y, Stroke::new(2.0_f32, t::focus()));
+                if let Some(drag) = row_drop.dnd_release_payload::<ChannelDrag>() {
+                    move_channel = Some((drag.0, id, after));
+                }
             }
             // A .dwp, sample or plugin dragged here (FL: drop on the rack): the
             // row's middle replaces this channel's sound, its top or bottom
@@ -820,14 +865,14 @@ impl App {
                 match place.flatten() {
                     Some(at) => {
                         let ly = if at == n { slot.top() } else { slot.bottom() };
-                        p.line_segment(
-                            [pos2(body.left() + 4.0, ly), pos2(grid_r, ly)],
+                        fixed_painter.line_segment(
+                            [pos2(left + 4.0, ly), pos2(right, ly)],
                             Stroke::new(2.5_f32, t::text()),
                         );
-                        p.circle_filled(pos2(body.left() + 4.0, ly), 4.0, t::text());
+                        fixed_painter.circle_filled(pos2(left + 4.0, ly), 4.0, t::text());
                     }
                     None => {
-                        p.rect_stroke(
+                        fixed_painter.rect_stroke(
                             row_rect.expand(1.0),
                             6.0,
                             Stroke::new(1.5_f32, t::text()),
@@ -912,10 +957,10 @@ impl App {
                 );
             }
             self.channel_strip(
-                ui,
-                &p,
-                body.left(),
-                grid_l - 8.0,
+                &mut channels_ui,
+                &channel_painter,
+                left,
+                fixed_grid_l - 26.0,
                 mid,
                 id,
                 name,
@@ -925,16 +970,20 @@ impl App {
             );
             // Selector (FL: the bar at the row's right end). Click selects, Ctrl toggles, Shift extends.
             // Hit area is 24x24; the painted bar stays small and centred in it.
-            let sel_hit = Rect::from_center_size(pos2(grid_r + 12.0, mid), vec2(24.0, 24.0));
-            let sr = ui.interact(sel_hit, ui.id().with(("select", id)), Sense::click());
+            let sel_hit = Rect::from_center_size(pos2(fixed_grid_l - 14.0, mid), vec2(24.0, 24.0));
+            let sr = channels_ui.interact(
+                sel_hit,
+                channels_ui.id().with(("select", id)),
+                Sense::click(),
+            );
             let on = self.rack_sel.contains(&id);
-            let hover = kit::hover_amount(ui, &sr);
+            let hover = kit::hover_amount(&channels_ui, &sr);
             let face = if on {
                 t::text()
             } else {
                 kit::mix(t::sunken(), t::strong(), hover)
             };
-            p.rect_filled(sel_hit.shrink2(vec2(7.0, 2.0)), 3.0, face);
+            channel_painter.rect_filled(sel_hit.shrink2(vec2(7.0, 2.0)), 3.0, face);
             if sr
                 .on_hover_text(format!("Select {name}  · Ctrl toggles · Shift extends"))
                 .clicked()
@@ -1023,40 +1072,9 @@ impl App {
             self.graph_editor(ui, &p, lane, &pad_x, pad_w, steps);
         }
 
-        // FL: the + under the channels adds one.
-        let add = Rect::from_min_size(
-            pos2(body.left(), tray_bottom + 14.0 + graph_h),
-            vec2(150.0, kit::CONTROL_H),
-        );
-        let r = ui.interact(add, ui.id().with("add-channel"), Sense::click());
-        kit::paint_button(
-            ui,
-            add,
-            &r,
-            kit::Kind::Ghost,
-            true,
-            "Add channel",
-            |p, face, ink| {
-                kit::icon_plus(p, pos2(face.left() + 16.0, face.center().y), 10.0, ink);
-                p.text(
-                    pos2(face.left() + 30.0, face.center().y),
-                    Align2::LEFT_CENTER,
-                    "Add channel",
-                    t::sans(14.0),
-                    ink,
-                );
-            },
-        );
-        #[cfg(test)]
-        {
-            self.probe.add_channel = Some(add);
+        if let Some((from, to, after)) = move_channel {
+            self.reorder_channel(from, to, after);
         }
-        let r = r.on_hover_text("Add a channel");
-        let add_popup = ui.make_persistent_id("add-channel-menu");
-        if r.clicked() {
-            ui.memory_mut(|m| m.toggle_popup(add_popup));
-        }
-        kit::popup_menu(ui, add_popup, &r, 180.0, |ui| self.add_channel_menu(ui));
 
         // The stroke covers the path since last frame, so a fast move skips no pad.
         if let Some(st) = &mut stroke
@@ -1114,18 +1132,72 @@ impl App {
         if let Some((id, step, shift)) = step_click {
             self.toggle_step(id, step, shift);
         }
-        // A file dropped anywhere else in the rack becomes a new channel.
-        let area = ui.interact(body, ui.id().with("rack-drop"), Sense::hover());
+        let drop_rect = Rect::from_min_max(pos2(left, body.top()), pos2(right, body.bottom()));
+        self.rack_drop(pins, drop_rect);
+    }
+
+    fn rack_add_channel(&mut self, ui: &mut Ui) {
+        let (add, _) = ui.allocate_exact_size(vec2(150.0, kit::CONTROL_H), Sense::hover());
+        let r = ui.interact(add, ui.id().with("add-channel"), Sense::click());
+        kit::paint_button(
+            ui,
+            add,
+            &r,
+            kit::Kind::Ghost,
+            true,
+            "Add channel",
+            |p, face, ink| {
+                kit::icon_plus(p, pos2(face.left() + 16.0, face.center().y), 10.0, ink);
+                p.text(
+                    pos2(face.left() + 30.0, face.center().y),
+                    Align2::LEFT_CENTER,
+                    "Add channel",
+                    t::sans(14.0),
+                    ink,
+                );
+            },
+        );
+        #[cfg(test)]
+        {
+            self.probe.add_channel = Some(add);
+        }
+        let r = r.on_hover_text("Add a channel");
+        let add_popup = ui.make_persistent_id("add-channel-menu");
+        if r.clicked() {
+            ui.memory_mut(|m| m.toggle_popup(add_popup));
+        }
+        kit::popup_menu(ui, add_popup, &r, 180.0, |ui| self.add_channel_menu(ui));
+
+        let drop_rect = Rect::from_min_max(
+            add.min,
+            pos2(ui.max_rect().right(), ui.clip_rect().bottom()),
+        );
+        self.rack_drop(ui, drop_rect);
+    }
+
+    fn rack_drop(&mut self, ui: &Ui, rect: Rect) {
+        let area = ui.interact(rect, ui.id().with("rack-drop"), Sense::hover());
         if let Some(drag) = area.dnd_release_payload::<super::files::FileDrag>() {
             self.load_file(drag.0.clone(), true);
         }
         if let Some(drag) = area.dnd_release_payload::<super::browser::PluginDrag>() {
             self.add_plugin_channel(&drag.0);
         }
-        if self.focus == Some(Tab::Rack) {
-            self.rack_keys(ui);
+    }
+
+    fn reorder_channel(&mut self, from: u64, to: u64, after: bool) {
+        let find = |id| self.song.instruments.iter().position(|inst| inst.id == id);
+        let (Some(source), Some(target)) = (find(from), find(to)) else {
+            return;
+        };
+        let boundary = target + usize::from(after);
+        let destination = boundary - usize::from(source < boundary);
+        if source != destination {
+            self.checkpoint();
+            let channel = self.song.instruments.remove(source);
+            self.song.instruments.insert(destination, channel);
+            self.publish();
         }
-        self.rack_humanize_dialog(ui);
     }
 
     /// Make a channel with `add` (a dropped file or plugin; it lands last)
@@ -1620,32 +1692,23 @@ impl App {
             );
         }
         let mr = mr.on_hover_text(format!(
-            "Mixer insert: {}. Click to choose, Ctrl+wheel or drag to step.",
+            "Mixer insert: {}. Click to choose, scroll or drag to step.",
             self.mixer_name(inst.mixer as usize)
         ));
-        // Only Ctrl+wheel steps the insert: a plain wheel keeps scrolling the rack.
-        let (ctrl_held, wheel) = ui.input(|i| {
-            let held = i.modifiers.command;
-            let raw = i.raw_scroll_delta.y;
-            let smooth = i.smooth_scroll_delta.y;
-            (held, if raw != 0.0 { raw } else { smooth })
-        });
-        let wheel = if mr.hovered() && ctrl_held && wheel != 0.0 {
-            ui.input_mut(|i| {
-                i.smooth_scroll_delta = egui::Vec2::ZERO;
-                i.raw_scroll_delta = egui::Vec2::ZERO;
-            });
-            wheel
-        } else {
-            0.0
-        };
-        let acc_id = ui.id().with(("mixer-wheel", id));
+        let wheel = kit::wheel_steps(ui, &mr);
+        let acc_id = ui.id().with(("mixer-drag", id));
         let drag = kit::captured_drag(ui, &mr);
-        let acc = ui.data(|d| d.get_temp::<f32>(acc_id)).unwrap_or(0.0) + wheel - drag.y * 5.0;
-        let steps = (acc / 50.0).trunc();
-        ui.data_mut(|d| d.insert_temp(acc_id, acc - steps * 50.0));
-        if steps != 0.0 {
-            let to = stepped_insert(inst.mixer, steps as i32, self.song.mixer.len());
+        let remainder = if mr.drag_started() {
+            0.0
+        } else {
+            ui.data(|d| d.get_temp::<f32>(acc_id)).unwrap_or(0.0)
+        };
+        let acc = remainder - drag.y;
+        let drag_steps = (acc / 10.0).trunc();
+        ui.data_mut(|d| d.insert_temp(acc_id, acc - drag_steps * 10.0));
+        let steps = wheel + drag_steps as i32;
+        if steps != 0 {
+            let to = stepped_insert(inst.mixer, steps, self.song.mixer.len());
             // One undo step per drag, or per run of wheel notches (0.6 s apart at most).
             let run_id = ui.id().with(("mixer-step-run", id));
             let now = ui.input(|i| i.time);
@@ -1693,7 +1756,9 @@ impl App {
             pos2(mbox.right() + 4.0, mid - 12.0),
             pos2(right, mid + 12.0),
         );
-        self.channel_label(ui, p, label, id, name, audible);
+        if label.is_positive() {
+            self.channel_label(ui, p, label, id, name, audible);
+        }
     }
 
     /// Channel name button (FL). Click opens the instrument window, right-click
@@ -1740,7 +1805,10 @@ impl App {
         name: &str,
         audible: bool,
     ) {
-        let r = ui.interact(rect, ui.id().with(("channel", id)), Sense::click());
+        let r = ui.interact(rect, ui.id().with(("channel", id)), Sense::click_and_drag());
+        if r.drag_started_by(egui::PointerButton::Primary) {
+            r.dnd_set_drag_payload(ChannelDrag(id));
+        }
         // A file from the browser dropped here loads into this channel.
         if r.dnd_hover_payload::<super::files::FileDrag>().is_some() {
             p.rect_stroke(
@@ -1798,7 +1866,7 @@ impl App {
             .and_then(|i| i.plugin())
             .map(|p| p.id);
         let r = r.on_hover_text(format!(
-            "{name}: click for the {} window, right-click for more",
+            "{name}: click for the {} window, drag to reorder, right-click for more",
             if plugin.is_some() {
                 "plugin's"
             } else {

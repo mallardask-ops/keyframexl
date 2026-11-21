@@ -1,10 +1,34 @@
 # Changelog
 
-Every push to `main` ships a nightly prerelease (`v<next>-nightly.<date>`);
+Every push to `main` ships a nightly prerelease (`v<version>-nightly.<date>` or `v<version>-nightly.rc.<candidate>.<date>`);
 versions below are the stable tags. The 0.2.0 plan with its tasks is in
 [docs/v0.2.0.md](docs/v0.2.0.md).
 
 ## Unreleased (0.2.0)
+
+### Nightly RC2
+
+- Open the Welcome screen from File. The movable Import dialog previews where
+  audio, DirectWave, MIDI, FL Studio projects, and bundles will go.
+- Browse all assets, the library, or files. Drag favorites and root folders to
+  set their order, and dismiss the plugin scan notice or open the Problems list.
+- Drag Channel Rack names to move instruments. The step grid scrolls horizontally
+  while channel controls stay visible. Scroll over the insert or pattern selector
+  to change it, and right-click the pattern selector for pattern actions.
+- Rotary controls, faders, and drag values capture relative mouse motion. Shared
+  window edges resize both panels, and embedded X11 editors respect overlapping
+  application windows.
+- Export audio can be moved and resized. The estimate and actions stay visible
+  while its settings scroll.
+- Demo mode (*View → Demo mode*, `keyframexl --show`): full-canvas Arrange
+  overview fitted to the window and Falling notes waterfall with vocal pitch
+  contours, live lyrics, rhythm pads, lit keyboard, and deterministic video
+  recording.
+- Project info (*File → Project info*, `F11`): resizable tabbed window with live
+  project summary, expanded metadata (album, year, copyright/license, website
+  link, genre/license presets, *Show on open*), live MP3 ID3v2.4 tag preview,
+  dedicated Notes tab, and project musical settings (tempo, swing, time
+  signature, musical key synced with the Piano roll, and Forge sound style).
 
 ### Content
 - **Built-in drum kits.** KFX Core (17 808/909-style sounds) and KFX Chip

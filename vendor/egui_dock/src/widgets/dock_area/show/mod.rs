@@ -491,7 +491,8 @@ impl<Tab> DockArea<'_, Tab> {
                 expand.dim_point += style.separator.extra_interact_width / 2.0;
                 let interact_rect = separator.expand2(expand);
 
-                let response = ui.allocate_rect(interact_rect, Sense::click_and_drag())
+                let id = ui.id().with(("dock-separator", surface_index, node_index));
+                let response = ui.interact(interact_rect, id, Sense::click_and_drag())
                     .on_hover_and_drag_cursor(paste!{ CursorIcon::[<Resize orientation>]});
 
                 let should_respond_to_arrow_keys = ui.input(|i| i.modifiers.command || i.modifiers.shift);
@@ -545,21 +546,27 @@ impl<Tab> DockArea<'_, Tab> {
 
                 ui.painter().rect_filled(separator, CornerRadius::ZERO, color);
 
-                // Update 'fraction' interaction after drawing separator,
-                // otherwise it may overlap on other separator / bodies when
-                // shrunk fast.
-                if let Some(pos) = response.interact_pointer_pos().or(arrow_key_offset.map(|v| separator.center() + v)) {
-                    let dim_point = pos.dim_point;
-                    let delta = arrow_key_offset.unwrap_or(response.drag_delta()).dim_point;
-
-                    if (delta > 0. && dim_point > midpoint && dim_point < rect.max.dim_point)
-                        || (delta < 0. && dim_point < midpoint && dim_point > rect.min.dim_point)
-                    {
-                        let range = rect.max.dim_point - rect.min.dim_point;
-                        let min = (style.separator.extra / range).min(1.0);
-                        let max = 1.0 - min;
-                        let (min, max) = (min.min(max), max.max(min));
-                        *fraction = (*fraction + delta / range).clamp(min, max);
+                let range = rect.dim_size();
+                if range > 0.0 {
+                    let drag_offset_id = id.with("grab-offset");
+                    if response.drag_started() {
+                        if let Some(origin) = ui.input(|i| i.pointer.press_origin()) {
+                            let offset = midpoint - origin.dim_point;
+                            ui.data_mut(|d| d.insert_temp(drag_offset_id, offset));
+                        }
+                    }
+                    let target = if let Some(offset) = arrow_key_offset {
+                        Some(midpoint + offset.dim_point)
+                    } else if response.dragged() {
+                        let offset = ui.data(|d| d.get_temp::<f32>(drag_offset_id)).unwrap_or_default();
+                        response.interact_pointer_pos().map(|pos| pos.dim_point + offset)
+                    } else {
+                        None
+                    };
+                    if let Some(target) = target {
+                        let min = (style.separator.extra / range).clamp(0.0, 0.5);
+                        *fraction = ((target - rect.min.dim_point) / range).clamp(min, 1.0 - min);
+                        ui.ctx().request_repaint();
                     }
                 }
 

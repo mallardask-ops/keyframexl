@@ -1,7 +1,7 @@
 name: Nightly
 
 # Every push to main publishes a nightly prerelease
-# (v<next-patch>-nightly.<UTC yyyymmddHHMM>). Stable releases still come from
+# (v<version>-nightly[.rc.N].<UTC yyyymmddHHMM>). Stable releases still come from
 # pushing a vX.Y.Z tag (release.yml). The in-app updater follows nightlies
 # when Settings → General → Nightly builds is on (the default).
 
@@ -44,8 +44,12 @@ jobs:
             exit 0
           fi
           base=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
-          IFS=. read -r major minor patch <<< "$base"
-          version="${major}.${minor}.$((patch + 1))-nightly.$(date -u +%Y%m%d%H%M)"
+          if [[ "$base" == *-nightly* ]]; then
+            version="${base}.$(date -u +%Y%m%d%H%M)"
+          else
+            IFS=. read -r major minor patch <<< "$base"
+            version="${major}.${minor}.$((patch + 1))-nightly.$(date -u +%Y%m%d%H%M)"
+          fi
           prev=$(git tag --sort=-creatordate --merged HEAD | grep -E '^v[0-9]' | head -n1 || true)
           {
             echo "skip=false"

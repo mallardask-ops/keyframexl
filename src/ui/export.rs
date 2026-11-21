@@ -479,6 +479,7 @@ impl App {
             d.error.clone(),
         );
         let selection = d.selection && song_mode && self.song.loop_range.is_some();
+        let mut open = true;
         let mut close = false;
         let mut start = false;
         let mut pick_path = false;
@@ -510,9 +511,11 @@ impl App {
         let mut prefs = self.export_prefs.clone();
         egui::Window::new("Export audio")
             .collapsible(false)
-            .resizable(false)
-            .default_width(440.0)
-            .anchor(Align2::CENTER_TOP, vec2(0.0, 110.0))
+            .open(&mut open)
+            .resizable(true)
+            .default_size(vec2(490.0, 575.0))
+            .min_size(vec2(425.0, 260.0))
+            .default_pos(egui::pos2(ctx.screen_rect().center().x - 245.0, 110.0))
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 6.0;
                 let label = |ui: &mut egui::Ui, text: &str| {
@@ -520,20 +523,24 @@ impl App {
                     let r = ui.allocate_exact_size(vec2(ui.available_width(), 14.0), egui::Sense::hover()).0;
                     kit::caps(ui.painter(), r.left_center(), Align2::LEFT_CENTER, text, 12.0, t::faint());
                 };
-                ui.add_enabled_ui(!running, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height((ui.available_height() - 96.0).max(130.0))
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| ui.add_enabled_ui(!running, |ui| {
                     label(ui, "file");
                     // The name matters most; the folder is context.
                     let stem = path.file_stem().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
                     let folder = path.parent().map(|p| p.display().to_string()).unwrap_or_default();
                     ui.horizontal(|ui| {
-                        let shown = kit::elide(ui.painter(), &stem, t::medium(14.0), 300.0);
-                        ui.label(RichText::new(shown).font(t::medium(14.0)).color(t::text())).on_hover_text(path.display().to_string());
+                        let shown = kit::elide(ui.painter(), &stem, t::medium(16.0), (ui.available_width() - 90.0).max(70.0));
+                        ui.label(RichText::new(shown).font(t::medium(16.0)).color(t::text())).on_hover_text(path.display().to_string());
                         if kit::tool_button(ui, "Change…", kit::Kind::Ghost, true).clicked() {
                             pick_path = true;
                         }
                     });
                     let folder = kit::elide(ui.painter(), &folder, t::sans(12.0), 400.0);
                     ui.label(RichText::new(format!("in {folder}")).font(t::sans(12.0)).color(t::faint()));
+                    ui.separator();
                     label(ui, "source");
                     let mut items = vec![format!("Pattern “{pattern_name}”  {}", clock(len_pattern)), format!("Song  {}", clock(len_song))];
                     if let Some((a, b, secs)) = &sel {
@@ -556,6 +563,7 @@ impl App {
                         prefs.tail = Tail::ALL[i];
                     }
                     ui.label(RichText::new(prefs.tail.hint()).font(t::sans(12.0)).color(t::faint()));
+                    ui.separator();
                     label(ui, "formats");
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("WAV").font(t::sans(13.0)).color(t::muted()));
@@ -585,15 +593,42 @@ impl App {
                             ui.label(RichText::new("Needs LAME (libmp3lame): install the lame package").font(t::sans(12.0)).color(t::faint()));
                         }
                     });
+                    let mut open_project_info = false;
                     if prefs.mp3.is_some() && keyframexl::mp3::available() {
+                        let tr = crate::i18n::strings(self.settings.general.language);
                         let i = &self.song.info;
-                        let tags = [("title", &i.title), ("author", &i.author), ("genre", &i.genre)]
-                            .iter()
-                            .filter(|(_, v)| !v.trim().is_empty())
-                            .map(|(k, v)| format!("{k} “{}”", v.trim()))
-                            .collect::<Vec<_>>();
-                        let note = if tags.is_empty() { "MP3 tags: none yet · FILE → Project info (F11)".to_string() } else { format!("MP3 tags: {}", tags.join(", ")) };
-                        ui.label(RichText::new(note).font(t::sans(12.0)).color(t::faint()));
+                        let mut tags = [
+                            ("title", &i.title),
+                            ("author", &i.author),
+                            ("album", &i.album),
+                            ("genre", &i.genre),
+                            ("year", &i.year),
+                            ("copyright", &i.copyright),
+                        ]
+                        .iter()
+                        .filter(|(_, v)| !v.trim().is_empty())
+                        .map(|(k, v)| format!("{k} “{}”", v.trim()))
+                        .collect::<Vec<_>>();
+                        if !i.url.trim().is_empty() {
+                            tags.push("url".into());
+                        }
+                        if !i.comments.trim().is_empty() {
+                            tags.push("comments".into());
+                        }
+                        let note = if tags.is_empty() {
+                            "MP3 tags: none yet · FILE → Project info (F11)".to_string()
+                        } else {
+                            format!("MP3 tags: {}", tags.join(", "))
+                        };
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(RichText::new(note).font(t::sans(12.0)).color(t::faint()));
+                            if kit::tool_button(ui, tr.info_edit_from_export, kit::Kind::Ghost, !running).clicked() {
+                                open_project_info = true;
+                            }
+                        });
+                    }
+                    if open_project_info {
+                        self.open_info(ui.ctx());
                     }
                     label(ui, "options");
                     ui.checkbox(&mut prefs.normalize, RichText::new("Normalize to −1 dB peak").font(t::sans(13.0)));
@@ -602,12 +637,12 @@ impl App {
                         .on_disabled_hover_text("Dither only applies to 16-bit files");
                     ui.checkbox(&mut prefs.split, RichText::new(format!("Split mixer tracks ({stem_count} stems)")).font(t::sans(13.0)))
                         .on_hover_text("Also a file per used mixer insert, named after the track. Master effects stay out of the stems, as in FL.");
-                });
+                }));
                 // Size estimate (FLAC: upper bound) and the result line.
                 let secs = if selection { sel.as_ref().map_or(len_song, |s| s.2) } else if song_mode { len_song } else { len_pattern } + if prefs.tail == Tail::Leave { 2.0 } else { 0.0 };
                 let secs = secs * if prefs.split { 1.0 + stem_count as f64 } else { 1.0 };
                 let bytes: u64 = prefs.wav.into_iter().chain(prefs.flac).chain(prefs.mp3).map(|f| (f.bytes_per_second() as f64 * secs) as u64).sum();
-                ui.add_space(4.0);
+                ui.separator();
                 let rate = self.rate();
                 let mb = bytes as f64 / 1e6 * rate as f64 / render::RATE as f64;
                 ui.label(RichText::new(format!("About {mb:.1} MB · {:.1} kHz stereo", rate as f64 / 1000.0)).font(t::sans(12.0)).color(t::faint()));
@@ -621,7 +656,7 @@ impl App {
                 ui.horizontal(|ui| {
                     let none = prefs.wav.is_none() && prefs.flac.is_none() && (prefs.mp3.is_none() || !keyframexl::mp3::available());
                     if !running {
-                        let r = kit::button(ui, "Start", kit::Kind::Primary, !none);
+                        let r = kit::button(ui, "Export", kit::Kind::Primary, !none);
                         let r = if none { r.on_disabled_hover_text("Choose WAV, FLAC or MP3") } else { r };
                         if r.clicked() || (!none && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
                             start = true;
@@ -660,7 +695,7 @@ impl App {
         if start {
             self.start_export();
         }
-        if close {
+        if close || !open {
             match self.export.as_ref().and_then(|d| d.running.as_ref()) {
                 // Cancel while rendering stops the worker; the dialog stays to say so.
                 Some((_, cancel)) => cancel.store(true, Ordering::Relaxed),

@@ -121,15 +121,6 @@ pub(crate) fn stage_import(song: &mut keyframexl::sequence::Song, ids: &[u64]) -
 }
 
 impl App {
-    pub(crate) fn import_midi_dialog(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("MIDI", &["mid", "midi"])
-            .pick_file()
-        {
-            self.import_midi(&path);
-        }
-    }
-
     /// One undo step; sounds load in the background without extra steps.
     pub(crate) fn import_midi(&mut self, path: &Path) {
         let bytes = match std::fs::read(path) {

@@ -561,7 +561,7 @@ impl egui_dock::TabViewer for Viewer<'_> {
         match tab {
             // The playlist scrolls its own grid; its track column stays put.
             Tab::Playlist => [false, false],
-            Tab::Rack => [true, true],
+            Tab::Rack => [false, false],
             Tab::Roll { .. } => [false, false],
             Tab::Instrument { .. } => [false, true],
             Tab::Mixer => [true, false],
@@ -600,9 +600,9 @@ pub fn dock_style(style: &egui::Style) -> egui_dock::Style {
     let mut s = egui_dock::Style::from_egui(style);
     s.dock_area_padding = Some(Margin::same(8));
     s.main_surface_border_stroke = Stroke::NONE;
-    s.separator.width = 1.0;
-    s.separator.extra = 0.0;
-    s.separator.extra_interact_width = 7.0;
+    s.separator.width = 3.0;
+    s.separator.extra = 96.0;
+    s.separator.extra_interact_width = 9.0;
     s.separator.color_idle = t::edge();
     s.separator.color_hovered = t::strong();
     s.separator.color_dragged = t::text();

@@ -1262,7 +1262,7 @@ impl App {
                 ui.label(egui::RichText::new(note).font(t::sans(12.0)).color(t::faint()));
                 // 480 ticks = one beat (PPQ 480), 120 = one step.
                 let ticks = |ui: &mut Ui, v: &mut i64, max: i64| {
-                    ui.add(egui::DragValue::new(v).range(0..=max).speed(5.0).custom_formatter(|x, _| format!("{:.2} steps", x / STEP as f64)).custom_parser(|s| s.trim().trim_end_matches("steps").trim().parse::<f64>().ok().map(|x| x * STEP as f64)));
+                    kit::drag_value(ui, egui::DragValue::new(v).range(0..=max).speed(5.0).custom_formatter(|x, _| format!("{:.2} steps", x / STEP as f64)).custom_parser(|s| s.trim().trim_end_matches("steps").trim().parse::<f64>().ok().map(|x| x * STEP as f64)));
                 };
                 egui::Grid::new("batch-note-grid").num_columns(2).spacing(vec2(14.0, 8.0)).show(ui, |ui| {
                     let label = |ui: &mut Ui, s: &str| {
@@ -1288,10 +1288,10 @@ impl App {
                             ticks(ui, &mut params.0, 3840);
                             ui.end_row();
                             label(ui, "Velocity ±");
-                            ui.add(egui::DragValue::new(&mut params.1).range(0..=127));
+                            kit::drag_value(ui, egui::DragValue::new(&mut params.1).range(0..=127));
                             ui.end_row();
                             label(ui, "Seed");
-                            ui.add(egui::DragValue::new(&mut params.5));
+                            kit::drag_value(ui, egui::DragValue::new(&mut params.5));
                             ui.end_row();
                         }
                         "Flip…" => {
@@ -1305,16 +1305,16 @@ impl App {
                         "Limit…" => {
                             label(ui, "Velocity");
                             ui.horizontal(|ui| {
-                                ui.add(egui::DragValue::new(&mut params.0).range(1..=127));
+                                kit::drag_value(ui, egui::DragValue::new(&mut params.0).range(1..=127));
                                 ui.label("to");
-                                ui.add(egui::DragValue::new(&mut params.1).range(1..=127));
+                                kit::drag_value(ui, egui::DragValue::new(&mut params.1).range(1..=127));
                             });
                             ui.end_row();
                             label(ui, "Pitch");
                             ui.horizontal(|ui| {
-                                ui.add(egui::DragValue::new(&mut params.2).range(0..=127).custom_formatter(|x, _| note_name(x as u8)));
+                                kit::drag_value(ui, egui::DragValue::new(&mut params.2).range(0..=127).custom_formatter(|x, _| note_name(x as u8)));
                                 ui.label("to");
-                                ui.add(egui::DragValue::new(&mut params.3).range(0..=127).custom_formatter(|x, _| note_name(x as u8)));
+                                kit::drag_value(ui, egui::DragValue::new(&mut params.3).range(0..=127).custom_formatter(|x, _| note_name(x as u8)));
                             });
                             ui.end_row();
                         }

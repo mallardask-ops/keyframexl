@@ -808,16 +808,163 @@ enum TypeAt {
     Below,
 }
 
-/// Pointer movement for a drag gesture, in points: the plain per-frame delta.
-/// (An older version warped the cursor back with `CursorPosition` every frame;
-/// on XWayland the warp eats the motion events, so every knob froze with its
-/// cursor hidden and no edit ever landed.)
+#[derive(Clone, Copy)]
+struct PointerCapture {
+    widget: egui::Id,
+    origin: Option<egui::Pos2>,
+    frame: u64,
+    absolute_drag: bool,
+}
+
+const CAPTURE_ID: &str = "kfxl-relative-pointer";
+const X11_CAPTURE: &str = "kfxl-x11-pointer";
+
 pub(crate) fn captured_drag(ui: &Ui, r: &Response) -> egui::Vec2 {
-    if r.dragged() {
-        ui.input(|i| i.pointer.delta())
-    } else {
-        egui::Vec2::ZERO
+    if !begin_pointer_capture(ui, r, false) {
+        return egui::Vec2::ZERO;
     }
+    // Native motion is in physical pixels and keeps arriving at screen edges.
+    ui.input(|i| i.pointer.motion().map(|d| d / i.pixels_per_point))
+        .unwrap_or_else(|| r.drag_delta())
+}
+
+/// Keep DragValue's native text editing and rounding, but feed its drag
+/// calculation from the same relative motion as the rotary controls.
+pub(crate) fn drag_value(ui: &mut Ui, widget: egui::DragValue<'_>) -> Response {
+    let r = ui.add(widget);
+    begin_pointer_capture(ui, &r, true);
+    r
+}
+
+fn begin_pointer_capture(ui: &Ui, r: &Response, absolute_drag: bool) -> bool {
+    if !r.dragged_by(egui::PointerButton::Primary) || !ui.input(|i| i.focused) {
+        return false;
+    }
+    let ctx = ui.ctx();
+    let key = egui::Id::new(CAPTURE_ID);
+    let mut capture: Option<PointerCapture> = ctx.data(|d| d.get_temp(key));
+    if capture.is_none_or(|c| c.widget != r.id) {
+        let x11 = ctx.data(|d| d.get_temp::<bool>(egui::Id::new(X11_CAPTURE))) == Some(true);
+        let origin = x11
+            .then(|| ui.input(|i| i.pointer.press_origin()))
+            .flatten();
+        ctx.send_viewport_cmd(egui::ViewportCommand::CursorGrab(if x11 {
+            egui::viewport::CursorGrab::Confined
+        } else {
+            egui::viewport::CursorGrab::Locked
+        }));
+        capture = Some(PointerCapture {
+            widget: r.id,
+            origin,
+            frame: 0,
+            absolute_drag,
+        });
+    }
+    if let Some(mut capture) = capture {
+        capture.frame = ctx.cumulative_pass_nr();
+        ctx.data_mut(|d| d.insert_temp(key, capture));
+    }
+    true
+}
+
+pub(crate) fn relative_value_input(ctx: &egui::Context, raw: &mut egui::RawInput) {
+    let capture = ctx.data(|d| d.get_temp::<PointerCapture>(egui::Id::new(CAPTURE_ID)));
+    if !raw.focused
+        || !capture.is_some_and(|c| c.absolute_drag)
+        || raw.events.iter().any(|e| {
+            matches!(
+                e,
+                egui::Event::PointerButton {
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    ..
+                }
+            )
+        })
+    {
+        return;
+    }
+    let Some(pos) = ctx.pointer_latest_pos() else {
+        return;
+    };
+    let mut motion = None;
+    for event in &raw.events {
+        if let egui::Event::MouseMoved(delta) = event {
+            *motion.get_or_insert(egui::Vec2::ZERO) += *delta;
+        }
+    }
+    if let Some(motion) = motion {
+        raw.events.retain(|event| {
+            !matches!(
+                event,
+                egui::Event::PointerMoved(_) | egui::Event::PointerGone
+            )
+        });
+        raw.events.push(egui::Event::PointerMoved(
+            pos + motion / ctx.pixels_per_point(),
+        ));
+    }
+}
+
+pub(crate) fn finish_pointer_capture(ctx: &egui::Context, x11: bool) {
+    let key = egui::Id::new(CAPTURE_ID);
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(X11_CAPTURE), x11));
+    let Some(capture) = ctx.data(|d| d.get_temp::<PointerCapture>(key)) else {
+        return;
+    };
+    let focused = ctx.input(|i| i.focused);
+    if capture.frame == ctx.cumulative_pass_nr() && focused {
+        ctx.set_cursor_icon(egui::CursorIcon::None);
+        return;
+    }
+    ctx.send_viewport_cmd(egui::ViewportCommand::CursorGrab(
+        egui::viewport::CursorGrab::None,
+    ));
+    if focused && let Some(origin) = capture.origin {
+        ctx.send_viewport_cmd(egui::ViewportCommand::CursorPosition(origin));
+    }
+    ctx.data_mut(|d| d.remove::<PointerCapture>(key));
+}
+
+/// Consume a wheel gesture over a selector. Preserve fractional trackpad input.
+pub(crate) fn wheel_steps(ui: &Ui, r: &Response) -> i32 {
+    if !r.hovered() || ui.memory(|m| m.any_popup_open()) {
+        return 0;
+    }
+    let delta = ui.input_mut(|i| {
+        let y = i.raw_scroll_delta.y;
+        if y == 0.0 {
+            return 0.0;
+        }
+        let lines: f32 = i
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Line,
+                    delta,
+                    ..
+                } => Some(delta.y),
+                _ => None,
+            })
+            .sum();
+        i.raw_scroll_delta.y = 0.0;
+        i.smooth_scroll_delta.y = 0.0;
+        if lines == 0.0 { y } else { lines * 18.0 }
+    });
+    if delta == 0.0 {
+        return 0;
+    }
+    let key = r.id.with("wheel-remainder");
+    let (mut rest, last): (f32, f64) = ui.data(|d| d.get_temp(key)).unwrap_or_default();
+    let now = ui.input(|i| i.time);
+    if rest * delta < 0.0 || now - last > 0.6 {
+        rest = 0.0;
+    }
+    let travel = rest + delta;
+    let steps = (travel / 18.0).trunc();
+    ui.data_mut(|d| d.insert_temp(key, (travel - steps * 18.0, now)));
+    (steps as i32).clamp(-32, 32)
 }
 
 /// True on the first change of a text field in one focus run: the moment to

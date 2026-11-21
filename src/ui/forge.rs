@@ -1638,7 +1638,7 @@ fn curve_editor(
                 c.points[i].v = v;
             }
             Grab::Bend(i) if i + 1 < c.points.len() => {
-                let dy = resp.drag_delta().y / 60.0;
+                let dy = kit::captured_drag(ui, &resp).y / 60.0;
                 let rising = c.points[i + 1].v >= c.points[i].v;
                 let p = &mut c.points[i];
                 p.tension = (p.tension + if rising { dy } else { -dy }).clamp(-1.0, 1.0);

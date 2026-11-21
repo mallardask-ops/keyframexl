@@ -19,6 +19,9 @@ pub const SHOWN: [&str; 8] = ["wav", "flac", "ogg", "dwp", "kfxl", "flp", "mid",
 #[derive(Clone, Debug)]
 pub struct FileDrag(pub PathBuf);
 
+#[derive(Clone)]
+struct RootOrder(PathBuf);
+
 #[derive(Clone, Debug)]
 pub struct Entry {
     pub path: PathBuf,
@@ -477,7 +480,9 @@ impl App {
             );
         }
         let mut action: Option<(PathBuf, &str)> = None;
+        let mut order = None;
         for (depth, e, open) in &rows {
+            let is_root = *depth == 0 && e.dir && filter.is_empty();
             let w = ui.available_width();
             let (rect, _) = ui.allocate_exact_size(vec2(w, ROW_H), Sense::hover());
             let resp = ui.interact(
@@ -485,6 +490,14 @@ impl App {
                 ui.id().with(("file", &e.path)),
                 Sense::click_and_drag(),
             );
+            if is_root {
+                if resp.drag_started_by(egui::PointerButton::Primary) {
+                    resp.dnd_set_drag_payload(RootOrder(e.path.clone()));
+                }
+                if let Some((from, after)) = super::browser::sort_drop::<RootOrder>(ui, &resp) {
+                    order = Some((from, e.path.clone(), after));
+                }
+            }
             let p = ui.painter();
             let current = self.files.selected.as_ref() == Some(&e.path);
             if current {
@@ -573,7 +586,11 @@ impl App {
             if resp.double_clicked() && !e.dir {
                 action = Some((e.path.clone(), "load"));
             }
-            let is_root = *depth == 0 && e.dir && filter.is_empty();
+            let resp = if is_root {
+                resp.on_hover_text("Drag to reorder folders")
+            } else {
+                resp
+            };
             resp.context_menu(|ui| {
                 kit::menu_style(ui);
                 let key = e.path.display().to_string();
@@ -604,6 +621,11 @@ impl App {
                     ui.close_menu();
                 }
             });
+        }
+        if let Some((from, to, after)) = order
+            && super::browser::reorder(&mut self.files.roots, &from.0, &to, after)
+        {
+            self.files.save();
         }
         self.files_keys(ui, &rows, &mut action);
         if let Some((path, what)) = action {

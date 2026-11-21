@@ -314,6 +314,9 @@ impl App {
         if item(ui, tr.file_open, "Ctrl+O", true, "") {
             self.request(super::Pending::Open(None));
         }
+        if item(ui, tr.help_welcome, "", true, "") {
+            self.welcome_open = true;
+        }
         self.recent_menu(ui);
         self.recover_item(ui);
         ui.separator();
@@ -326,7 +329,7 @@ impl App {
         if item(ui, tr.file_save_new_version, "Ctrl+N", true, "") {
             self.save_new_version();
         }
-        if item(ui, "Project info…", "F11", true, "") {
+        if item(ui, tr.file_project_info, "F11", true, "") {
             self.toggle_info(ui.ctx());
         }
         ui.separator();
@@ -343,29 +346,9 @@ impl App {
                 self.export_project_bundle();
             }
         });
-        ui.menu_button(RichText::new("Import").font(t::sans(13.0)), |ui| {
-            kit::menu_style(ui);
-            if item(
-                ui,
-                "Sampler preset (.dwp) into a new channel…",
-                "",
-                true,
-                "",
-            ) {
-                let id = self.add_sampler();
-                self.load_preset_dialog(id);
-            }
-            if item(ui, tr.file_import_midi, "", true, "") {
-                self.import_midi_dialog();
-            }
-            if item(ui, tr.file_import_flp, "", true, "") {
-                self.import_flp_dialog();
-            }
-            ui.separator();
-            if item(ui, tr.file_import_bundle, "", true, "") {
-                self.import_project_bundle();
-            }
-        });
+        if item(ui, tr.file_import, "", true, "") {
+            self.import_dialog = Some(Default::default());
+        }
         ui.separator();
         if item(ui, tr.file_quit, "", true, "") {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -451,6 +434,12 @@ impl App {
         if item(ui, "Find next empty", "F4", true, "") {
             self.next_empty_pattern();
         }
+        ui.separator();
+        self.selected_pattern_menu(ui);
+    }
+
+    pub(super) fn selected_pattern_menu(&mut self, ui: &mut Ui) {
+        kit::menu_style(ui);
         if item(ui, "Rename…", "F2", true, "") {
             self.start_rename();
         }
@@ -530,6 +519,16 @@ impl App {
         if check(ui, "Follow playhead", "", self.follow) {
             self.follow = !self.follow;
         }
+        let tr = crate::i18n::strings(self.settings.general.language);
+        ui.menu_button(RichText::new(tr.view_demo_mode).font(t::sans(13.0)), |ui| {
+            kit::menu_style(ui);
+            if item(ui, tr.show_arrange, "", true, "") {
+                self.enter_show(super::show::ShowView::Arrange, Some(ui.ctx()));
+            }
+            if item(ui, tr.show_notes, "", true, "") {
+                self.enter_show(super::show::ShowView::Notes, Some(ui.ctx()));
+            }
+        });
         ui.menu_button(RichText::new("Deck monitor").font(t::sans(13.0)), |ui| {
             kit::menu_style(ui);
             for mode in crate::settings::DeckMonitor::ALL {

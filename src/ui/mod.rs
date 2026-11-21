@@ -10,6 +10,7 @@ mod files;
 mod forge;
 mod fx_response;
 mod fx_views;
+mod import_dialog;
 mod instrument;
 mod kit;
 mod library;
@@ -30,6 +31,7 @@ mod sampler;
 mod script;
 mod settings_ui;
 mod shortcuts;
+mod show;
 mod synth;
 mod tempo_lane;
 mod updater_ui;
@@ -371,12 +373,17 @@ pub struct App {
     /// Startup / hub welcome screen state and visibility.
     pub(crate) welcome: welcome::WelcomeState,
     pub(crate) welcome_open: bool,
+    import_dialog: Option<import_dialog::ImportDialog>,
     /// Hosted plugins (VST3, VST2, CLAP).
     pub(crate) plugins: plugins_ui::PluginState,
     /// Built-in effects open in their own windows: (mixer track, slot).
     pub(crate) fx_windows: Vec<(usize, usize)>,
     /// Play was pressed with Record and Wait for input on: the first note starts it.
     pub(crate) waiting_input: bool,
+    /// Full-canvas Demo / Showcase overlay state.
+    pub(crate) show: Option<show::ShowState>,
+    /// Open Project info on the next UI frame (e.g. when a loaded project sets `show_on_open`).
+    pub(crate) open_info_next: bool,
     #[cfg(test)]
     pub(crate) probe: Probe,
 }
@@ -661,9 +668,19 @@ impl App {
                 app.song.info = keyframexl::sequence::ProjectInfo {
                     title: "Нічне місто".into(),
                     author: "Demo Artist".into(),
+                    album: "Night Sessions".into(),
                     genre: "Deep House".into(),
+                    year: "2026".into(),
+                    copyright: "CC BY 4.0".into(),
+                    url: "https://example.com/night-city".into(),
                     comments: "Kick from Kit 3, pad resampled from take 2.".into(),
+                    show_on_open: false,
+                    scale: Some(keyframexl::scale::Scale {
+                        root: 9,
+                        kind: keyframexl::scale::Kind::Minor,
+                    }),
                 };
+                app.roll_scale = app.song.info.scale;
                 app.toggle_info(&cc.egui_ctx);
             }
             // KFXL_CAPTURE_UPDATE=notes.md[:stage] opens the update window on a
@@ -1175,11 +1192,42 @@ impl App {
                 0,
             ));
         }
+        let show_view = match std::env::var("KFXL_SHOW_VIEW").as_deref() {
+            Ok("notes") | Ok("fall") => show::ShowView::Notes,
+            _ => show::ShowView::Arrange,
+        };
+        if kind == Some("--capture-show") {
+            app.enter_show(show_view, Some(&cc.egui_ctx));
+            if let Some(st) = &mut app.show {
+                st.hud = std::env::var_os("KFXL_SHOW_HUD").is_some();
+            }
+            let tick_override = std::env::var("KFXL_SHOW_TICK")
+                .ok()
+                .and_then(|v| v.parse::<i64>().ok())
+                .or_else(|| {
+                    std::env::var("KFXL_CAPTURE_POS")
+                        .ok()
+                        .and_then(|v| v.parse::<i64>().ok())
+                        .map(|bar| bar * keyframexl::sequence::BAR)
+                });
+            if let Some(tk) = tick_override {
+                let f = app.tick_frame_at(tk.max(0));
+                if let Some(st) = &mut app.show {
+                    st.clock = show::ShowClock::Fixed(f);
+                }
+            }
+        } else if !capture && args.iter().skip(1).any(|a| a == "--show") {
+            if !opened_cli {
+                app.open_demo_song();
+            }
+            app.enter_show(show_view, Some(&cc.egui_ctx));
+        }
         app
     }
 
     pub(crate) fn with_song(song: Song, audio: Option<Audio>) -> Self {
         let selected = song.patterns.first().map(|p| p.id).unwrap_or(1);
+        let roll_scale = song.info.scale;
         Self {
             song,
             history: Vec::new(),
@@ -1215,7 +1263,7 @@ impl App {
             mix_solo: None,
             note_color: 0,
             porta_new: false,
-            roll_scale: None,
+            roll_scale,
             join_preset: None,
             auto_open: None,
             auto_sent: std::collections::HashMap::new(),
@@ -1288,9 +1336,12 @@ impl App {
             updater: Default::default(),
             welcome: Default::default(),
             welcome_open: false,
+            import_dialog: None,
             plugins: Default::default(),
             fx_windows: Vec::new(),
             waiting_input: false,
+            show: None,
+            open_info_next: false,
             #[cfg(test)]
             probe: Probe::default(),
         }
@@ -1821,6 +1872,8 @@ impl App {
         self.checkpoint();
         self.song = Song::default();
         self.selected = self.song.patterns[0].id;
+        self.roll_scale = None;
+        self.open_info_next = false;
         self.clip = None;
         self.path = None;
         self.saved_edits = self.edits;
@@ -1871,7 +1924,7 @@ impl App {
         else {
             return;
         };
-        self.import_bundle_path(&zip_path);
+        self.request(Pending::Open(Some(zip_path)));
     }
 
     fn import_bundle_path(&mut self, zip_path: &std::path::Path) {
@@ -1892,6 +1945,8 @@ impl App {
                 self.unload_all_plugins();
                 self.checkpoint();
                 self.selected = imported.song.patterns[0].id;
+                self.roll_scale = imported.song.info.scale;
+                self.open_info_next = imported.song.info.show_on_open;
                 self.song = imported.song;
                 self.clip = None;
                 self.path = Some(imported.project_path.clone());
@@ -1944,6 +1999,8 @@ impl App {
                 self.unload_all_plugins();
                 self.checkpoint();
                 self.selected = s.patterns[0].id;
+                self.roll_scale = s.info.scale;
+                self.open_info_next = s.info.show_on_open;
                 self.song = s;
                 self.clip = None;
                 self.path = Some(path.to_path_buf());
@@ -1964,7 +2021,7 @@ impl App {
             .add_filter("FL Studio project", &["flp"])
             .pick_file()
         {
-            self.import_flp(&path);
+            self.request(Pending::Open(Some(path)));
         }
     }
 
@@ -1984,6 +2041,8 @@ impl App {
             self.instrument = id;
             self.roll_inst = id;
         }
+        self.roll_scale = song.info.scale;
+        self.open_info_next = false;
         self.song = song;
         self.clip = None;
         self.path = None;
@@ -3407,7 +3466,8 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        kit::relative_value_input(ctx, raw);
         if let Some(s) = &mut self.script {
             s.feed(raw.time.unwrap_or(0.0), raw);
         }
@@ -3423,6 +3483,7 @@ impl eframe::App for App {
         if !self.rec.parts.is_empty() {
             self.finish_takes();
         }
+        self.shutdown_show();
         self.shutdown_plugins();
         if let Some(exe) = self.relaunch.take()
             && let Err(e) = crate::updater::relaunch_binary(&exe)
@@ -3496,6 +3557,10 @@ impl eframe::App for App {
         self.midi_learn_frame(ctx);
         self.audio_watch(ctx);
         self.plugins_frame();
+        if self.show_overlay(ctx) {
+            self.plugins_end_frame(ctx);
+            return;
+        }
         self.poll_import();
         self.poll_flp_freeze();
         self.poll_preview();
@@ -3585,6 +3650,7 @@ impl eframe::App for App {
         self.manual_window(ctx);
         self.rename_window(ctx);
         self.export_window(ctx);
+        self.import_window(ctx);
         self.fx_windows_ui(ctx);
         self.automation_frame(ctx);
         self.automation_window(ctx);
@@ -3613,7 +3679,8 @@ impl eframe::App for App {
         self.prune_tabs();
         self.autosave_layout(ctx.input(|i| i.time));
         self.drop_overlay(ctx);
-        self.plugins_end_frame();
+        self.plugins_end_frame(ctx);
+        kit::finish_pointer_capture(ctx, self.plugins.parent.is_some());
         self.capture_frame(ctx);
         if std::env::var_os("KFXL_FRAME_TRACE").is_some() {
             let ms = frame_start.elapsed().as_secs_f64() * 1000.0;
@@ -3650,6 +3717,8 @@ mod tests;
 mod menu_tests;
 #[cfg(test)]
 mod playlist_tests;
+#[cfg(test)]
+mod show_tests;
 
 /// The next free `name_N.kfxl` beside `path` (FL: Save new version).
 pub(crate) fn next_version(path: &std::path::Path) -> std::path::PathBuf {

@@ -811,7 +811,8 @@ impl App {
             if i >= 1_000_000 {
                 let k = i - 1_000_000;
                 if let Some(q) = e.points.get_mut(k) {
-                    q.tension = (q.tension - resp.drag_delta().y / 120.0).clamp(-1.0, 1.0);
+                    q.tension =
+                        (q.tension - kit::captured_drag(ui, &resp).y / 120.0).clamp(-1.0, 1.0);
                 }
             } else if i < e.points.len() {
                 // The first point stays at the start; the others keep their order.

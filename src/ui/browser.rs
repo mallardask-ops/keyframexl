@@ -10,6 +10,54 @@ use std::path::{Path, PathBuf};
 #[derive(Clone)]
 pub(crate) struct PluginDrag(pub Scanned);
 
+#[derive(Clone)]
+struct FavoriteOrder(String);
+
+pub(super) fn reorder<T: PartialEq>(
+    items: &mut Vec<T>,
+    source: &T,
+    target: &T,
+    after: bool,
+) -> bool {
+    let (Some(from), Some(to)) = (
+        items.iter().position(|item| item == source),
+        items.iter().position(|item| item == target),
+    ) else {
+        return false;
+    };
+    let boundary = to + usize::from(after);
+    let destination = boundary - usize::from(from < boundary);
+    if destination == from {
+        return false;
+    }
+    let item = items.remove(from);
+    items.insert(destination, item);
+    true
+}
+
+pub(super) fn sort_drop<T: Send + Sync + 'static>(
+    ui: &Ui,
+    row: &egui::Response,
+) -> Option<(std::sync::Arc<T>, bool)> {
+    if row.dnd_hover_payload::<T>().is_some()
+        && let Some(pos) = ui.ctx().pointer_interact_pos()
+    {
+        let after = pos.y >= row.rect.center().y;
+        let y = if after {
+            row.rect.bottom()
+        } else {
+            row.rect.top()
+        };
+        ui.painter().hline(
+            row.rect.x_range(),
+            y,
+            egui::Stroke::new(2.0_f32, t::focus()),
+        );
+        return row.dnd_release_payload::<T>().map(|source| (source, after));
+    }
+    None
+}
+
 /// What a click on a favorite or tagged asset asks for.
 enum AssetAct {
     AddPlugin(Scanned),
@@ -289,6 +337,23 @@ impl App {
 
     fn browser_body(&mut self, ui: &mut Ui) {
         ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("Browser")
+                    .font(t::medium(15.0))
+                    .color(t::text()),
+            );
+            if self.previewing.is_some() {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if super::kit::tool_button(ui, "Stop", super::kit::Kind::Ghost, true)
+                        .on_hover_text("Stop sample preview")
+                        .clicked()
+                    {
+                        self.stop_preview();
+                    }
+                });
+            }
+        });
         let id = egui::Id::new("kfxl-browser-search");
         let mut q: String = ui.ctx().data(|d| d.get_temp(id).unwrap_or_default());
         let response = ui.add(
@@ -302,12 +367,31 @@ impl App {
             q.clear();
         }
         ui.ctx().data_mut(|d| d.insert_temp(id, q.clone()));
-        ui.add_space(4.0);
+        let tab_id = egui::Id::new("kfxl-browser-source");
+        let mut tab = ui.data(|d| d.get_temp::<usize>(tab_id)).unwrap_or_default();
+        if let (Some(next), _) = super::kit::chips(
+            ui,
+            "browser-source",
+            &["All", "Library", "Files"],
+            tab,
+            None,
+        ) {
+            tab = next;
+            ui.data_mut(|d| d.insert_temp(tab_id, tab));
+        }
+        ui.separator();
+        if tab != 2 {
+            self.plugin_warning(ui);
+        }
         egui::ScrollArea::vertical()
-            .id_salt("browser-list")
+            .id_salt(("browser-list", tab))
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                self.favorites_section(ui);
+                if tab == 2 {
+                    self.files_tab(ui, &q);
+                    return;
+                }
+                self.favorites_section(ui, &q);
                 self.tags_section(ui, &q);
                 // Instruments and effects stay in their own groups (FL browser):
                 // one long mixed list hides where a click will put the plugin.
@@ -322,7 +406,6 @@ impl App {
                     .filter(|p| matches(&q, &p.name))
                     .collect();
                 fxs.sort_by_cached_key(|p| p.name.to_lowercase());
-                let problems = self.plugins.list.iter().filter(|p| !p.usable()).count();
                 let scanning = self.plugins.scan_rx.is_some();
                 egui::CollapsingHeader::new(
                     RichText::new(format!("Instruments ({})", self.plugin_choices(true).len()))
@@ -480,15 +563,6 @@ impl App {
                     }
                 });
                 self.synth_presets_section(ui, &q);
-                if problems > 0 && !scanning {
-                    ui.label(
-                        RichText::new(format!(
-                            "{problems} plugin(s) with problems — Settings → Plugins → Problems"
-                        ))
-                        .font(t::sans(12.0))
-                        .color(t::wait()),
-                    );
-                }
                 egui::CollapsingHeader::new(RichText::new("Presets").font(t::sans(13.0))).show(
                     ui,
                     |ui| {
@@ -519,10 +593,63 @@ impl App {
                         },
                     );
                 }
-                egui::CollapsingHeader::new(RichText::new("Folders").font(t::sans(13.0)))
-                    .default_open(true)
-                    .show(ui, |ui| self.files_tab(ui, &q));
+                if tab == 0 {
+                    egui::CollapsingHeader::new(RichText::new("Folders").font(t::sans(13.0)))
+                        .default_open(true)
+                        .show(ui, |ui| self.files_tab(ui, &q));
+                }
             });
+    }
+
+    fn plugin_warning(&mut self, ui: &mut Ui) {
+        if self.plugins.scan_rx.is_some() {
+            return;
+        }
+        let issues: Vec<_> = self
+            .plugins
+            .list
+            .iter()
+            .filter(|plugin| !plugin.usable())
+            .map(|plugin| (plugin.path.clone(), plugin.status.clone()))
+            .collect();
+        let id = egui::Id::new("dismissed-plugin-problems");
+        let dismissed = ui.data(|d| d.get_temp::<Vec<(PathBuf, crate::plugins::Status)>>(id));
+        if issues.is_empty() || dismissed.as_ref() == Some(&issues) {
+            return;
+        }
+        egui::Frame::new()
+            .fill(t::wait_soft())
+            .inner_margin(egui::Margin::same(4))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let text = if issues.len() == 1 {
+                        "1 plugin needs attention".to_string()
+                    } else {
+                        format!("{} plugins need attention", issues.len())
+                    };
+                    if ui
+                        .link(RichText::new(text).color(t::wait()).font(t::sans(12.0)))
+                        .clicked()
+                    {
+                        ui.data_mut(|d| {
+                            d.insert_temp(
+                                egui::Id::new("settings-plugins"),
+                                (String::new(), 3_usize, None::<PathBuf>),
+                            )
+                        });
+                        self.open_settings(super::settings_ui::Page::Plugins);
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if super::kit::tool_button(ui, "×", super::kit::Kind::Ghost, true)
+                            .on_hover_text("Dismiss plugin warning")
+                            .clicked()
+                        {
+                            ui.data_mut(|d| d.insert_temp(id, issues.clone()));
+                        }
+                    });
+                });
+            });
+        ui.add_space(5.0);
     }
 
     fn browser_directory(&mut self, ui: &mut Ui, path: &Path, q: &str) {
@@ -858,12 +985,12 @@ impl App {
 
     /// Starred plugins and files, under the search. Hidden when empty.
     /// A favorite stores its plain path: a scanned plugin bundle or a file.
-    fn favorites_section(&mut self, ui: &mut Ui) {
-        let favs = favorites(ui.ctx());
+    fn favorites_section(&mut self, ui: &mut Ui, query: &str) {
+        let mut favs = favorites(ui.ctx());
         if favs.is_empty() {
             return;
         }
-        egui::CollapsingHeader::new(RichText::new("Favorites").font(t::sans(13.0)))
+        egui::CollapsingHeader::new(RichText::new("Favorites").font(t::medium(13.0)))
             .default_open(true)
             .show(ui, |ui| {
                 let known: Vec<Scanned> = self
@@ -872,8 +999,42 @@ impl App {
                     .chain(self.plugin_choices(false))
                     .collect();
                 let mut act = None;
+                let mut order = None;
                 for fav in &favs {
-                    act = self.asset_row(ui, fav, "★ ", &known).or(act);
+                    let name = known
+                        .iter()
+                        .find(|p| p.path.as_path() == Path::new(fav))
+                        .map(|p| std::borrow::Cow::Borrowed(p.name.as_str()))
+                        .unwrap_or_else(|| {
+                            Path::new(fav)
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                        });
+                    if !matches(query, &name) {
+                        continue;
+                    }
+                    let row = ui
+                        .push_id(fav, |ui| {
+                            ui.horizontal(|ui| {
+                                let handle = ui
+                                    .add(egui::Label::new("⠿").sense(egui::Sense::drag()))
+                                    .on_hover_and_drag_cursor(egui::CursorIcon::Grab)
+                                    .on_hover_text("Drag to reorder favorites");
+                                handle.dnd_set_drag_payload(FavoriteOrder(fav.clone()));
+                                act = self.asset_row(ui, fav, "", &known).or(act.take());
+                            })
+                            .response
+                        })
+                        .inner;
+                    if let Some((from, after)) = sort_drop::<FavoriteOrder>(ui, &row) {
+                        order = Some((from, fav.clone(), after));
+                    }
+                }
+                if let Some((from, to, after)) = order
+                    && reorder(&mut favs, &from.0, &to, after)
+                {
+                    set_favorites(ui.ctx(), favs);
                 }
                 self.asset_act(ui, act);
             });
@@ -995,7 +1156,8 @@ impl App {
             let r = ui.add(
                 egui::Button::new(RichText::new(format!("{mark}{}", p.name)).font(t::sans(13.0)))
                     .frame(false)
-                    .min_size(egui::vec2(ui.available_width(), 24.0)),
+                    .min_size(egui::vec2(ui.available_width(), 24.0))
+                    .truncate(),
             );
             let tip = if p.instrument {
                 "Click adds it to the channel rack".to_string()
