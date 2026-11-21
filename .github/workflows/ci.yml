@@ -68,6 +68,20 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Download Steinberg ASIO SDK
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "asio-sdk"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $zip = Join-Path $env:RUNNER_TEMP "asiosdk.zip"
+          curl.exe -fsSL -L "https://www.steinberg.net/asiosdk" -o $zip
+          tar.exe -xf $zip -C $dir
+          $hdr = Get-ChildItem -Path $dir -Recurse -Filter "asiodrivers.h" | Select-Object -First 1
+          if (-not $hdr) { throw "asiodrivers.h not found in ASIO SDK archive" }
+          $root = $hdr.Directory.Parent.FullName
+          Write-Host "CPAL_ASIO_DIR=$root"
+          "CPAL_ASIO_DIR=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings
 
