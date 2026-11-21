@@ -591,6 +591,10 @@ define_strings! {
         tl_open, tl_fold, tl_caps, tl_moved, tl_ramps, tl_jumps, tl_between, tl_first_stays, tl_deleted, tl_reset, tl_half, tl_double, tl_scaled, tl_at, tl_point_at, tl_cleared,
         // Presets
         pk_channel, pk_mixer, pk_fx, pk_synth, pre_saved, pre_save_err, pre_insert_n, pre_synth_on, pre_synth_added, pre_not_preset, pre_ch_loaded, pre_ch_added, pre_mixer_on, pre_fx_on,
+        // Riff Machine
+        riff_progression, riff_changes, riff_chord_voices, riff_inversion, riff_rhythm, riff_direction, riff_division, riff_octaves, riff_continue, riff_reverse, riff_invert, riff_velocity, riff_pan_spread, riff_release, riff_fine, riff_mod_x, riff_mod_y, riff_length_pct, riff_variation_pct, riff_grid, riff_timing, riff_keep_length, riff_keep_end, riff_snap_end, riff_grid_strength, riff_swing, riff_jitter, riff_key, riff_scale, riff_lowest, riff_highest, riff_recipes, riff_reset_all, riff_save_recipe, riff_recipe_filter, riff_recipe_saved, riff_load_recipe, riff_recipe_loaded, riff_recipe_range, riff_vel_caps, riff_select_first, riff_source_updated, riff_throw_dice, riff_stop_preview, riff_play_preview, riff_preview_needs, riff_apply, riff_stages_title, riff_length, riff_bars_suffix, riff_seed, riff_use_existing, riff_phrase, riff_through_stage, riff_enabled, riff_reset, riff_vary, riff_st_progression, riff_st_chords, riff_st_arpeggio, riff_st_mirror, riff_st_levels, riff_st_articulation, riff_st_groove, riff_st_fit, riff_seeded_walk, riff_triplet, riff_rh_straight, riff_rh_tresillo, riff_rh_offbeat, riff_rh_gallop, riff_dir_up, riff_dir_down, riff_dir_updown, riff_dir_random, riff_save_err, riff_load_err, riff_counts,
+        // Settings window
+        set_pg_audio, set_pg_midi, set_pg_plugins, set_pg_general, set_pg_audio_blurb, set_pg_midi_blurb, set_pg_plugins_blurb, set_pg_general_blurb, set_au_preferred_back, set_au_after_error, set_au_after_stall, set_au_after_disconnect, set_link_cancelled, set_typing_on, set_typing_off, set_metronome_on, set_metronome_off, set_pattern_full, set_apply_note, set_all_notes_off, set_card_output, set_device, set_system_default, set_sample_rate, set_buffer, set_buffer_hint, set_auto, set_running, set_device_buffer, set_chosen_output, set_unknown, set_no_output, set_restart_audio, set_card_input, set_record_input, set_record_input_hint, set_card_midi_in, set_midi_in_off, set_no_midi_in, set_connected, set_off_lc, set_rescan, set_panic, set_activity, set_keys_play, set_card_midi_out, set_midi_out_off, set_no_midi_out, set_midi_clock, set_midi_clock_hint, set_clock_need_port, set_card_notes_in, set_channel, set_velocity, set_level, set_transpose, set_reset, set_sustain, set_sustain_hint, set_card_recording, set_quantize, set_quantize_hint, set_record_note, set_card_links, set_no_links, set_forget_link, set_links_note, set_card_interface, set_size, set_size_hint, set_theme, set_theme_sys_light, set_theme_sys_dark, set_theme_sys_none, set_theme_hint, set_deck_monitor, set_deck_monitor_hint, set_x11, set_x11_hint, set_title_bar, set_title_bar_hint, set_card_projects, set_autosave, set_off, set_starter, set_starter_hint, set_ask_close, set_ask_close_hint, set_card_updates, set_check_auto, set_check_auto_hint, set_current_version, set_checking, set_check_now, set_default_buffer, set_vc_linear, set_vc_soft, set_vc_hard, set_vc_fixed, set_clk_send, set_clk_receive, set_dm_scope, set_dm_spectrum, set_th_dark, set_th_light, set_th_system, set_not_saved, set_audio_ok, set_audio_failed, set_au_recovered, set_audio_lost, set_learn, set_learned, set_frames, set_latency_line, set_rate_mismatch, set_fallback, set_stream_error, set_reconnecting, set_last_error, set_activity_last, set_clock_sending, set_semitones, set_system_scale, set_clear_skipped,
     },
     plurals: {
         clips_deleted,
@@ -662,6 +666,7 @@ define_strings! {
         rec_frames_lost,
         rec_takes,
         lib_kit_added,
+        riff_added,
     },
 }
 
@@ -1289,6 +1294,85 @@ impl Strings {
             K::Mixer => self.pk_mixer,
             K::Fx => self.pk_fx,
             K::Synth => self.pk_synth,
+        }
+    }
+
+    pub fn riff_stages(&self) -> [&'static str; 8] {
+        [
+            self.riff_st_progression,
+            self.riff_st_chords,
+            self.riff_st_arpeggio,
+            self.riff_st_mirror,
+            self.riff_st_levels,
+            self.riff_st_articulation,
+            self.riff_st_groove,
+            self.riff_st_fit,
+        ]
+    }
+
+    /// Roman-numeral progressions stay as written; only the seeded walk is a word.
+    pub fn riff_progressions(&self) -> [&'static str; 5] {
+        let p = keyframexl::riff::PROGRESSIONS;
+        [p[0], p[1], p[2], p[3], self.riff_seeded_walk]
+    }
+
+    pub fn riff_rates(&self) -> [&'static str; 5] {
+        let r = keyframexl::riff::RATES;
+        [r[0].0, r[1].0, self.riff_triplet, r[3].0, r[4].0]
+    }
+
+    pub fn riff_rhythms(&self) -> [&'static str; 4] {
+        [
+            self.riff_rh_straight,
+            self.riff_rh_tresillo,
+            self.riff_rh_offbeat,
+            self.riff_rh_gallop,
+        ]
+    }
+
+    pub fn riff_directions(&self) -> [&'static str; 4] {
+        [
+            self.riff_dir_up,
+            self.riff_dir_down,
+            self.riff_dir_updown,
+            self.riff_dir_random,
+        ]
+    }
+
+    pub fn velocity_curve(&self, c: crate::settings::VelocityCurve) -> &'static str {
+        use crate::settings::VelocityCurve as V;
+        match c {
+            V::Linear => self.set_vc_linear,
+            V::Soft => self.set_vc_soft,
+            V::Hard => self.set_vc_hard,
+            V::Fixed => self.set_vc_fixed,
+        }
+    }
+
+    pub fn midi_clock_mode(&self, m: crate::settings::MidiClockMode) -> &'static str {
+        use crate::settings::MidiClockMode as C;
+        match m {
+            C::Off => self.set_off,
+            C::Master => self.set_clk_send,
+            C::Slave => self.set_clk_receive,
+        }
+    }
+
+    pub fn deck_monitor(&self, m: crate::settings::DeckMonitor) -> &'static str {
+        use crate::settings::DeckMonitor as D;
+        match m {
+            D::Off => self.set_off,
+            D::Scope => self.set_dm_scope,
+            D::Spectrum => self.set_dm_spectrum,
+        }
+    }
+
+    pub fn theme_mode(&self, m: crate::settings::ThemeMode) -> &'static str {
+        use crate::settings::ThemeMode as T;
+        match m {
+            T::Dark => self.set_th_dark,
+            T::Light => self.set_th_light,
+            T::System => self.set_th_system,
         }
     }
 }

@@ -57,14 +57,6 @@ pub enum VelocityCurve {
 
 impl VelocityCurve {
     pub const ALL: [Self; 4] = [Self::Linear, Self::Soft, Self::Hard, Self::Fixed];
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Linear => "Linear",
-            Self::Soft => "Soft",
-            Self::Hard => "Hard",
-            Self::Fixed => "Fixed",
-        }
-    }
     /// Map 1..=127 to 1..=127; `fixed` is the level for `Fixed`.
     pub fn apply(self, v: u8, fixed: u8) -> u8 {
         let x = v.clamp(1, 127) as f32 / 127.0;
@@ -91,13 +83,6 @@ pub enum MidiClockMode {
 
 impl MidiClockMode {
     pub const ALL: [Self; 3] = [Self::Off, Self::Master, Self::Slave];
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Off => "Off",
-            Self::Master => "Send (Master)",
-            Self::Slave => "Receive (Slave)",
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -274,13 +259,6 @@ pub enum DeckMonitor {
 
 impl DeckMonitor {
     pub const ALL: [Self; 3] = [Self::Off, Self::Scope, Self::Spectrum];
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Off => "Off",
-            Self::Scope => "Oscilloscope",
-            Self::Spectrum => "Spectrum",
-        }
-    }
 }
 
 /// Light or dark interface; System follows the desktop (xdg-desktop-portal).
@@ -294,13 +272,6 @@ pub enum ThemeMode {
 
 impl ThemeMode {
     pub const ALL: [Self; 3] = [Self::Dark, Self::Light, Self::System];
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Dark => "Dark",
-            Self::Light => "Light",
-            Self::System => "System",
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
