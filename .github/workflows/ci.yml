@@ -25,6 +25,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libasound2-dev \
+            libpipewire-0.3-dev \
+            libclang-dev \
+            libdbus-1-dev \
             libxcb1-dev \
             libxcb-xtest0-dev \
             libvorbis-dev \
@@ -41,6 +44,27 @@ jobs:
 
       - name: cargo fmt
         run: cargo fmt --check
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo test (lib)
+        run: cargo test --lib
+
+      - name: cargo test (bin)
+        run: cargo test --bin keyframexl
+
+  windows-test:
+    name: windows-test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
 
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings

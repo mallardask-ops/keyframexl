@@ -875,6 +875,7 @@ impl App {
                                 .unwrap_or_else(|| tr.set_device_buffer.into());
                             let load = a.load.load(Ordering::Relaxed) as f64 / 10.0;
                             let overruns = a.overruns.load(Ordering::Relaxed);
+                            let xruns = a.xruns.load(Ordering::Relaxed);
                             ui.horizontal(|ui| {
                                 badge(ui, r.backend.label(), t::text());
                                 ui.label(
@@ -890,10 +891,11 @@ impl App {
                                         ("ms", &format!("{:.1}", r.latency_ms())),
                                         ("load", &format!("{load:.0}")),
                                         ("overruns", &overruns.to_string()),
+                                        ("xruns", &xruns.to_string()),
                                     ],
                                 ))
                                 .font(t::mono(13.0))
-                                .color(if overruns > 0 {
+                                .color(if overruns + xruns > 0 {
                                     t::wait()
                                 } else {
                                     t::muted()

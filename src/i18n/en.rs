@@ -2304,7 +2304,7 @@ pub const EN: Strings = Strings {
     set_learn: "Move a knob on your controller to link {label}. Esc cancels.",
     set_learned: "Linked CH {channel} CC {cc} to {label}.",
     set_frames: "{n} frames",
-    set_latency_line: "Latency ≈{ms} ms · CPU {load}% · Overruns {overruns}",
+    set_latency_line: "Latency ≈{ms} ms · CPU {load}% · Overruns {overruns} · Xruns {xruns}",
     set_rate_mismatch: "The device does not offer {want} Hz; running at {rate} Hz.",
     set_fallback: "{output} is not available; playing through {device}. It reconnects when the device returns.",
     set_stream_error: "Stream error: {err}. Reconnecting.",

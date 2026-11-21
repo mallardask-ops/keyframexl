@@ -2449,7 +2449,7 @@ pub const UK: Strings = Strings {
     set_learn: "Покрутіть ручку контролера, щоб прив'язати {label}. Esc скасовує.",
     set_learned: "CH {channel} CC {cc} прив'язано до {label}.",
     set_frames: "{n} кадрів",
-    set_latency_line: "Затримка ≈{ms} ms · CPU {load}% · Переповнення {overruns}",
+    set_latency_line: "Затримка ≈{ms} ms · CPU {load}% · Переповнення {overruns} · Xruns {xruns}",
     set_rate_mismatch: "Пристрій не підтримує {want} Hz; працює на {rate} Hz.",
     set_fallback: "{output} недоступний; звук іде через {device}. Під'єднається, коли пристрій повернеться.",
     set_stream_error: "Помилка потоку: {err}. Перепідключення.",

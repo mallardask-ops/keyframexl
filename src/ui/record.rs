@@ -60,36 +60,36 @@ fn open_input(
     tr: &'static crate::i18n::Strings,
 ) -> Result<(cpal::Stream, rtrb::Consumer<[f32; 2]>, u32, String), String> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-    let host = cpal::default_host();
+    let host = crate::audio::host();
     let named = name.and_then(|want| {
         host.input_devices()
             .ok()?
-            .find(|d| d.name().ok().as_deref() == Some(want))
+            .find(|d| crate::audio::device_name(d).as_deref() == Some(want))
     });
     let device = match named {
         Some(d) => d,
         None => host.default_input_device().ok_or(tr.rec_no_input)?,
     };
-    let dev_name = device.name().unwrap_or_else(|_| "Input".into());
+    let dev_name = crate::audio::device_name(&device).unwrap_or_else(|| "Input".into());
     let def = device.default_input_config().map_err(|e| e.to_string())?;
-    let rate = def.sample_rate().0;
+    let rate = def.sample_rate();
     let range = device
         .supported_input_configs()
         .map_err(|e| e.to_string())?
         .filter(|c| {
             c.sample_format() == cpal::SampleFormat::F32
                 && c.channels() <= 2
-                && c.min_sample_rate().0 <= rate
-                && c.max_sample_rate().0 >= rate
+                && c.min_sample_rate() <= rate
+                && c.max_sample_rate() >= rate
         })
         .max_by_key(|c| c.channels())
         .ok_or_else(|| crate::i18n::fill(tr.rec_no_float, &[("dev", &dev_name)]))?;
-    let config = range.with_sample_rate(cpal::SampleRate(rate)).config();
+    let config = range.with_sample_rate(rate).config();
     let ch = config.channels as usize;
     let (mut tx, rx) = rtrb::RingBuffer::<[f32; 2]>::new(rate as usize * 8);
     let stream = device
         .build_input_stream(
-            &config,
+            config,
             move |data: &[f32], _| {
                 for f in data.chunks_exact(ch) {
                     let frame = if ch == 1 { [f[0], f[0]] } else { [f[0], f[1]] };

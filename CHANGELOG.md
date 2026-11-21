@@ -4,6 +4,18 @@ Every push to `main` ships a nightly prerelease (`v<version>-nightly.<date>` or 
 versions below are the stable tags. The 0.2.0 plan with its tasks is in
 [docs/v0.2.0.md](docs/v0.2.0.md).
 
+## Unreleased (0.2.1)
+
+See [docs/v0.2.1.md](docs/v0.2.1.md) for the Windows port and 0.2.1 plan.
+
+### Engine and internals
+- **Native PipeWire output**: the program is a PipeWire node of its own
+  (cpal 0.18), with ALSA as the fallback; the buffer setting is the node's
+  quantum, xruns are counted, and the device list shows hardware outputs
+  and *System default* instead of ALSA plug names.
+- **Windows foundation (W0)**: platform-gated dependencies and stubs so the
+  library and application build and pass tests on `windows-latest` in CI.
+
 ## 0.2.0 — 2026-11-21
 
 Everything since 0.1.2, gathered from the nightlies and release

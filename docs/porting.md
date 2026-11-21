@@ -37,7 +37,7 @@ Linux-специфіка зосереджена приблизно в 12 фай�
 | `src/bridge/{mod,host,shm,supervisor}.rs` | `UnixStream`, `mmap` файлу, `futex` | Windows: `CreateFileMapping` + named Event (або `WaitOnAddress` — тільки в межах процесу, тож не підходить) + named pipe; macOS: `mmap` лишається, `futex` → `os_sync_wait_on_address` з прапором shared (macOS 14.4+) або POSIX-семафор |
 | `src/fl_link.rs`, `src/fl_native.rs`, `src/flp_freeze.rs` | запуск FL під Wine, захоплення звуку через `pw-cat`/`parec`/`pactl`/`pw-link`, віртуальні MIDI-порти `midir::os::unix` | Windows/macOS: завантажувати FL Studio VSTi як звичайний плагін (на Linux це вже працює), а міст `fl_link` вимкнути — він потрібен лише для обходу Wine |
 | `src/audio.rs` | детект PipeWire, `PIPEWIRE_LATENCY`, гаряче перепідключення | гілки за `cfg`; на Windows — вибір WASAPI shared/exclusive та ASIO; на macOS — розмір буфера CoreAudio |
-| `vendor/cpal`, `vendor/winit` | патчі для ALSA-underrun і X11 XDND | на інших ОС не заважають, але XDND-фікс для перетягування з плагінів треба повторити для OLE drag&drop на Windows і NSPasteboard на macOS |
+| `vendor/winit` | патч X11 XDND | на інших ОС не заважає, але XDND-фікс для перетягування з плагінів треба повторити для OLE drag&drop на Windows і NSPasteboard на macOS |
 | `src/mp3.rs` | `dlopen("libmp3lame.so.0")` | статично зібраний LAME (`mp3lame-encoder`) на всіх ОС, щоб експорт MP3 працював без системних бібліотек |
 | `src/theme.rs` | `fc-match` для шрифту з каною (вокал) | Windows: `C:\Windows\Fonts\YuGothM.ttc`/`msgothic.ttc`; macOS: `Hiragino Sans`; або вбудувати Noto Sans JP subset |
 | `src/updater.rs` | заміна бінарника через `rename`, `tar`, `chmod` | див. розділ «Оновлювач» |
