@@ -6,41 +6,56 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 
 ## Unreleased (0.2.0)
 
-### Nightly RC3
+Everything since 0.1.2, gathered from the nightlies up to
+`v0.2.0-nightly.rc.3`. Native PipeWire output (E1) is still in review and
+not part of this list.
 
-- Tap tempo is a window (*Tools → Tap tempo*, **Tap** on the deck): tap
-  with the mouse, `Space`/`Enter`/`T`, or any MIDI note or sustain pedal,
-  timed by the device clock. Shows the tempo and the spread of recent taps,
-  averages 4/8/16 taps, and sets the project tempo as one undo step.
-- Export audio and Project info keep their height when a side edge is
-  dragged; Export's estimate, progress and buttons stay pinned at the
-  bottom, and the file name is an editable field.
-- Track and pattern colours are picked from swatches instead of hex codes.
-- The whole interface and the manual are in English and Ukrainian.
-
-### Nightly RC2
-
-- Open the Welcome screen from File. The movable Import dialog previews where
-  audio, DirectWave, MIDI, FL Studio projects, and bundles will go.
-- Browse all assets, the library, or files. Drag favorites and root folders to
-  set their order, and dismiss the plugin scan notice or open the Problems list.
-- Drag Channel Rack names to move instruments. The step grid scrolls horizontally
-  while channel controls stay visible. Scroll over the insert or pattern selector
-  to change it, and right-click the pattern selector for pattern actions.
-- Rotary controls, faders, and drag values capture relative mouse motion. Shared
-  window edges resize both panels, and embedded X11 editors respect overlapping
-  application windows.
-- Export audio can be moved and resized. The estimate and actions stay visible
-  while its settings scroll.
-- Demo mode (*View → Demo mode*, `keyframexl --show`): full-canvas Arrange
-  overview fitted to the window and Falling notes waterfall with vocal pitch
-  contours, live lyrics, rhythm pads, lit keyboard, and deterministic video
+### New features
+- **Ukrainian interface.** Every window, menu, tooltip, dialog and status
+  message is in English and Ukrainian, with proper plural forms. The
+  language follows the system locale; change it in *Settings → General* or
+  run with `KFXL_LANG=en|uk`. Effect, preset and recipe names stay as they
+  are.
+- **User manual** (*Help → Manual*): 13 chapters in English and Ukrainian,
+  built into the program with search and links; it works offline and opens
+  in the interface language. The same pages are in `docs/manual/` and
+  `docs/manual/uk/`. The old menu item opened a file that did not exist.
+- **Light theme** (*Settings → General → Theme*, *View → Theme*): Dark,
+  Light, or System (follows the desktop through xdg-desktop-portal). All
+  text keeps at least 4.5:1 contrast; Tide and the Sampler stay dark, like
+  hardware on a light desk.
+- **Demo mode** (*View → Demo mode*, `keyframexl --show`): a full-window
+  Arrange overview and a Falling notes view with vocal pitch contours, live
+  lyrics, rhythm pads and a lit keyboard, with deterministic video
   recording.
-- Project info (*File → Project info*, `F11`): resizable tabbed window with live
-  project summary, expanded metadata (album, year, copyright/license, website
-  link, genre/license presets, *Show on open*), live MP3 ID3v2.4 tag preview,
-  dedicated Notes tab, and project musical settings (tempo, swing, time
-  signature, musical key synced with the Piano roll, and Forge sound style).
+- **Project info** (*File → Project info*, `F11`): a resizable window with
+  tabs for details, notes and musical settings. Album, year,
+  copyright/licence (with presets), website, genre presets, *Show on open*,
+  a live project summary, and tempo, swing, time signature, key (synced
+  with the Piano roll) and Forge sound style in one place. MP3 export
+  writes these fields as ID3v2.4 tags, previewed in the window.
+- **Import dialog** (*File → Import…*): one movable dialog for audio,
+  DirectWave presets, MIDI, FL Studio projects and bundles, showing where
+  each file will go.
+- **Tap tempo window** (*Tools → Tap tempo*, **Tap** on the deck): tap with
+  the mouse, `Space`/`Enter`/`T`, or any MIDI note or sustain pedal, timed
+  by the device's own clock. It shows the tempo and the spread of recent
+  taps, averages 4/8/16 taps, rejects stray taps and sets the project
+  tempo as one undo step. While it is open, `Space` taps instead of
+  playing.
+- **Sampler time stretch.** A zone can stretch its sample with the pitch
+  kept: by a ratio (*Time*, 25–400 %) or to a number of beats at the
+  song's tempo (*Beat sync*), using Signalsmith Stretch (MIT, vendored).
+  Renders are deterministic, so playback and export match.
+- **Vocal pitch curves.** The piano roll's *Pitch* lane draws each sung
+  note's pitch: points with smooth, linear or eased segments (a scoop, a
+  fall, a bend), and a note's own vibrato instead of the channel's.
+- **FL Studio live link window**: a state (not running, starting,
+  connected, check, error), the measured delay, gaps and queue, whether FL
+  has the MIDI input open, a *Reconnect* button, and a check of what FLEX
+  needs in FL's Wine prefix (vkd3d-proton, Verdana) with a warning for
+  FL 2026 on stock Wine. One link channel at a time. See
+  [docs/fl-link.md](docs/fl-link.md).
 
 ### Content
 - **Built-in drum kits.** KFX Core (17 808/909-style sounds) and KFX Chip
@@ -50,57 +65,60 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
   Drum kit* adds a whole kit.
 - **KeyFrame Tide: 105 factory presets** (was 18) in ten categories: bass,
   lead, pad, keys, pluck, bell, arp, FX, drum-synth, chiptune. Menus and the
-  browser group by category; search finds categories too.
+  browser group by category, search finds categories, factory presets can
+  be favourites.
 - **Forge: 51 recipes** (was 11) in ten categories: UI, footsteps on seven
   surfaces, actions, weapons, pickups, magic, damage, doors, ambience,
-  creatures.
+  creatures. *Mono* export added.
 - **Genre starters** on a new *Genres* tab of the Welcome screen: lo-fi
   hip-hop, trap, house, synthwave, chiptune, drum & bass, ambient.
 - **Demo song** (*Help → Demo song*, `keyframexl write-demo`,
   `render-demo-song`): 32 bars using every part of the program, with a
   vocal on a synthetic CC0 voice the program writes itself.
-- **User manual** (*Help → Manual*): 13 chapters built into the program,
-  with search; it works offline. The same pages are in `docs/manual/`.
-  The old menu item opened a file that did not exist.
-- The `F1` list is grouped and complete (`F8`, `Ctrl+Shift+M`, `Alt+E`,
-  `Alt+C`, `Alt+↑/↓`, `Ctrl+K` were missing); the manual's shortcut page is
-  generated from the same list.
-- New README screenshots, all taken from the demo song
+- New README screenshots, dark and light, all taken from the demo song
   (`scripts/ux/shots.sh`).
 
-- **FL Studio live link window**: a state (not running, starting,
-  connected, check, error), the measured delay, gaps and queue, whether FL
-  has the MIDI input open, a *Reconnect* button, and a check of what FLEX
-  needs in FL's Wine prefix (vkd3d-proton, Verdana) with a warning for
-  FL 2026 on stock Wine. One link channel at a time. See
-  [docs/fl-link.md](docs/fl-link.md).
-
-- **Sampler time stretch.** A zone can stretch its sample with the pitch
-  kept: by a ratio (*Time*, 25–400 %) or to a number of beats at the
-  song's tempo (*Beat sync*), using Signalsmith Stretch (MIT, vendored).
-  Renders are deterministic, so playback and export match.
-
 ### Interface
-- **Ukrainian interface.** Every window, menu, tooltip, dialog and status
-  message is in English and Ukrainian, with proper plural forms. The
-  language follows the system locale; change it in *Settings → General* or
-  run with `KFXL_LANG=en|uk`. Effect, preset and recipe names stay as they
-  are.
-- **Ukrainian manual** in `docs/manual/uk/`; *Help → Manual* opens it when
-  the interface is in Ukrainian.
-- **Light theme** (*Settings → General → Theme*, *View → Theme*): Dark,
-  Light, or System (follows the desktop through xdg-desktop-portal). All
-  text keeps at least 4.5:1 contrast; Tide and the Sampler stay dark, like
-  hardware on a light desk. The dark theme's Play button text is a little
-  more readable.
+- **Browser**: *All*, *Library* and *Files* sources with one search field,
+  a Stop button while a sample previews, favourites and root folders in
+  your own order (dragged, remembered), folders sorted by name, type, date
+  or size. The plugin scan notice can be dismissed or opens the Problems
+  list.
+- **Channel rack**: drag a channel's name to move it; the step grid scrolls
+  sideways while the channel controls stay in place.
+- **Deck**: the mouse wheel over the insert or pattern selector changes
+  it; right-click the pattern selector for rename, colour, clone and
+  delete. *File → Welcome screen* reopens the Welcome screen.
+- **Colours** of tracks and patterns are picked from a grid of swatches
+  (they were a list of hex codes).
+- **Knobs, faders and number fields** capture the mouse, so a long drag
+  does not stop at the screen edge.
+- **Docked panels**: dragging a shared edge resizes both panels. Embedded
+  X11 plugin editors are hidden where an app window covers them.
+- **Export audio** is a movable, resizable window: its settings scroll,
+  the size estimate, progress and buttons stay pinned at the bottom, and
+  the file name is an editable field.
+- **Shortcuts**: the `F1` list is grouped and complete (`F8`,
+  `Ctrl+Shift+M`, `Alt+E`, `Alt+C`, `Alt+↑/↓`, `Ctrl+K` were missing); the
+  manual's shortcut page is generated from the same list, and the View menu
+  shows `Ctrl+=` instead of `Ctrl++`.
+- **Version**: nightly builds show their own version (for example
+  `v0.2.0-nightly.rc.3.…`) with a *Nightly* badge on the Welcome screen, in
+  About and in *Settings → General*; they showed 0.1.2.
+- **Window size**: the main window reopens at its last size, and maximised
+  if it was closed maximised.
+- The dark theme's Play button text is a little more readable.
 
 ### Fixes
+- **Crash** when a tab group or a floating window was dragged by its grip
+  over another panel (since 0.1.1).
+- **Window height creep**: Export audio and Project info lost a few pixels
+  of height on every drag of a side edge.
+- **Maximised start on X11** was ignored: the request was sent before the
+  window was mapped.
 - **Forge export levels.** Export no longer normalises every file to −1 dB
   by default; each recipe is made at its category's level, so a UI click
-  stays well under a shotgun. *Normalize* is a switch; *Mono* export added.
-- **Vocal pitch curves.** The piano roll's *Pitch* lane draws each sung
-  note's pitch: points with smooth, linear or eased segments (a scoop, a
-  fall, a bend), and a note's own vibrato instead of the channel's.
+  stays well under a shotgun. *Normalize* is a switch.
 - **Vocal timing.** Notes inside a phrase follow the tempo map (they used
   the constant song tempo); a tempo-map edit renders the phrase again. A
   playlist clip cut in the middle of a phrase now sings from its first note
@@ -116,7 +134,8 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
     their three oscillators, and FLEX channels on the Tide preset of the
     same role (bass, pad, pluck…), instead of staying silent.
   - Fruity Squeeze and Hyper Chorus keep their settings (they were
-    imported switched off).
+    imported switched off); Squeeze with no Impact no longer clicks once
+    per cycle.
   - Automation of effect slot on/off and of send levels comes across.
 - **Denormals.** DSP threads flush denormals to zero: reverb and filter
   tails no longer spike the CPU in silence.
@@ -129,6 +148,9 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
   in a large project costs ~50 µs instead of 2–5 ms, and undo keeps only
   changed patterns.
 - The Tide header no longer rebuilds every factory preset each frame.
+- Styling and behaviour no longer depend on English labels, so translation
+  cannot change what a control does; a test fails on any new untranslated
+  UI text.
 - Clippy-clean codebase; CI checks `cargo fmt` and `cargo clippy -D warnings`.
 - `LICENSE` file (MIT).
 
@@ -136,6 +158,8 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 - The 16 px icon has its own pixel-aligned drawing.
 - Release and nightly archives carry the desktop launcher, the icon set and
   `install.sh` (installs into `~/.local`).
+- Nightlies are tagged `v<version>-nightly.<date>`, and release candidates
+  `v0.2.0-nightly.rc.<n>.<date>`.
 
 ## 0.1.2 — 2026-11-19
 - In-place self-updater: downloads the release archive, checks its SHA-256,
