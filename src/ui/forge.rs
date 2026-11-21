@@ -5,6 +5,7 @@
 
 use super::synth::{Edit, panel, pct, secs, signed};
 use super::{App, Tone, kit};
+use crate::i18n::fill;
 use crate::theme as t;
 use eframe::egui::{self, Align2, Color32, Rect, Sense, Stroke, Ui, pos2, vec2};
 use keyframexl::forge::{
@@ -209,6 +210,7 @@ fn source_kind(s: &Source) -> usize {
 impl App {
     /// FL: Add → channel → Forge. Starts from the Jump recipe.
     pub(crate) fn add_forge(&mut self) -> u64 {
+        let tr = self.tr();
         self.checkpoint();
         let name = self.song.free_name("Forge");
         let patch = self.recipe(Recipe::Jump);
@@ -220,10 +222,7 @@ impl App {
         );
         self.publish();
         self.win(super::Cmd::Show(super::Tab::Instrument { id }));
-        self.say(
-            Tone::Quiet,
-            format!("{name} added. Pick a recipe, press Play, turn the knobs. Notes play it too: C5 as made."),
-        );
+        self.say(Tone::Quiet, fill(tr.forge_added, &[("name", &name)]));
         id
     }
 
@@ -333,6 +332,7 @@ impl App {
     }
 
     pub(super) fn forge_editor(&mut self, ui: &mut Ui, id: u64, sound: &ForgeSound) {
+        let tr = self.tr();
         let ctx = ui.ctx().clone();
         let view_key = egui::Id::new(("forge-view", id));
         let mut view: View = ctx.data_mut(|d| d.get_temp(view_key)).unwrap_or_default();
@@ -378,20 +378,37 @@ impl App {
                 ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
                 // Start, hear, style.
                 ui.horizontal_wrapped(|ui| {
-                    play = kit::button_sized(ui, vec2(92.0, kit::CONTROL_H), kit::Kind::Primary, true, "Play", |p, face, ink| {
-                        kit::icon_play(p, face.center() - vec2(22.0, 0.0), 11.0, ink);
-                        p.text(face.center() + vec2(8.0, 0.0), Align2::CENTER_CENTER, "PLAY", t::mono_medium(13.0), ink);
-                    })
-                    .on_hover_text("Hear the sound. A note on this channel plays it too (C5 as made)")
-                        .clicked();
+                    play = kit::button_sized(
+                        ui,
+                        vec2(92.0, kit::CONTROL_H),
+                        kit::Kind::Primary,
+                        true,
+                        tr.forge_play,
+                        |p, face, ink| {
+                            kit::icon_play(p, face.center() - vec2(22.0, 0.0), 11.0, ink);
+                            p.text(
+                                face.center() + vec2(8.0, 0.0),
+                                Align2::CENTER_CENTER,
+                                tr.forge_play_caps,
+                                t::mono_medium(13.0),
+                                ink,
+                            );
+                        },
+                    )
+                    .on_hover_text(tr.forge_play_tip)
+                    .clicked();
                     let user = cached_user_sounds(ui.ctx());
                     egui::ComboBox::from_id_salt(("forge-start", id))
                         .width(170.0)
-                        .selected_text(format!("Start from: {}", p.name))
+                        .selected_text(fill(tr.forge_start_from, &[("name", &p.name)]))
                         .show_ui(ui, |ui| {
                             kit::menu_style(ui);
                             for cat in keyframexl::forge::library::Category::ALL {
-                                ui.label(egui::RichText::new(cat.label()).font(t::sans(11.5)).color(t::faint()));
+                                ui.label(
+                                    egui::RichText::new(tr.forge_category(cat))
+                                        .font(t::sans(11.5))
+                                        .color(t::faint()),
+                                );
                                 for r in Recipe::ALL.into_iter().filter(|r| r.category() == cat) {
                                     if ui.selectable_label(false, r.label()).clicked() {
                                         adopt = Some(r.styled(game_style));
@@ -400,7 +417,11 @@ impl App {
                             }
                             if !user.is_empty() {
                                 ui.separator();
-                                ui.label(egui::RichText::new("My sounds").font(t::sans(11.5)).color(t::faint()));
+                                ui.label(
+                                    egui::RichText::new(tr.forge_my_sounds)
+                                        .font(t::sans(11.5))
+                                        .color(t::faint()),
+                                );
                                 for u in user.iter() {
                                     if ui.selectable_label(false, &u.name).clicked() {
                                         adopt = Some(u.clone());
@@ -409,35 +430,51 @@ impl App {
                             }
                         });
                     save = ui
-                        .button("Save to My sounds")
-                        .on_hover_text("Keep this sound: it joins Start from, in Presets/Forge")
+                        .button(tr.forge_save_my_sounds)
+                        .on_hover_text(tr.forge_save_my_sounds_tip)
                         .clicked();
                 });
                 ui.horizontal_wrapped(|ui| {
                     let (r, _) = ui.allocate_exact_size(vec2(84.0, 20.0), Sense::hover());
-                    kit::caps(ui.painter(), r.left_center(), Align2::LEFT_CENTER, "GAME STYLE", 10.0, t::muted());
-                    let names = ["Any", "Retro", "Cartoon", "Heavy", "Sci-fi"];
-                    let at = game_style.map_or(0, |s| Style::ALL.iter().position(|x| *x == s).unwrap_or(0) + 1);
-                    let (pick, r) = kit::chips(ui, &format!("forge-game-style-{id}"), &names, at, None);
+                    kit::caps(
+                        ui.painter(),
+                        r.left_center(),
+                        Align2::LEFT_CENTER,
+                        tr.forge_game_style_caps,
+                        10.0,
+                        t::muted(),
+                    );
+                    let names = tr.forge_game_styles();
+                    let at = game_style.map_or(0, |s| {
+                        Style::ALL.iter().position(|x| *x == s).unwrap_or(0) + 1
+                    });
+                    let (pick, r) =
+                        kit::chips(ui, &format!("forge-game-style-{id}"), &names, at, None);
                     ui.interact(r, ui.id().with("game-style-hint"), Sense::hover())
-                        .on_hover_text("The whole project: every recipe in Start from and every new Forge channel begins in this style");
+                        .on_hover_text(tr.forge_game_style_tip);
                     if let Some(i) = pick
                         && i != at
                     {
-                        style_pick = Some(if i == 0 { None } else { Some(Style::ALL[i - 1]) });
+                        style_pick = Some(if i == 0 {
+                            None
+                        } else {
+                            Some(Style::ALL[i - 1])
+                        });
                     }
                 });
                 ui.horizontal_wrapped(|ui| {
                     let (r, _) = ui.allocate_exact_size(vec2(84.0, 20.0), Sense::hover());
-                    kit::caps(ui.painter(), r.left_center(), Align2::LEFT_CENTER, "MAKE IT", 10.0, t::muted());
+                    kit::caps(
+                        ui.painter(),
+                        r.left_center(),
+                        Align2::LEFT_CENTER,
+                        tr.forge_make_it_caps,
+                        10.0,
+                        t::muted(),
+                    );
                     for s in Style::ALL {
-                        let hint = match s {
-                            Style::Retro => "Chip waves, chip noise, fewer bits",
-                            Style::Cartoon => "Round waves, bouncier sweeps, no grit",
-                            Style::Heavy => "Lower, bigger, driven, with a sub layer",
-                            Style::SciFi => "Wobble, phaser, ring modulation, room",
-                        };
-                        if ui.button(s.label()).on_hover_text(hint).clicked() {
+                        let hint = tr.forge_style_hint(s);
+                        if ui.button(tr.forge_style(s)).on_hover_text(hint).clicked() {
                             s.apply(&mut p);
                             ed.started = true;
                             ed.changed = true;
@@ -445,8 +482,9 @@ impl App {
                     }
                 });
 
-                panel(ui, "sound", t::enc_white(), |ui| {
-                    let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 84.0), Sense::click());
+                panel(ui, tr.forge_sec_sound, t::enc_white(), |ui| {
+                    let (r, resp) =
+                        ui.allocate_exact_size(vec2(ui.available_width(), 84.0), Sense::click());
                     let painter = ui.painter();
                     let well = kit::sunken(painter, r, 6.0).shrink(6.0);
                     wave(painter, well, &sound.rendered.frames, t::enc_white());
@@ -455,51 +493,93 @@ impl App {
                         painter,
                         well.right_top() + vec2(-2.0, 2.0),
                         Align2::RIGHT_TOP,
-                        &format!("{} · PEAK {db:.1} DB", secs(sound.rendered.seconds())),
+                        &fill(
+                            tr.forge_peak_hud,
+                            &[
+                                ("len", &secs(sound.rendered.seconds())),
+                                ("db", &format!("{db:.1}")),
+                            ],
+                        ),
                         10.0,
                         t::faint(),
                     );
                     if sound.stale() {
-                        kit::caps(painter, well.left_top() + vec2(2.0, 2.0), Align2::LEFT_TOP, "RENDERING", 10.0, t::wait());
+                        kit::caps(
+                            painter,
+                            well.left_top() + vec2(2.0, 2.0),
+                            Align2::LEFT_TOP,
+                            tr.forge_rendering_caps,
+                            10.0,
+                            t::wait(),
+                        );
                     }
-                    if resp.on_hover_text("Click to hear it").clicked() {
+                    if resp.on_hover_text(tr.forge_click_to_hear).clicked() {
                         play = true;
                     }
                 });
 
-                panel(ui, "character", t::enc_white(), |ui| {
+                panel(ui, tr.forge_sec_character, t::enc_white(), |ui| {
                     ui.horizontal_wrapped(|ui| {
                         let c = t::enc_white();
-                        let hints = [
-                            "Small and high .. huge, low and long",
-                            "Lazy, soft, shallow sweeps .. wild, loud, deep sweeps",
-                            "Clean .. driven, then crushed to fewer bits",
-                            "Dry .. a cave (reverb)",
-                        ];
+                        let macros = tr.forge_macros();
                         for i in 0..4 {
                             let mut v = p.macros.get(i);
                             let def = forge::Macros::default().get(i) as f64;
-                            knob(ui, &mut ed, &forge::Macros::NAMES[i].to_uppercase(), c, &mut v, (0.0, 1.0, def), false, &pct, hints[i]);
+                            knob(
+                                ui,
+                                &mut ed,
+                                macros[i].0,
+                                c,
+                                &mut v,
+                                (0.0, 1.0, def),
+                                false,
+                                &pct,
+                                macros[i].1,
+                            );
                             p.macros.set(i, v);
                         }
-                        knob(ui, &mut ed, "PITCH", c, &mut p.transpose, (-24.0, 24.0, 0.0), false, &|v| format!("{v:+.1} st"), "The whole sound up or down, in semitones");
-                        knob(ui, &mut ed, "OUTPUT", c, &mut p.gain_db, (-36.0, 12.0, 0.0), false, &|v| format!("{v:+.1} dB"), "Level before the safety limiter");
+                        knob(
+                            ui,
+                            &mut ed,
+                            tr.forge_k_pitch,
+                            c,
+                            &mut p.transpose,
+                            (-24.0, 24.0, 0.0),
+                            false,
+                            &|v| format!("{v:+.1} st"),
+                            tr.forge_k_pitch_hint,
+                        );
+                        knob(
+                            ui,
+                            &mut ed,
+                            tr.forge_k_output,
+                            c,
+                            &mut p.gain_db,
+                            (-36.0, 12.0, 0.0),
+                            false,
+                            &|v| format!("{v:+.1} dB"),
+                            tr.forge_k_output_hint,
+                        );
                     });
                 });
 
-                panel(ui, "ideas", t::enc_green(), |ui| {
+                panel(ui, tr.forge_sec_ideas, t::enc_green(), |ui| {
                     ui.horizontal_wrapped(|ui| {
-                        let label = if growing { "Growing" } else { "Mutate" };
+                        let label = if growing {
+                            tr.forge_growing
+                        } else {
+                            tr.forge_mutate
+                        };
                         mutate_now = kit::button(ui, label, kit::Kind::Normal, !growing)
-                            .on_hover_text("Eight relatives of this sound: different waves, sweeps and knobs")
+                            .on_hover_text(tr.forge_mutate_tip)
                             .clicked();
-                        if !view.ideas.is_empty() && ui.button("Clear").clicked() {
+                        if !view.ideas.is_empty() && ui.button(tr.forge_clear).clicked() {
                             view.ideas.clear();
                             view.heard = None;
                         }
                     });
                     if view.ideas.is_empty() {
-                        ui.label(egui::RichText::new("Mutate grows eight relatives of this sound. Click one to hear it, double-click to keep it.").color(t::muted()));
+                        ui.label(egui::RichText::new(tr.forge_ideas_empty).color(t::muted()));
                         return;
                     }
                     let cols = if ui.available_width() >= 560.0 { 4 } else { 2 };
@@ -509,16 +589,37 @@ impl App {
                             for c in 0..cols {
                                 let i = row * cols + c;
                                 let Some(idea) = view.ideas.get(i) else { break };
-                                let (r, resp) = ui.allocate_exact_size(vec2(w, 54.0), Sense::click());
+                                let (r, resp) =
+                                    ui.allocate_exact_size(vec2(w, 54.0), Sense::click());
                                 let painter = ui.painter();
                                 let lit = view.heard == Some(i);
                                 let well = kit::sunken(painter, r, 6.0).shrink(4.0);
                                 if lit || resp.hovered() {
-                                    painter.rect_stroke(r, 6.0, Stroke::new(1.0_f32, if lit { t::enc_green() } else { t::strong() }), egui::StrokeKind::Inside);
+                                    painter.rect_stroke(
+                                        r,
+                                        6.0,
+                                        Stroke::new(
+                                            1.0_f32,
+                                            if lit { t::enc_green() } else { t::strong() },
+                                        ),
+                                        egui::StrokeKind::Inside,
+                                    );
                                 }
-                                wave(painter, well, &idea.sound.frames, if lit { t::enc_green() } else { t::muted() });
-                                kit::caps(painter, well.left_top() + vec2(2.0, 1.0), Align2::LEFT_TOP, &format!("{:02}", i + 1), 10.0, t::faint());
-                                let resp = resp.on_hover_text("Click to hear · double-click to use it");
+                                wave(
+                                    painter,
+                                    well,
+                                    &idea.sound.frames,
+                                    if lit { t::enc_green() } else { t::muted() },
+                                );
+                                kit::caps(
+                                    painter,
+                                    well.left_top() + vec2(2.0, 1.0),
+                                    Align2::LEFT_TOP,
+                                    &format!("{:02}", i + 1),
+                                    10.0,
+                                    t::faint(),
+                                );
+                                let resp = resp.on_hover_text(tr.forge_idea_tile_tip);
                                 if resp.double_clicked() {
                                     adopt = Some(idea.patch.clone());
                                 } else if resp.clicked() {
@@ -530,53 +631,109 @@ impl App {
                     }
                     if let Some(i) = view.heard
                         && let Some(idea) = view.ideas.get(i)
-                        && kit::button(ui, &format!("Use {:02}", i + 1), kit::Kind::Normal, true)
-                            .on_hover_text("Replace the sound with this one (Ctrl+Z undoes)")
-                            .clicked()
+                        && kit::button(
+                            ui,
+                            &fill(tr.forge_use_idea, &[("n", &format!("{:02}", i + 1))]),
+                            kit::Kind::Normal,
+                            true,
+                        )
+                        .on_hover_text(tr.forge_use_idea_tip)
+                        .clicked()
                     {
                         adopt = Some(idea.patch.clone());
                     }
                 });
 
-                let jobs = Bouncing { now: bouncing, channels: &channels };
-                layers_panel(ui, &mut ed, id, &mut p, &mut view, &mut load_sample, &jobs, &mut bounce);
+                let jobs = Bouncing {
+                    now: bouncing,
+                    channels: &channels,
+                    deleted: tr.forge_deleted_channel,
+                };
+                layers_panel(
+                    ui,
+                    &mut ed,
+                    id,
+                    &mut p,
+                    &mut view,
+                    &mut load_sample,
+                    &jobs,
+                    &mut bounce,
+                );
                 if let Some(l) = p.layers.get_mut(view.layer) {
                     let color = t::enc_blue();
-                    panel(ui, &format!("layer {:02} · {}", view.layer + 1, l.name), color, |ui| {
-                        layer_editor(ui, &mut ed, id, l, &mut view, &mut load_sample, &jobs, &mut bounce);
-                    });
+                    panel(
+                        ui,
+                        &fill(
+                            tr.forge_sec_layer,
+                            &[("n", &format!("{:02}", view.layer + 1)), ("name", &l.name)],
+                        ),
+                        color,
+                        |ui| {
+                            layer_editor(
+                                ui,
+                                &mut ed,
+                                id,
+                                l,
+                                &mut view,
+                                &mut load_sample,
+                                &jobs,
+                                &mut bounce,
+                            );
+                        },
+                    );
                 }
-                panel(ui, "master effects", t::enc_white(), |ui| {
+                panel(ui, tr.forge_sec_master_fx, t::enc_white(), |ui| {
                     fx_list(ui, &mut ed, &format!("forge-master-{id}"), &mut p.fx);
                 });
-                panel(ui, "export for game", t::enc_white(), |ui| {
+                panel(ui, tr.forge_sec_export, t::enc_white(), |ui| {
                     ui.horizontal_wrapped(|ui| {
                         // View settings, not the sound: no undo step.
                         let mut scratch = Edit::default();
-                        scratch.knob(ui, "FILES", t::enc_white(), &mut view.count, (1.0, 20.0, 5.0), false, &|v| format!("{:.0}", v.round()), "The sound, then variations of it: a little different each, so repeats never sound robotic");
+                        scratch.knob(
+                            ui,
+                            tr.forge_k_files,
+                            t::enc_white(),
+                            &mut view.count,
+                            (1.0, 20.0, 5.0),
+                            false,
+                            &|v| format!("{:.0}", v.round()),
+                            tr.forge_k_files_hint,
+                        );
                         view.count = view.count.round().clamp(1.0, 20.0);
                         ui.vertical(|ui| {
-                            if let (Some(i), _) = kit::chips(ui, &format!("forge-fmt-{id}"), &["WAV", "OGG"], view.ogg as usize, None) {
+                            if let (Some(i), _) = kit::chips(
+                                ui,
+                                &format!("forge-fmt-{id}"),
+                                &["WAV", "OGG"],
+                                view.ogg as usize,
+                                None,
+                            ) {
                                 view.ogg = i == 1;
                             }
-                            if let (Some(i), _) = kit::chips(ui, &format!("forge-rate-{id}"), &["48 kHz", "44.1 kHz"], view.rate_44 as usize, None) {
+                            if let (Some(i), _) = kit::chips(
+                                ui,
+                                &format!("forge-rate-{id}"),
+                                &["48 kHz", "44.1 kHz"],
+                                view.rate_44 as usize,
+                                None,
+                            ) {
                                 view.rate_44 = i == 1;
                             }
                         });
                         ui.vertical(|ui| {
                             ui.horizontal(|ui| {
                                 super::settings_ui::kit_switch(ui, &mut view.normalize);
-                                ui.label("Normalize").on_hover_text(
-                                    "Every file's loudest peak at −1 dB. Off: files keep the sound's own level, so a set of recipes stays balanced (a click under a shotgun)",
-                                );
+                                ui.label(tr.forge_normalize)
+                                    .on_hover_text(tr.forge_normalize_hint);
                             });
                             ui.horizontal(|ui| {
                                 super::settings_ui::kit_switch(ui, &mut view.mono);
-                                ui.label("Mono").on_hover_text("One channel: what a game engine positions in 3D");
+                                ui.label(tr.forge_mono).on_hover_text(tr.forge_mono_hint);
                             });
-                            export_now = kit::button(ui, "Export…", kit::Kind::Normal, true)
-                                .on_hover_text("Choose a folder: files are named like jump_01.wav, jump_02.wav")
-                                .clicked();
+                            export_now =
+                                kit::button(ui, tr.forge_export_btn, kit::Kind::Normal, true)
+                                    .on_hover_text(tr.forge_export_tip)
+                                    .clicked();
                         });
                     });
                 });
@@ -597,10 +754,10 @@ impl App {
             self.checkpoint();
             self.song.game_style = style;
             self.publish();
-            let what = style.map_or("any style".to_string(), |s| {
-                format!("the {} style", s.label())
+            let msg = style.map_or(tr.forge_style_any_msg.to_string(), |s| {
+                fill(tr.forge_style_set_msg, &[("style", tr.forge_style(s))])
             });
-            self.say(Tone::Quiet, format!("Recipes and new Forge channels now start in {what}. MAKE IT turns this sound too."));
+            self.say(Tone::Quiet, msg);
         }
         if mutate_now {
             view.seed = view.seed.wrapping_add(1);
@@ -642,6 +799,8 @@ impl App {
     /// Render one note of a project channel (plugin, sampler, synth) on a
     /// worker thread, the way a song export does, for Forge channel `forge`.
     fn forge_bounce(&mut self, forge: u64, into: Into, b: forge::Bounce) {
+        let tr = self.tr();
+        let stopped = tr.forge_render_stopped;
         use keyframexl::sequence::{Note, PPQ, Pattern};
         if self.forge_jobs.bounce.is_some() {
             return;
@@ -691,16 +850,14 @@ impl App {
             if let Some(h) = hold {
                 h.store(false, std::sync::atomic::Ordering::Relaxed);
             }
-            let _ = tx.send(
-                out.map(|f| (rate, f))
-                    .ok_or_else(|| "the render stopped".to_string()),
-            );
+            let _ = tx.send(out.map(|f| (rate, f)).ok_or_else(|| stopped.to_string()));
         });
         self.forge_jobs.bounce = Some((forge, into, b, rx));
     }
 
     /// A finished bounce becomes a layer (one undo step).
     fn poll_bounce(&mut self) {
+        let tr = self.tr();
         let Some((forge_id, into, b, rx)) = &self.forge_jobs.bounce else {
             return;
         };
@@ -708,7 +865,7 @@ impl App {
         let result = match rx.try_recv() {
             Ok(r) => r,
             Err(mpsc::TryRecvError::Empty) => return,
-            Err(mpsc::TryRecvError::Disconnected) => Err("the render stopped".into()),
+            Err(mpsc::TryRecvError::Disconnected) => Err(tr.forge_render_stopped.into()),
         };
         self.forge_jobs.bounce = None;
         let name = format!(
@@ -719,7 +876,10 @@ impl App {
         let (rate, mut frames) = match result {
             Ok(v) => v,
             Err(e) => {
-                self.say(Tone::Bad, format!("Could not bounce {name}: {e}."));
+                self.say(
+                    Tone::Bad,
+                    fill(tr.forge_bounce_err, &[("name", &name), ("err", &e)]),
+                );
                 return;
             }
         };
@@ -728,12 +888,7 @@ impl App {
             .iter()
             .position(|f| f[0].abs().max(f[1].abs()) > 1e-4);
         let Some(first) = first else {
-            self.say(
-                Tone::Bad,
-                format!(
-                    "{name} played silence. Load a sound into that channel, or pick another note."
-                ),
-            );
+            self.say(Tone::Bad, fill(tr.forge_bounce_silence, &[("name", &name)]));
             return;
         };
         frames.drain(..first);
@@ -761,19 +916,13 @@ impl App {
                 p.layers.push(l);
             }
             _ => {
-                self.say(
-                    Tone::Bad,
-                    "Six layers is the most: delete one, then bounce again.",
-                );
+                self.say(Tone::Bad, tr.forge_layers_full_bounce);
                 return;
             }
         }
         self.checkpoint();
         self.commit_forge(forge_id, p);
-        self.say(
-            Tone::Quiet,
-            format!("{name} bounced into the sound. Ctrl+Z undoes."),
-        );
+        self.say(Tone::Quiet, fill(tr.forge_bounced_ok, &[("name", &name)]));
     }
 
     /// Live check: `KFXL_CAPTURE_FORGE_BOUNCE=out.wav` bounces C5 of the last
@@ -870,6 +1019,7 @@ impl App {
     }
 
     fn forge_save(&mut self, ctx: &egui::Context, id: u64) {
+        let tr = self.tr();
         let Some(p) = self.forge_patch(id) else {
             return;
         };
@@ -878,23 +1028,26 @@ impl App {
                 ctx.data_mut(|d| d.remove::<Arc<Vec<ForgePatch>>>(egui::Id::new("forge-user")));
                 self.say(
                     Tone::Quiet,
-                    format!(
-                        "Saved {} to {}. It is in Start from now.",
-                        p.name,
-                        path.display()
+                    fill(
+                        tr.forge_saved_ok,
+                        &[("name", &p.name), ("path", &path.display().to_string())],
                     ),
                 );
             }
-            Err(e) => self.say(Tone::Bad, format!("Could not save the sound: {e}")),
+            Err(e) => self.say(
+                Tone::Bad,
+                fill(tr.forge_save_err, &[("err", &e.to_string())]),
+            ),
         }
     }
 
     fn forge_export(&mut self, id: u64, view: &View) {
+        let tr = self.tr();
         let Some(p) = self.forge_patch(id) else {
             return;
         };
         let Some(dir) = rfd::FileDialog::new()
-            .set_title("Export sounds into this folder")
+            .set_title(tr.forge_export_dlg_title)
             .pick_folder()
         else {
             return;
@@ -921,25 +1074,26 @@ impl App {
                     .unwrap_or_default();
                 self.say(
                     Tone::Quiet,
-                    format!(
-                        "Exported {} files ({first} …) to {}.",
+                    tr.forge_exported_files.fmt_with(
+                        tr.lang,
                         paths.len(),
-                        dir.display()
+                        &[("first", &first), ("dir", &dir.display().to_string())],
                     ),
                 );
             }
             Err(e) => self.say(
                 Tone::Bad,
-                format!("Export stopped: {e}. Files written before it are kept."),
+                fill(tr.forge_export_err, &[("err", &e.to_string())]),
             ),
         }
     }
 
     /// Pick an audio file for layer `layer` of channel `id`.
     fn forge_load_sample(&mut self, id: u64, layer: usize) {
+        let tr = self.tr();
         let Some(path) = rfd::FileDialog::new()
-            .add_filter("Audio", &["wav", "flac", "ogg"])
-            .set_title("Sample for this layer")
+            .add_filter(tr.forge_sample_filter, &["wav", "flac", "ogg"])
+            .set_title(tr.forge_sample_dlg_title)
             .pick_file()
         else {
             return;
@@ -947,7 +1101,10 @@ impl App {
         let (rate, mut frames) = match crate::import::read_audio(&path) {
             Ok(v) => v,
             Err(e) => {
-                self.say(Tone::Bad, format!("Could not read the sample: {e}"));
+                self.say(
+                    Tone::Bad,
+                    fill(tr.forge_sample_read_err, &[("err", &e.to_string())]),
+                );
                 return;
             }
         };
@@ -976,7 +1133,7 @@ impl App {
         self.commit_forge(id, p);
         self.say(
             Tone::Quiet,
-            format!("{name} loaded into the layer. Ctrl+Z undoes."),
+            fill(tr.forge_sample_loaded, &[("name", &name)]),
         );
     }
 }
@@ -1003,6 +1160,8 @@ fn cached_user_sounds(ctx: &egui::Context) -> Arc<Vec<ForgePatch>> {
 struct Bouncing<'a> {
     now: Option<(Into, forge::Bounce)>,
     channels: &'a [(u64, String)],
+    /// Shown for a channel that no longer exists.
+    deleted: &'static str,
 }
 
 impl Bouncing<'_> {
@@ -1010,7 +1169,7 @@ impl Bouncing<'_> {
         self.channels
             .iter()
             .find(|c| c.0 == channel)
-            .map_or("a deleted channel", |c| c.1.as_str())
+            .map_or(self.deleted, |c| c.1.as_str())
     }
 }
 
@@ -1025,7 +1184,8 @@ fn layers_panel(
     jobs: &Bouncing,
     bounce: &mut Option<(Into, forge::Bounce)>,
 ) {
-    panel(ui, "layers", t::enc_blue(), |ui| {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
+    panel(ui, tr.forge_sec_layers, t::enc_blue(), |ui| {
         let solo_any = p.layers.iter().any(|l| l.solo);
         let mut remove = None;
         for (i, l) in p.layers.iter_mut().enumerate() {
@@ -1041,11 +1201,7 @@ fn layers_panel(
                             .color(if l.solo { t::wait() } else { t::muted() }),
                     )
                     .min_size(vec2(24.0, 22.0));
-                    if ui
-                        .add(solo)
-                        .on_hover_text("Solo: hear only soloed layers")
-                        .clicked()
-                    {
+                    if ui.add(solo).on_hover_text(tr.forge_solo_tip).clicked() {
                         l.solo = !l.solo;
                         ed.started = true;
                         ed.changed = true;
@@ -1057,16 +1213,16 @@ fn layers_panel(
                         .color(if audible { t::text() } else { t::muted() });
                     if ui
                         .selectable_label(view.layer == i, label)
-                        .on_hover_text("Edit this layer below")
+                        .on_hover_text(tr.forge_edit_layer_tip)
                         .clicked()
                     {
                         view.layer = i;
                     }
                     let what = match &l.source {
-                        Source::Osc { wave, .. } => wave.label().to_string(),
-                        Source::Noise { color, .. } => format!("{} noise", color.label()),
+                        Source::Osc { wave, .. } => tr.forge_wave(*wave).to_string(),
+                        Source::Noise { color, .. } => tr.forge_noise_full(*color).to_string(),
                         Source::Sample { name, .. } => name.clone(),
-                        Source::Synth { .. } => "Tide synth".into(),
+                        Source::Synth { .. } => tr.forge_tide_synth_lbl.into(),
                     };
                     ui.label(
                         egui::RichText::new(what)
@@ -1075,7 +1231,7 @@ fn layers_panel(
                     );
                     if ui
                         .small_button("×")
-                        .on_hover_text("Delete this layer")
+                        .on_hover_text(tr.forge_delete_layer_tip)
                         .clicked()
                     {
                         remove = Some(i);
@@ -1090,48 +1246,56 @@ fn layers_panel(
             ed.changed = true;
         }
         if let Some((into, b)) = jobs.now {
-            let what = match into {
-                Into::NewLayer => "a new layer".to_string(),
-                Into::Layer(i) => format!("layer {:02}", i + 1),
+            let channel = jobs.name(b.channel);
+            let note = super::roll::note_name(b.key);
+            let text = match into {
+                Into::NewLayer => fill(
+                    tr.forge_bouncing_new,
+                    &[("channel", channel), ("note", &note)],
+                ),
+                Into::Layer(i) => fill(
+                    tr.forge_bouncing_layer,
+                    &[
+                        ("channel", channel),
+                        ("note", &note),
+                        ("n", &format!("{:02}", i + 1)),
+                    ],
+                ),
             };
-            ui.label(
-                egui::RichText::new(format!(
-                    "Bouncing {} · {} into {what}…",
-                    jobs.name(b.channel),
-                    super::roll::note_name(b.key)
-                ))
-                .color(t::wait()),
-            );
+            ui.label(egui::RichText::new(text).color(t::wait()));
         }
         if p.layers.is_empty() {
-            ui.label(
-                egui::RichText::new(
-                    "No layers: the sound is silent. Add one, or pick a recipe in Start from.",
-                )
-                .color(t::muted()),
-            );
+            ui.label(egui::RichText::new(tr.forge_layers_empty).color(t::muted()));
         }
         ui.horizontal(|ui| {
             let full = p.layers.len() >= MAX_LAYERS;
             ui.add_enabled_ui(!full, |ui| {
-                ui.menu_button("+ Add layer", |ui| {
+                ui.menu_button(tr.forge_add_layer, |ui| {
                     kit::menu_style(ui);
-                    let new = if ui.button("Oscillator").clicked() {
+                    let new = if ui.button(tr.forge_src_osc).clicked() {
                         Some(Layer::new("Tone", Source::osc(Wave::Square, 440.0), 0.3))
-                    } else if ui.button("Noise").clicked() {
-                        Some(Layer::new("Noise", Source::noise(NoiseColor::White, 4000.0), 0.3))
-                    } else if ui.button("Sample…").clicked() {
+                    } else if ui.button(tr.forge_src_noise).clicked() {
+                        Some(Layer::new(
+                            "Noise",
+                            Source::noise(NoiseColor::White, 4000.0),
+                            0.3,
+                        ))
+                    } else if ui.button(tr.forge_src_sample_menu).clicked() {
                         let mut l = Layer::new("Sample", Source::osc(Wave::Sine, 440.0), 0.3);
                         l.amp = Curve::flat(1.0);
                         *load_sample = Some(p.layers.len());
                         Some(l)
                     } else if !jobs.channels.is_empty()
                         && let Some(ch) = ui
-                            .menu_button("Note from a channel", |ui| {
+                            .menu_button(tr.forge_src_channel_note, |ui| {
                                 kit::menu_style(ui);
                                 let mut pick = None;
                                 for (cid, name) in jobs.channels {
-                                    if ui.button(name).on_hover_text("One C5 of this channel through its mixer insert: a VST plugin, the sampler, a synth").clicked() {
+                                    if ui
+                                        .button(name)
+                                        .on_hover_text(tr.forge_src_channel_note_tip)
+                                        .clicked()
+                                    {
                                         pick = Some(*cid);
                                     }
                                 }
@@ -1140,11 +1304,25 @@ fn layers_panel(
                             .inner
                             .flatten()
                     {
-                        *bounce = Some((Into::NewLayer, forge::Bounce { channel: ch, key: 60, hold: 0.5 }));
+                        *bounce = Some((
+                            Into::NewLayer,
+                            forge::Bounce {
+                                channel: ch,
+                                key: 60,
+                                hold: 0.5,
+                            },
+                        ));
                         ui.close_menu();
                         None
-                    } else if ui.button("Synth note (KeyFrame Tide)").clicked() {
-                        Some(Layer::new("Synth", Source::Synth { patch: Box::new(keyframexl::synth::SynthPatch::factory(2)), key: 60 }, 0.5))
+                    } else if ui.button(tr.forge_src_tide_note).clicked() {
+                        Some(Layer::new(
+                            "Synth",
+                            Source::Synth {
+                                patch: Box::new(keyframexl::synth::SynthPatch::factory(2)),
+                                key: 60,
+                            },
+                            0.5,
+                        ))
                     } else {
                         None
                     };
@@ -1157,10 +1335,19 @@ fn layers_panel(
                     }
                 })
                 .response
-                .on_hover_text(if full { "Six layers is the most" } else { "Add a source to the sound" });
-                if !p.layers.is_empty() && ui.button("Duplicate").on_hover_text("Copy the selected layer").clicked() {
+                .on_hover_text(if full {
+                    tr.forge_layers_max_tip
+                } else {
+                    tr.forge_add_layer_tip
+                });
+                if !p.layers.is_empty()
+                    && ui
+                        .button(tr.forge_duplicate)
+                        .on_hover_text(tr.forge_duplicate_tip)
+                        .clicked()
+                {
                     let mut l = p.layers[view.layer].clone();
-                    l.name = format!("{} copy", l.name);
+                    l.name = fill(tr.forge_layer_copy_suffix, &[("name", &l.name)]);
                     p.layers.insert(view.layer + 1, l);
                     view.layer += 1;
                     ed.started = true;
@@ -1182,13 +1369,14 @@ fn layer_editor(
     jobs: &Bouncing,
     bounce: &mut Option<(Into, forge::Bounce)>,
 ) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let c = t::enc_blue();
     let salt = format!("forge-{id}-{}", view.layer);
     let mut name = l.name.clone();
     let r = ui.add(
         egui::TextEdit::singleline(&mut name)
             .desired_width(220.0)
-            .hint_text("Layer name"),
+            .hint_text(tr.forge_layer_name_hint),
     );
     if r.changed() {
         if kit::first_edit(ui, &r) {
@@ -1200,7 +1388,12 @@ fn layer_editor(
     kit::end_edit(ui, &r);
 
     // Source: what the layer plays.
-    let kinds = ["Oscillator", "Noise", "Sample", "Synth"];
+    let kinds = [
+        tr.forge_src_osc,
+        tr.forge_src_noise,
+        tr.forge_src_sample,
+        tr.forge_src_synth,
+    ];
     let at = source_kind(&l.source);
     if let (Some(k), _) = kit::chips(ui, &format!("{salt}-src"), &kinds, at, None)
         && k != at
@@ -1233,42 +1426,42 @@ fn layer_editor(
                 ed,
                 &format!("{salt}-wave"),
                 &Wave::ALL,
-                &Wave::ALL.map(Wave::label),
+                &Wave::ALL.map(|w| tr.forge_wave(w)),
                 wave,
             );
             ui.horizontal_wrapped(|ui| {
                 knob(
                     ui,
                     ed,
-                    "PITCH",
+                    tr.forge_k_pitch,
                     c,
                     f,
                     (20.0, 8000.0, 440.0),
                     true,
                     &hz,
-                    "Frequency where the pitch line is at 0",
+                    tr.forge_k_osc_pitch_hint,
                 );
                 knob(
                     ui,
                     ed,
-                    "VIBRATO",
+                    tr.forge_k_vibrato,
                     c,
                     vibrato,
                     (0.0, 4.0, 0.0),
                     false,
                     &|v| format!("{v:.2} st"),
-                    "How far the pitch wobbles",
+                    tr.forge_k_vibrato_hint,
                 );
                 knob(
                     ui,
                     ed,
-                    "RATE",
+                    tr.forge_k_rate,
                     c,
                     vibrato_hz,
                     (0.0, 30.0, 6.0),
                     false,
                     &|v| format!("{v:.1} Hz"),
-                    "How fast it wobbles",
+                    tr.forge_k_vib_rate_hint,
                 );
             });
         }
@@ -1278,20 +1471,20 @@ fn layer_editor(
                 ed,
                 &format!("{salt}-noise"),
                 &NoiseColor::ALL,
-                &NoiseColor::ALL.map(NoiseColor::label),
+                &NoiseColor::ALL.map(|c| tr.forge_noise_color(c)),
                 color,
             );
             if matches!(color, NoiseColor::Digital | NoiseColor::Crackle) {
                 let hint = if *color == NoiseColor::Digital {
-                    "Clock of the chip noise: low is gritty, high is hiss"
+                    tr.forge_k_digital_rate_hint
                 } else {
-                    "Pops per second"
+                    tr.forge_k_crackle_rate_hint
                 };
                 ui.horizontal_wrapped(|ui| {
                     knob(
                         ui,
                         ed,
-                        "RATE",
+                        tr.forge_k_rate,
                         c,
                         f,
                         (10.0, 48_000.0, 4000.0),
@@ -1323,15 +1516,38 @@ fn layer_editor(
                         });
                     let mut k = nb.key as f64;
                     let mut scratch = Edit::default();
-                    scratch.knob(ui, "NOTE", c, &mut k, (24.0, 96.0, 60.0), false, &|v| super::roll::note_name(v.round() as u8), "The note the channel plays");
+                    scratch.knob(
+                        ui,
+                        tr.forge_k_note,
+                        c,
+                        &mut k,
+                        (24.0, 96.0, 60.0),
+                        false,
+                        &|v| super::roll::note_name(v.round() as u8),
+                        tr.forge_k_bounce_note_hint,
+                    );
                     nb.key = k.round().clamp(0.0, 127.0) as u8;
                     let mut h = nb.hold as f64;
-                    scratch.knob(ui, "HOLD", c, &mut h, (0.02, 4.0, 0.5), true, &|v| secs(v), "How long the key is held; the release rings on");
+                    scratch.knob(
+                        ui,
+                        tr.forge_k_hold,
+                        c,
+                        &mut h,
+                        (0.02, 4.0, 0.5),
+                        true,
+                        &|v| secs(v),
+                        tr.forge_k_hold_hint,
+                    );
                     nb.hold = h as f32;
                     let busy = jobs.now.is_some();
-                    if kit::button(ui, "Bounce", kit::Kind::Normal, !busy && jobs.channels.iter().any(|c| c.0 == nb.channel))
-                        .on_hover_text("Render the note again with these settings (and the channel's current sound)")
-                        .clicked()
+                    if kit::button(
+                        ui,
+                        tr.forge_bounce_btn,
+                        kit::Kind::Normal,
+                        !busy && jobs.channels.iter().any(|c| c.0 == nb.channel),
+                    )
+                    .on_hover_text(tr.forge_bounce_btn_tip)
+                    .clicked()
                     {
                         *bounce = Some((Into::Layer(view.layer), nb));
                     }
@@ -1339,14 +1555,14 @@ fn layer_editor(
             }
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(name.as_str()).font(t::sans(14.0)));
-                if ui.button("Replace…").clicked() {
+                if ui.button(tr.forge_replace_btn).clicked() {
                     *load_sample = Some(view.layer);
                 }
                 super::settings_ui::kit_switch(ui, reverse).then(|| {
                     ed.started = true;
                     ed.changed = true;
                 });
-                ui.label("Reverse");
+                ui.label(tr.forge_reverse_lbl);
             });
         }
         Source::Synth { patch, key } => {
@@ -1356,7 +1572,7 @@ fn layer_editor(
                     .find(|&i| **patch == keyframexl::synth::SynthPatch::factory(i));
                 egui::ComboBox::from_id_salt(format!("{salt}-tide"))
                     .width(160.0)
-                    .selected_text(now.map_or("Edited patch", |i| names[i]))
+                    .selected_text(now.map_or(tr.forge_edited_patch, |i| names[i]))
                     .show_ui(ui, |ui| {
                         kit::menu_style(ui);
                         for (i, n) in names.iter().enumerate() {
@@ -1370,13 +1586,13 @@ fn layer_editor(
                 let mut k = *key as f64;
                 ed.knob(
                     ui,
-                    "NOTE",
+                    tr.forge_k_note,
                     c,
                     &mut k,
                     (24.0, 96.0, 60.0),
                     false,
                     &|v| super::roll::note_name(v.round() as u8),
-                    "The synth note this layer plays",
+                    tr.forge_k_synth_note_hint,
                 );
                 *key = k.round().clamp(0.0, 127.0) as u8;
             });
@@ -1388,46 +1604,46 @@ fn layer_editor(
         knob(
             ui,
             ed,
-            "START",
+            tr.forge_k_start,
             c,
             &mut l.start,
             (0.0, 2.0, 0.0),
             false,
             &|v| secs(v),
-            "When the layer comes in",
+            tr.forge_k_start_hint,
         );
         knob(
             ui,
             ed,
-            "LENGTH",
+            tr.forge_k_length,
             c,
             &mut l.length,
             (0.01, forge::MAX_SECONDS as f64, 0.3),
             true,
             &|v| secs(v),
-            "How long it lasts; its lines stretch with it",
+            tr.forge_k_length_hint,
         );
         knob(
             ui,
             ed,
-            "GAIN",
+            tr.forge_k_gain,
             c,
             &mut l.gain,
             (0.0, 2.0, 1.0),
             false,
             &pct,
-            "Layer level",
+            tr.forge_k_gain_hint,
         );
         knob(
             ui,
             ed,
-            "PAN",
+            tr.forge_k_pan,
             c,
             &mut l.pan,
             (-1.0, 1.0, 0.0),
             false,
             &signed,
-            "Left .. right",
+            tr.forge_k_pan_hint,
         );
     });
 
@@ -1437,7 +1653,11 @@ fn layer_editor(
     if let (Some(i), _) = kit::chips(
         ui,
         &format!("{salt}-line"),
-        &["Pitch", "Volume", "Filter"],
+        &[
+            tr.forge_line_pitch,
+            tr.forge_line_volume,
+            tr.forge_line_filter,
+        ],
         at,
         None,
     ) {
@@ -1469,7 +1689,7 @@ fn layer_editor(
                 ed,
                 &format!("{salt}-fmode"),
                 &FilterMode::ALL,
-                &FilterMode::ALL.map(FilterMode::label),
+                &FilterMode::ALL.map(|m| tr.forge_filter_mode(m)),
                 &mut l.filter,
             );
             if l.filter != FilterMode::Off {
@@ -1486,13 +1706,13 @@ fn layer_editor(
                     knob(
                         ui,
                         ed,
-                        "RESO",
+                        tr.forge_k_reso,
                         t::enc_orange(),
                         &mut l.resonance,
                         (0.0, 1.0, 0.0),
                         false,
                         &pct,
-                        "Ring at the cutoff: a whistle on sweeps",
+                        tr.forge_k_reso_hint,
                     );
                 });
             }
@@ -1505,7 +1725,7 @@ fn layer_editor(
         ui.painter(),
         r.left_center(),
         Align2::LEFT_CENTER,
-        "LAYER EFFECTS",
+        tr.forge_layer_fx_caps,
         10.0,
         t::muted(),
     );
@@ -1523,6 +1743,7 @@ fn curve_editor(
     color: Color32,
     length: f64,
 ) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let (lo, hi) = match kind {
         Line::Pitch => {
             let most = c.points.iter().map(|p| p.v.abs()).fold(0.0, f32::max);
@@ -1704,13 +1925,14 @@ fn curve_editor(
         }
     }
     resp.on_hover_text(match kind {
-        Line::Pitch => "Drag points · double-click adds or removes one · drag the line to bend it · Alt: off the semitones",
-        _ => "Drag points · double-click adds or removes one · drag the line to bend it",
+        Line::Pitch => tr.forge_curve_pitch_tip,
+        _ => tr.forge_curve_tip,
     });
 }
 
 /// A chain of effects: switch, name, every knob, remove; an add menu below.
 fn fx_list(ui: &mut Ui, ed: &mut Edit, salt: &str, fx: &mut Vec<FxSlot>) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let mut remove = None;
     for (i, slot) in fx.iter_mut().enumerate() {
         ui.push_id((salt, i), |ui| {
@@ -1748,7 +1970,7 @@ fn fx_list(ui: &mut Ui, ed: &mut Edit, salt: &str, fx: &mut Vec<FxSlot>) {
                 }
                 if ui
                     .small_button("×")
-                    .on_hover_text("Remove this effect")
+                    .on_hover_text(tr.forge_remove_fx_tip)
                     .clicked()
                 {
                     remove = Some(i);
@@ -1764,7 +1986,7 @@ fn fx_list(ui: &mut Ui, ed: &mut Edit, salt: &str, fx: &mut Vec<FxSlot>) {
     egui::ComboBox::from_id_salt((salt, "add"))
         .width(150.0)
         .selected_text(
-            egui::RichText::new("+ Add effect")
+            egui::RichText::new(tr.forge_add_fx)
                 .font(t::sans(12.5))
                 .color(t::faint()),
         )

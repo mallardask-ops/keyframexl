@@ -4,6 +4,7 @@
 //! in the middle, and pinned performance macros + audition keyboard across the bottom.
 
 use super::{App, kit};
+use crate::i18n::fill;
 use crate::theme as t;
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 use keyframexl::{
@@ -45,34 +46,6 @@ pub(super) fn secs(v: f64) -> String {
     }
 }
 
-fn table_name(v: Table) -> &'static str {
-    match v {
-        Table::SineSaw => "Sine-Saw",
-        Table::SquarePulse => "Square",
-        Table::Organ => "Organ",
-        Table::Vowel => "Vowel",
-    }
-}
-fn warp_name(v: Warp) -> &'static str {
-    match v {
-        Warp::Bend => "Bend",
-        Warp::Sync => "Sync",
-        Warp::PwmMirror => "Mirror",
-        Warp::FmSub => "FM Sub",
-    }
-}
-fn param_name(v: Param) -> &'static str {
-    match v {
-        Param::Position => "Position",
-        Param::Warp => "Warp",
-        Param::Cutoff => "Cutoff",
-        Param::Resonance => "Resonance",
-        Param::Sub => "Sub",
-        Param::Noise => "Noise",
-        Param::Detune => "Detune",
-        Param::Spread => "Spread",
-    }
-}
 const TABLES: [Table; 4] = [
     Table::SineSaw,
     Table::SquarePulse,
@@ -391,6 +364,7 @@ fn bipolar_bar(
     value: &mut f64,
     hint: &str,
 ) -> (bool, bool) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let (rect, resp) = ui.allocate_exact_size(vec2(width, 20.0), Sense::click_and_drag());
     let mut started = false;
     let mut changed = false;
@@ -439,10 +413,7 @@ fn bipolar_bar(
         t::text(),
     );
     let _ = id;
-    kit::tip(
-        resp,
-        format!("{hint}\nDrag left/right · Shift fine · Double-click resets"),
-    );
+    kit::tip(resp, fill(tr.tide_bipolar_tip, &[("hint", hint)]));
     (started, changed)
 }
 
@@ -537,6 +508,7 @@ fn tide_wave_scope(
     active: bool,
     modulated_pos: Option<f64>,
 ) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let bank = table_bank();
     let (area, resp) =
         ui.allocate_exact_size(vec2(ui.available_width(), 92.0), Sense::click_and_drag());
@@ -665,12 +637,14 @@ fn tide_wave_scope(
     p.text(
         well.left_top() + vec2(8.0, 5.0),
         Align2::LEFT_TOP,
-        format!(
-            "{}  POS {:.0}%  {} {}",
-            table_name(table).to_uppercase(),
-            *position * 100.0,
-            warp_name(warp).to_uppercase(),
-            signed(*warp_amount)
+        fill(
+            tr.tide_hud_pos,
+            &[
+                ("table", &tr.tide_table(table).to_uppercase()),
+                ("pos", &format!("{:.0}", *position * 100.0)),
+                ("warp", &tr.tide_warp(warp).to_uppercase()),
+                ("amt", &signed(*warp_amount)),
+            ],
         ),
         t::mono(12.0),
         if active { t::TIDE_MIST } else { t::faint() },
@@ -679,7 +653,7 @@ fn tide_wave_scope(
         p.text(
             well.right_top() + vec2(-8.0, 5.0),
             Align2::RIGHT_TOP,
-            "MUTED",
+            tr.tide_hud_muted,
             t::mono(12.0),
             t::wait(),
         );
@@ -687,20 +661,18 @@ fn tide_wave_scope(
         p.text(
             well.right_top() + vec2(-8.0, 5.0),
             Align2::RIGHT_TOP,
-            "X:POS  Y:WARP",
+            tr.tide_hud_xy_wave,
             t::mono(12.0),
             t::TIDE_CYAN,
         );
     }
 
-    kit::tip(
-        resp,
-        "Drag horizontally to morph Position, vertically to bend Warp · Shift fine · Double-click resets Warp",
-    );
+    kit::tip(resp, tr.tide_wave_scope_tip);
 }
 
 /// Interactive harmonic spectrum scope for Osc C (Spectral).
 fn tide_spectral_scope(ui: &mut Ui, ed: &mut Edit, c: &mut keyframexl::synth::Spectral) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     use keyframexl::synth::MAX_PARTIALS;
     let (area, resp) =
         ui.allocate_exact_size(vec2(ui.available_width(), 92.0), Sense::click_and_drag());
@@ -791,26 +763,31 @@ fn tide_spectral_scope(ui: &mut Ui, ed: &mut Edit, c: &mut keyframexl::synth::Sp
     p.text(
         well.left_top() + vec2(8.0, 5.0),
         Align2::LEFT_TOP,
-        format!("SPECTRAL  {n} PARTIALS  TILT {}", signed(c.tilt)),
+        fill(
+            tr.tide_hud_spectral,
+            &[("n", &n.to_string()), ("tilt", &signed(c.tilt))],
+        ),
         t::mono(12.0),
         if on { t::TIDE_MIST } else { t::faint() },
     );
     p.text(
         well.right_top() + vec2(-8.0, 5.0),
         Align2::RIGHT_TOP,
-        if on { "X:COUNT  Y:TILT" } else { "MUTED" },
+        if on {
+            tr.tide_hud_xy_spec
+        } else {
+            tr.tide_hud_muted
+        },
         t::mono(12.0),
         if on { t::TIDE_CYAN } else { t::wait() },
     );
-    kit::tip(
-        resp,
-        "Drag horizontally to set harmonic count, vertically to tilt spectrum · Double-click resets tilt",
-    );
+    kit::tip(resp, tr.tide_spec_scope_tip);
 }
 
 /// Interactive Filter Frequency Scope: drag node for Cutoff (X) & Resonance (Y),
 /// plus live Envelope Modulation ghost curve.
 fn tide_filter_scope(ui: &mut Ui, ed: &mut Edit, p: &mut SynthPatch) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let (area, resp) =
         ui.allocate_exact_size(vec2(ui.available_width(), 108.0), Sense::click_and_drag());
     let painter = ui.painter().clone();
@@ -927,7 +904,13 @@ fn tide_filter_scope(ui: &mut Ui, ed: &mut Edit, p: &mut SynthPatch) {
     painter.text(
         well.left_top() + vec2(8.0, 5.0),
         Align2::LEFT_TOP,
-        format!("{}  RESO {:.0}%", hz(p.cutoff), p.resonance * 100.0),
+        fill(
+            tr.tide_hud_reso,
+            &[
+                ("hz", &hz(p.cutoff)),
+                ("reso", &format!("{:.0}", p.resonance * 100.0)),
+            ],
+        ),
         t::mono(12.0),
         t::TIDE_MIST,
     );
@@ -935,15 +918,12 @@ fn tide_filter_scope(ui: &mut Ui, ed: &mut Edit, p: &mut SynthPatch) {
         painter.text(
             well.right_top() + vec2(-8.0, 5.0),
             Align2::RIGHT_TOP,
-            format!("ENV {}", signed(p.env_amount)),
+            fill(tr.tide_hud_env, &[("amt", &signed(p.env_amount))]),
             t::mono(12.0),
             t::TIDE_CORAL,
         );
     }
-    kit::tip(
-        resp,
-        "Drag horizontally for Cutoff, vertically for Resonance · Shift fine · Double-click resets Resonance",
-    );
+    kit::tip(resp, tr.tide_flt_scope_tip);
 }
 
 // ---------------------------------------------------------------- Envelopes
@@ -959,6 +939,7 @@ fn curve_mut(e: &mut Adsr, i: usize) -> &mut f64 {
 /// Interactive envelope canvas: drag breakpoints (Attack, Decay/Sustain, Release)
 /// OR drag any segment middle up/down to bend its curve.
 fn envelope_view(ui: &mut Ui, ed: &mut Edit, e: &mut Adsr, color: Color32) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let (area, resp) =
         ui.allocate_exact_size(vec2(ui.available_width(), 66.0), Sense::click_and_drag());
     let painter = ui.painter().clone();
@@ -1104,53 +1085,51 @@ fn envelope_view(ui: &mut Ui, ed: &mut Edit, e: &mut Adsr, color: Color32) {
         t::mono(12.0),
         t::TIDE_MIST,
     );
-    kit::tip(
-        resp,
-        "Drag dots to shape A / D / S / R · Drag segment up/down to bend curve · Double-click straightens",
-    );
+    kit::tip(resp, tr.tide_env_view_tip);
 }
 
 fn envelope_knobs(ui: &mut Ui, ed: &mut Edit, e: &mut Adsr, color: Color32) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     ui.horizontal_wrapped(|ui| {
         ed.knob(
             ui,
-            "ATTACK",
+            tr.tide_k_attack,
             color,
             &mut e.attack,
             (0.0, 10.0, 0.005),
             true,
             &secs,
-            "Rise time",
+            tr.tide_k_attack_hint,
         );
         ed.knob(
             ui,
-            "DECAY",
+            tr.tide_k_decay,
             color,
             &mut e.decay,
             (0.0, 20.0, 0.0),
             true,
             &secs,
-            "Fall time to sustain",
+            tr.tide_k_decay_hint,
         );
         ed.knob(
             ui,
-            "SUSTAIN",
+            tr.tide_k_sustain,
             color,
             &mut e.sustain,
             (0.0, 1.0, 1.0),
             false,
             &pct,
-            "Held level",
+            tr.tide_k_sustain_hint,
         );
         ed.knob(
             ui,
-            "RELEASE",
+            tr.tide_k_release,
             color,
             &mut e.release,
             (0.0, 20.0, 0.015),
             true,
             &secs,
-            "Fade after note off",
+            tr.tide_k_release_hint,
         );
     });
     for v in [&mut e.attack, &mut e.decay, &mut e.release] {
@@ -1185,6 +1164,7 @@ fn source_color(s: ModSource) -> Color32 {
 }
 
 fn lfo_scope(ui: &mut Ui, lfo: &Lfo, tempo: f64) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let (area, _) = ui.allocate_exact_size(vec2(ui.available_width(), 64.0), Sense::hover());
     let p = ui.painter();
     let well = tide_well(p, area, 6.0);
@@ -1245,9 +1225,13 @@ fn lfo_scope(ui: &mut Ui, lfo: &Lfo, tempo: f64) {
     }
 
     let rate = if lfo.shape == LfoShape::Off {
-        "OFF".to_string()
+        tr.tide_lfo_off.to_string()
     } else if lfo.sync {
-        format!("SYNC {}", division_name(lfo.division))
+        format!(
+            "{} {}",
+            tr.tide_lfo_sync_prefix,
+            division_name(lfo.division)
+        )
     } else {
         format!("{:.2} Hz", lfo.rate.clamp(0.01, 30.0))
     };
@@ -1358,6 +1342,7 @@ fn fx_mini_scope(ui: &mut Ui, kind: keyframexl::fx::FxKind, params: &[f32], on: 
 // ---------------------------------------------------------------- Unison Fan Visualizer
 
 fn unison_fan_scope(ui: &mut Ui, unison: u8, detune: f64, spread: f64) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let (area, _) = ui.allocate_exact_size(vec2(ui.available_width(), 70.0), Sense::hover());
     let p = ui.painter();
     let well = tide_well(p, area, 6.0);
@@ -1408,7 +1393,7 @@ fn unison_fan_scope(ui: &mut Ui, unison: u8, detune: f64, spread: f64) {
     p.text(
         pos2(well.center().x, well.top() + 4.0),
         Align2::CENTER_TOP,
-        format!("{count} VOICE{}", if count == 1 { "" } else { "S" }),
+        tr.tide_unison_voices.fmt(tr.lang, count),
         t::mono(12.0),
         t::TIDE_CYAN,
     );
@@ -1425,6 +1410,7 @@ fn osc_tab_button(
     level: f64,
     preview_fn: impl FnOnce(&egui::Painter, Rect, Color32),
 ) -> (bool, bool) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let (rect, resp) = ui.allocate_exact_size(vec2(w, 40.0), Sense::click());
     let p = ui.painter();
     let on = level > 0.0;
@@ -1485,7 +1471,11 @@ fn osc_tab_button(
     p.text(
         pos2(rect.left() + 23.0, rect.bottom() - 4.0),
         Align2::LEFT_BOTTOM,
-        if on { pct(level) } else { "OFF".into() },
+        if on {
+            pct(level)
+        } else {
+            tr.tide_osc_off.into()
+        },
         t::mono(11.0),
         if on { t::TIDE_CYAN } else { t::faint() },
     );
@@ -1500,7 +1490,10 @@ fn osc_tab_button(
         preview_fn(p, thumb, if on { t::TIDE_CYAN } else { t::strong() });
     }
 
-    kit::tip(led_resp.clone(), format!("Toggle {label} on/off"));
+    kit::tip(
+        led_resp.clone(),
+        fill(tr.tide_osc_toggle_tip, &[("label", label)]),
+    );
     let toggled_power = led_resp.clicked();
     let picked_tab = resp.clicked() && !toggled_power;
     (picked_tab, toggled_power)
@@ -1583,6 +1576,7 @@ const BLACK_SLOTS: [(usize, u8); 5] = [(0, 1), (1, 3), (3, 6), (4, 8), (5, 10)];
 
 /// Shared 2-octave playable audition keyboard strip (used by Tide; velocity by click Y).
 fn audition_keyboard(app: &mut App, ui: &mut Ui, id: u64, octave: &mut i8, accent: Color32) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         let oct_down = ui
@@ -1590,7 +1584,7 @@ fn audition_keyboard(app: &mut App, ui: &mut Ui, id: u64, octave: &mut i8, accen
                 *octave > 0,
                 egui::Button::new("◀").min_size(vec2(22.0, 32.0)),
             )
-            .on_hover_text("Octave down");
+            .on_hover_text(tr.tide_kb_oct_down);
         if oct_down.clicked() {
             *octave = (*octave - 1).max(0);
         }
@@ -1599,7 +1593,7 @@ fn audition_keyboard(app: &mut App, ui: &mut Ui, id: u64, octave: &mut i8, accen
                 *octave < 6,
                 egui::Button::new("▶").min_size(vec2(22.0, 32.0)),
             )
-            .on_hover_text("Octave up");
+            .on_hover_text(tr.tide_kb_oct_up);
         if oct_up.clicked() {
             *octave = (*octave + 1).min(6);
         }
@@ -1689,10 +1683,7 @@ fn audition_keyboard(app: &mut App, ui: &mut Ui, id: u64, octave: &mut i8, accen
             app.release_note();
         }
         ui.data_mut(|d| d.insert_temp(kb_drag_id, down));
-        kit::tip(
-            resp,
-            "Click or drag keys to audition · Lower on key = higher velocity",
-        );
+        kit::tip(resp, tr.tide_kb_tip);
     });
 }
 
@@ -1792,6 +1783,7 @@ impl App {
         view: &mut TideView,
         ed: &mut Edit,
     ) {
+        let tr = self.tr();
         let key = egui::Id::new(("tide-preset", id));
         let user = super::presets_ui::cached_synth_presets(ui.ctx());
         let names: Vec<&str> = SynthPatch::PRESETS
@@ -1839,26 +1831,20 @@ impl App {
                     // Interactive signal-chain indicators: [A][B][C] -> [FLT] -> [FX]
                     let fx_on = p.fx.iter().filter(|s| s.enabled).count();
                     let chain_items = [
-                        (
-                            "A",
-                            p.level > 0.0,
-                            t::TIDE_CYAN,
-                            0usize,
-                            "Jump to Oscillator A",
-                        ),
+                        ("A", p.level > 0.0, t::TIDE_CYAN, 0usize, tr.tide_jump_osc_a),
                         (
                             "B",
                             p.osc_b.level > 0.0,
                             t::TIDE_CYAN,
                             1,
-                            "Jump to Oscillator B",
+                            tr.tide_jump_osc_b,
                         ),
                         (
                             "C",
                             p.spectral.level > 0.0,
                             t::TIDE_CYAN,
                             2,
-                            "Jump to Oscillator C (Spectral)",
+                            tr.tide_jump_osc_c,
                         ),
                     ];
                     for (tag, active, col, tab_idx, tip) in chain_items {
@@ -1926,20 +1912,20 @@ impl App {
                         t::mono(12.0),
                         if fx_on > 0 { t::text() } else { t::faint() },
                     );
-                    if kit::tip(fx_resp, "Open Effects bay").clicked() {
+                    if kit::tip(fx_resp, tr.tide_open_fx_bay).clicked() {
                         view.deck_tab = 2;
                     }
 
                     ui.separator();
 
                     // Preset stepper & dropdown.
-                    if ui.button("◀").on_hover_text("Previous preset").clicked() {
+                    if ui.button("◀").on_hover_text(tr.tide_prev_preset).clicked() {
                         pick = Some((idx + n - 1) % n);
                     }
                     let shown = if now.is_some() {
                         names[idx].to_string()
                     } else {
-                        format!("{} · edited", names[idx])
+                        fill(tr.tide_preset_edited, &[("name", names[idx])])
                     };
                     egui::ComboBox::from_id_salt(("tide-presets", id))
                         .width(156.0)
@@ -1977,22 +1963,20 @@ impl App {
                             {
                                 if i == SynthPatch::PRESETS.len() {
                                     ui.separator();
-                                    head(ui, "Saved");
+                                    head(ui, tr.tide_preset_saved_group);
                                 }
                                 if ui.selectable_label(Some(i) == now, *name).clicked() {
                                     pick = Some(i);
                                 }
                             }
                         });
-                    if ui.button("▶").on_hover_text("Next preset").clicked() {
+                    if ui.button("▶").on_hover_text(tr.tide_next_preset).clicked() {
                         pick = Some((idx + 1) % n);
                     }
 
                     // A/B patch compare.
                     let ab_label = if view.ab_slot == 0 { "A/b" } else { "a/B" };
-                    let ab_resp = ui.button(ab_label).on_hover_text(
-                        "Compare A/B states · Shift+click copies current patch to the other slot",
-                    );
+                    let ab_resp = ui.button(ab_label).on_hover_text(tr.tide_ab_tip);
                     if ab_resp.clicked() {
                         if ui.input(|i| i.modifiers.shift) {
                             view.ab_other = Some(p.clone());
@@ -2008,8 +1992,8 @@ impl App {
                     }
 
                     if ui
-                        .button("Mutate")
-                        .on_hover_text("Subtle musical variation of wave, warp, filter and detune")
+                        .button(tr.tide_mutate)
+                        .on_hover_text(tr.tide_mutate_tip)
                         .clicked()
                     {
                         view.mutate_seq = view.mutate_seq.wrapping_add(1);
@@ -2018,8 +2002,8 @@ impl App {
                         ed.changed = true;
                     }
                     if ui
-                        .button("Init")
-                        .on_hover_text("Reset patch to clean Init state")
+                        .button(tr.tide_init)
+                        .on_hover_text(tr.tide_init_tip)
                         .clicked()
                     {
                         *p = SynthPatch::default();
@@ -2027,12 +2011,12 @@ impl App {
                         ed.changed = true;
                     }
                     save = ui
-                        .button("Save…")
-                        .on_hover_text("Save this patch as a preset (Presets/Synth)")
+                        .button(tr.tide_save_btn)
+                        .on_hover_text(tr.tide_save_tip)
                         .clicked();
                     load = ui
-                        .button("Load…")
-                        .on_hover_text("Open a saved .kfxsynth preset")
+                        .button(tr.tide_load_btn)
+                        .on_hover_text(tr.tide_load_tip)
                         .clicked();
                 });
             });
@@ -2083,6 +2067,7 @@ impl App {
         view: &mut TideView,
         ed: &mut Edit,
     ) {
+        let tr = self.tr();
         let modulated = p.modulated();
         tide_bay(ui, |ui| {
             // Oscillator switcher tabs with power LED + mini waveform thumbnails.
@@ -2188,7 +2173,7 @@ impl App {
                         if let Some(i) = tide_pills(
                             ui,
                             &format!("tide-tbl-a-{id}"),
-                            &TABLES.map(table_name),
+                            &TABLES.map(|v| tr.tide_table(v)),
                             cur_t,
                             t::TIDE_CYAN,
                         ) && i != cur_t
@@ -2201,7 +2186,7 @@ impl App {
                         if let Some(i) = tide_pills(
                             ui,
                             &format!("tide-wrp-a-{id}"),
-                            &WARPS.map(warp_name),
+                            &WARPS.map(|v| tr.tide_warp(v)),
                             cur_w,
                             t::TIDE_CYAN,
                         ) && i != cur_w
@@ -2215,73 +2200,73 @@ impl App {
                         let c = t::TIDE_CYAN;
                         ed.knob(
                             ui,
-                            "POS",
+                            tr.tide_k_pos,
                             c,
                             &mut p.position,
                             (0.0, 1.0, 0.0),
                             false,
                             &pct,
-                            "Wavetable frame morph",
+                            tr.tide_k_pos_a_hint,
                         );
                         ed.knob(
                             ui,
-                            "WARP",
+                            tr.tide_k_warp,
                             c,
                             &mut p.warp_amount,
                             (-1.0, 1.0, 0.0),
                             false,
                             &signed,
-                            "Phase warp depth",
+                            tr.tide_k_warp_a_hint,
                         );
                         ed.knob(
                             ui,
-                            "LEVEL",
+                            tr.tide_k_level,
                             c,
                             &mut p.level,
                             (0.0, 1.0, 1.0),
                             false,
                             &pct,
-                            "Oscillator A level",
+                            tr.tide_k_level_a_hint,
                         );
                         ed.knob(
                             ui,
-                            "COARSE",
+                            tr.tide_k_coarse,
                             c,
                             &mut p.coarse,
                             (-24.0, 24.0, 0.0),
                             false,
                             &|v| format!("{:+.0} st", v.round()),
-                            "Pitch in semitones",
+                            tr.tide_k_coarse_hint,
                         );
                         ed.knob(
                             ui,
-                            "FINE",
+                            tr.tide_k_fine,
                             c,
                             &mut p.fine,
                             (-100.0, 100.0, 0.0),
                             false,
                             &|v| format!("{:+.0} ct", v.round()),
-                            "Pitch in cents",
+                            tr.tide_k_fine_hint,
                         );
                         ed.knob(
                             ui,
-                            "SUB",
+                            tr.tide_k_sub,
                             t::TIDE_MIST,
                             &mut p.sub,
                             (0.0, 1.0, 0.0),
                             false,
                             &pct,
-                            "Sub-octave sine",
+                            tr.tide_k_sub_hint,
                         );
                         ed.knob(
                             ui,
-                            "NOISE",
+                            tr.tide_k_noise,
                             t::TIDE_MIST,
                             &mut p.noise,
                             (0.0, 1.0, 0.0),
                             false,
                             &pct,
-                            "White noise generator",
+                            tr.tide_k_noise_hint,
                         );
                     });
                 }
@@ -2302,7 +2287,7 @@ impl App {
                         if let Some(i) = tide_pills(
                             ui,
                             &format!("tide-tbl-b-{id}"),
-                            &TABLES.map(table_name),
+                            &TABLES.map(|v| tr.tide_table(v)),
                             cur_t,
                             t::TIDE_CYAN,
                         ) && i != cur_t
@@ -2315,7 +2300,7 @@ impl App {
                         if let Some(i) = tide_pills(
                             ui,
                             &format!("tide-wrp-b-{id}"),
-                            &WARPS.map(warp_name),
+                            &WARPS.map(|v| tr.tide_warp(v)),
                             cur_w,
                             t::TIDE_CYAN,
                         ) && i != cur_w
@@ -2329,53 +2314,53 @@ impl App {
                         let c = t::TIDE_CYAN;
                         ed.knob(
                             ui,
-                            "POS",
+                            tr.tide_k_pos,
                             c,
                             &mut b.position,
                             (0.0, 1.0, 0.0),
                             false,
                             &pct,
-                            "Oscillator B frame morph",
+                            tr.tide_k_pos_b_hint,
                         );
                         ed.knob(
                             ui,
-                            "WARP",
+                            tr.tide_k_warp,
                             c,
                             &mut b.warp_amount,
                             (-1.0, 1.0, 0.0),
                             false,
                             &signed,
-                            "Oscillator B warp depth",
+                            tr.tide_k_warp_b_hint,
                         );
                         ed.knob(
                             ui,
-                            "LEVEL",
+                            tr.tide_k_level,
                             c,
                             &mut b.level,
                             (0.0, 1.0, 0.0),
                             false,
                             &pct,
-                            "Oscillator B level (0 = off)",
+                            tr.tide_k_level_b_hint,
                         );
                         ed.knob(
                             ui,
-                            "COARSE",
+                            tr.tide_k_coarse,
                             c,
                             &mut b.coarse,
                             (-24.0, 24.0, 0.0),
                             false,
                             &|v| format!("{:+.0} st", v.round()),
-                            "Pitch in semitones",
+                            tr.tide_k_coarse_hint,
                         );
                         ed.knob(
                             ui,
-                            "FINE",
+                            tr.tide_k_fine,
                             c,
                             &mut b.fine,
                             (-100.0, 100.0, 0.0),
                             false,
                             &|v| format!("{:+.0} ct", v.round()),
-                            "Pitch in cents",
+                            tr.tide_k_fine_hint,
                         );
                     });
                 }
@@ -2386,34 +2371,34 @@ impl App {
                         let col = t::TIDE_CYAN;
                         ed.knob(
                             ui,
-                            "LEVEL",
+                            tr.tide_k_level,
                             col,
                             &mut c.level,
                             (0.0, 1.0, 0.0),
                             false,
                             &pct,
-                            "Spectral additive level",
+                            tr.tide_k_level_c_hint,
                         );
                         ed.knob(
                             ui,
-                            "COARSE",
+                            tr.tide_k_coarse,
                             col,
                             &mut c.coarse,
                             (-24.0, 24.0, 0.0),
                             false,
                             &|v| format!("{:+.0} st", v.round()),
-                            "Pitch in semitones",
+                            tr.tide_k_coarse_hint,
                         );
                         let mut partials = c.partials as f64;
                         ed.knob(
                             ui,
-                            "PARTIALS",
+                            tr.tide_k_partials,
                             col,
                             &mut partials,
                             (1.0, keyframexl::synth::MAX_PARTIALS as f64, 16.0),
                             false,
                             &|v| format!("{:.0}", v.round()),
-                            "Number of harmonics",
+                            tr.tide_k_partials_hint,
                         );
                         c.partials = partials
                             .round()
@@ -2421,33 +2406,33 @@ impl App {
                             as u8;
                         ed.knob(
                             ui,
-                            "TILT",
+                            tr.tide_k_tilt,
                             col,
                             &mut c.tilt,
                             (-1.0, 1.0, 0.0),
                             false,
                             &signed,
-                            "Dark (-) to bright (+)",
+                            tr.tide_k_tilt_hint,
                         );
                         ed.knob(
                             ui,
-                            "ODD",
+                            tr.tide_k_odd,
                             col,
                             &mut c.odd,
                             (-1.0, 1.0, 0.0),
                             false,
                             &signed,
-                            "+ odd harmonics, - even harmonics",
+                            tr.tide_k_odd_hint,
                         );
                         ed.knob(
                             ui,
-                            "SHIMMER",
+                            tr.tide_k_shimmer,
                             col,
                             &mut c.shimmer,
                             (0.0, 1.0, 0.0),
                             false,
                             &pct,
-                            "Harmonic shimmer motion",
+                            tr.tide_k_shimmer_hint,
                         );
                     });
                 }
@@ -2463,12 +2448,13 @@ impl App {
         view: &mut TideView,
         ed: &mut Edit,
     ) {
+        let tr = self.tr();
         tide_bay(ui, |ui| {
             ui.horizontal(|ui| {
                 let (sq, _) = ui.allocate_exact_size(vec2(7.0, 7.0), Sense::hover());
                 ui.painter().rect_filled(sq, 1.5, t::TIDE_CORAL);
                 ui.label(
-                    egui::RichText::new("FILTER")
+                    egui::RichText::new(tr.tide_sec_filter)
                         .font(t::mono(12.0))
                         .color(t::TIDE_MIST),
                 );
@@ -2495,43 +2481,43 @@ impl App {
                 let c = t::TIDE_CORAL;
                 ed.knob(
                     ui,
-                    "CUTOFF",
+                    tr.tide_k_cutoff,
                     c,
                     &mut p.cutoff,
                     (20.0, 20000.0, 18000.0),
                     true,
                     &hz,
-                    "Cutoff frequency",
+                    tr.tide_k_cutoff_hint,
                 );
                 ed.knob(
                     ui,
-                    "RESO",
+                    tr.tide_k_reso,
                     c,
                     &mut p.resonance,
                     (0.0, 1.0, 0.0),
                     false,
                     &pct,
-                    "Filter resonance",
+                    tr.tide_k_reso_hint,
                 );
                 ed.knob(
                     ui,
-                    "KEY",
+                    tr.tide_k_key,
                     c,
                     &mut p.keytrack,
                     (-1.0, 1.0, 0.0),
                     false,
                     &signed,
-                    "Cutoff keytracking",
+                    tr.tide_k_key_hint,
                 );
                 ed.knob(
                     ui,
-                    "ENV",
+                    tr.tide_k_env,
                     c,
                     &mut p.env_amount,
                     (-1.0, 1.0, 0.0),
                     false,
                     &signed,
-                    "Filter envelope depth",
+                    tr.tide_k_env_hint,
                 );
             });
 
@@ -2546,13 +2532,13 @@ impl App {
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         ui.label(
-                            egui::RichText::new("UNISON")
+                            egui::RichText::new(tr.tide_unison_lbl)
                                 .font(t::mono(12.0))
                                 .color(t::TIDE_MIST),
                         );
                         if ui
                             .small_button("−")
-                            .on_hover_text("Fewer unison voices")
+                            .on_hover_text(tr.tide_unison_less)
                             .clicked()
                             && p.unison > 1
                         {
@@ -2567,7 +2553,7 @@ impl App {
                         );
                         if ui
                             .small_button("+")
-                            .on_hover_text("More unison voices")
+                            .on_hover_text(tr.tide_unison_more)
                             .clicked()
                             && p.unison < 7
                         {
@@ -2576,22 +2562,27 @@ impl App {
                             ed.changed = true;
                         }
                         ui.label(
-                            egui::RichText::new(format!(
-                                "DET {:.0}%  SPR {:.0}%  GLD {}",
-                                p.detune * 100.0,
-                                p.spread * 100.0,
-                                if p.glide < 0.0011 {
-                                    "off".into()
-                                } else {
-                                    secs(p.glide)
-                                }
+                            egui::RichText::new(fill(
+                                tr.tide_voice_strip,
+                                &[
+                                    ("det", &format!("{:.0}", p.detune * 100.0)),
+                                    ("spr", &format!("{:.0}", p.spread * 100.0)),
+                                    (
+                                        "gld",
+                                        &if p.glide < 0.0011 {
+                                            tr.tide_off_lower.to_string()
+                                        } else {
+                                            secs(p.glide)
+                                        },
+                                    ),
+                                ],
                             ))
                             .font(t::mono(12.0))
                             .color(t::TIDE_MIST),
                         );
                         if ui
-                            .small_button("Edit")
-                            .on_hover_text("Open Voices, Glide & Macros tab")
+                            .small_button(tr.tide_edit_btn)
+                            .on_hover_text(tr.tide_edit_voices_tip)
                             .clicked()
                         {
                             view.deck_tab = 3;
@@ -2610,22 +2601,23 @@ impl App {
         ed: &mut Edit,
         tempo: f64,
     ) {
+        let tr = self.tr();
         let mod_label = if p.mods.is_empty() {
-            "LFO & Mod".to_string()
+            tr.tide_tab_lfo_mod.to_string()
         } else {
-            format!("LFO & Mod ({})", p.mods.len())
+            fill(tr.tide_tab_lfo_mod_n, &[("n", &p.mods.len().to_string())])
         };
         let fx_count = p.fx.iter().filter(|s| s.enabled).count();
         let fx_label = if fx_count == 0 {
-            "Effects".to_string()
+            tr.tide_tab_effects.to_string()
         } else {
-            format!("Effects ({fx_count})")
+            fill(tr.tide_tab_effects_n, &[("n", &fx_count.to_string())])
         };
         let tabs = [
-            "Envelopes",
+            tr.tide_tab_envelopes,
             mod_label.as_str(),
             fx_label.as_str(),
-            "Voices & Macros",
+            tr.tide_tab_voices_macros,
         ];
 
         ui.horizontal(|ui| {
@@ -2649,6 +2641,7 @@ impl App {
     }
 
     fn tide_deck_envelopes(&mut self, ui: &mut Ui, p: &mut SynthPatch, ed: &mut Edit) {
+        let tr = self.tr();
         pair(ui, |ui, col| {
             if col == 0 {
                 tide_bay(ui, |ui| {
@@ -2656,7 +2649,7 @@ impl App {
                         let (sq, _) = ui.allocate_exact_size(vec2(7.0, 7.0), Sense::hover());
                         ui.painter().rect_filled(sq, 1.5, t::TIDE_MINT);
                         ui.label(
-                            egui::RichText::new("AMP ENVELOPE")
+                            egui::RichText::new(tr.tide_sec_amp_env)
                                 .font(t::mono(12.0))
                                 .color(t::TIDE_MIST),
                         );
@@ -2670,7 +2663,7 @@ impl App {
                         let (sq, _) = ui.allocate_exact_size(vec2(7.0, 7.0), Sense::hover());
                         ui.painter().rect_filled(sq, 1.5, t::TIDE_CORAL);
                         ui.label(
-                            egui::RichText::new("FILTER ENVELOPE")
+                            egui::RichText::new(tr.tide_sec_flt_env)
                                 .font(t::mono(12.0))
                                 .color(t::TIDE_MIST),
                         );
@@ -2691,6 +2684,7 @@ impl App {
         ed: &mut Edit,
         tempo: f64,
     ) {
+        let tr = self.tr();
         pair(ui, |ui, col| {
             if col == 0 {
                 tide_bay(ui, |ui| {
@@ -2708,10 +2702,10 @@ impl App {
                             let lfo = &mut p.lfos[view.lfo_tab.min(1)];
                             if tide_toggle(
                                 ui,
-                                "RETRIG",
+                                tr.tide_retrig,
                                 lfo.retrigger,
                                 t::TIDE_MINT,
-                                "Restart LFO phase on every note",
+                                tr.tide_retrig_tip,
                             )
                             .clicked()
                             {
@@ -2721,10 +2715,10 @@ impl App {
                             }
                             if tide_toggle(
                                 ui,
-                                "SYNC",
+                                tr.tide_sync,
                                 lfo.sync,
                                 t::TIDE_MINT,
-                                "Lock LFO rate to song tempo divisions",
+                                tr.tide_sync_tip,
                             )
                             .clicked()
                             {
@@ -2742,7 +2736,7 @@ impl App {
                     if let Some(i) = tide_pills(
                         ui,
                         &format!("tide-lfo-shp-{id}-{which}"),
-                        &["Off", "Sine", "Tri", "Saw", "Sq", "S&H"],
+                        &tr.tide_lfo_shapes(),
                         cur_s,
                         t::TIDE_MINT,
                     ) && i != cur_s
@@ -2774,7 +2768,7 @@ impl App {
                         }
                         ed.knob(
                             ui,
-                            "RATE",
+                            tr.tide_k_rate,
                             t::TIDE_MINT,
                             &mut lfo.rate,
                             (0.01, 30.0, 1.0),
@@ -2786,7 +2780,7 @@ impl App {
                                     format!("{v:.1} Hz")
                                 }
                             },
-                            "LFO cycles per second",
+                            tr.tide_k_rate_hint,
                         );
                     }
                 });
@@ -2796,12 +2790,12 @@ impl App {
                         let (sq, _) = ui.allocate_exact_size(vec2(7.0, 7.0), Sense::hover());
                         ui.painter().rect_filled(sq, 1.5, t::TIDE_MINT);
                         ui.label(
-                            egui::RichText::new("MOD MATRIX")
+                            egui::RichText::new(tr.tide_sec_mod_matrix)
                                 .font(t::mono(12.0))
                                 .color(t::TIDE_MIST),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if p.mods.len() < 16 && ui.small_button("+ Route").clicked() {
+                            if p.mods.len() < 16 && ui.small_button(tr.tide_add_route).clicked() {
                                 p.mods.push(ModRoute {
                                     source: ModSource::Lfo1,
                                     target: ModTarget::Cutoff,
@@ -2815,18 +2809,36 @@ impl App {
 
                     if p.mods.is_empty() {
                         ui.label(
-                            egui::RichText::new(
-                                "No active routes. Add one below or pick a quick route:",
-                            )
-                            .font(t::sans(12.5))
-                            .color(t::TIDE_MIST),
+                            egui::RichText::new(tr.tide_mod_empty)
+                                .font(t::sans(12.5))
+                                .color(t::TIDE_MIST),
                         );
                         ui.horizontal_wrapped(|ui| {
                             for (label, src, dst, depth) in [
-                                ("LFO 1 → Cutoff", ModSource::Lfo1, ModTarget::Cutoff, 0.35),
-                                ("LFO 1 → Pos", ModSource::Lfo1, ModTarget::Position, 0.25),
-                                ("Vel → Cutoff", ModSource::Velocity, ModTarget::Cutoff, 0.40),
-                                ("Wheel → Warp", ModSource::ModWheel, ModTarget::Warp, 0.50),
+                                (
+                                    tr.tide_qr_lfo1_cut,
+                                    ModSource::Lfo1,
+                                    ModTarget::Cutoff,
+                                    0.35,
+                                ),
+                                (
+                                    tr.tide_qr_lfo1_pos,
+                                    ModSource::Lfo1,
+                                    ModTarget::Position,
+                                    0.25,
+                                ),
+                                (
+                                    tr.tide_qr_vel_cut,
+                                    ModSource::Velocity,
+                                    ModTarget::Cutoff,
+                                    0.40,
+                                ),
+                                (
+                                    tr.tide_qr_wheel_warp,
+                                    ModSource::ModWheel,
+                                    ModTarget::Warp,
+                                    0.50,
+                                ),
                             ] {
                                 if ui.small_button(label).clicked() {
                                     p.mods.push(ModRoute {
@@ -2849,11 +2861,17 @@ impl App {
                             ui.painter().rect_filled(dot, 1.5, source_color(r.source));
                             egui::ComboBox::from_id_salt(("tide-msrc", id, i))
                                 .width(92.0)
-                                .selected_text(r.source.name())
+                                .selected_text(tr.tide_mod_source(r.source))
                                 .show_ui(ui, |ui| {
                                     kit::menu_style(ui);
                                     for s in ModSource::ALL {
-                                        if ui.selectable_value(&mut r.source, s, s.name()).changed()
+                                        if ui
+                                            .selectable_value(
+                                                &mut r.source,
+                                                s,
+                                                tr.tide_mod_source(s),
+                                            )
+                                            .changed()
                                         {
                                             ed.started = true;
                                             ed.changed = true;
@@ -2863,12 +2881,16 @@ impl App {
                             ui.label(egui::RichText::new("→").color(t::TIDE_MIST));
                             egui::ComboBox::from_id_salt(("tide-mdst", id, i))
                                 .width(102.0)
-                                .selected_text(r.target.name())
+                                .selected_text(tr.tide_mod_target(r.target))
                                 .show_ui(ui, |ui| {
                                     kit::menu_style(ui);
                                     for tg in ModTarget::ALL {
                                         if ui
-                                            .selectable_value(&mut r.target, tg, tg.name())
+                                            .selectable_value(
+                                                &mut r.target,
+                                                tg,
+                                                tr.tide_mod_target(tg),
+                                            )
                                             .changed()
                                         {
                                             ed.started = true;
@@ -2883,11 +2905,15 @@ impl App {
                                 bar_w,
                                 source_color(r.source),
                                 &mut r.depth,
-                                "Modulation depth",
+                                tr.tide_mod_depth_hint,
                             );
                             ed.started |= s;
                             ed.changed |= c;
-                            if ui.small_button("×").on_hover_text("Remove route").clicked() {
+                            if ui
+                                .small_button("×")
+                                .on_hover_text(tr.tide_remove_route)
+                                .clicked()
+                            {
                                 remove = Some(i);
                             }
                         });
@@ -2903,30 +2929,31 @@ impl App {
     }
 
     fn tide_deck_effects(&mut self, ui: &mut Ui, id: u64, p: &mut SynthPatch, ed: &mut Edit) {
+        let tr = self.tr();
         use keyframexl::fx::{FxKind, FxSlot};
         use keyframexl::synth::FX_KINDS;
-        type Knobs = &'static [(&'static str, usize, &'static str)];
+        type Knobs = [(&'static str, usize, &'static str); 3];
         let knobs = |k: FxKind| -> Knobs {
             match k {
-                FxKind::Drive => &[
-                    ("DRIVE", 0, "Saturation gain"),
-                    ("TONE", 1, "Saturated brightness"),
-                    ("MIX", 3, "Dry/wet blend"),
+                FxKind::Drive => [
+                    (tr.tide_fx_drive, 0, tr.tide_fx_drive_hint),
+                    (tr.tide_fx_tone, 1, tr.tide_fx_tone_hint),
+                    (tr.tide_fx_mix, 3, tr.tide_fx_mix_hint),
                 ],
-                FxKind::Chorus => &[
-                    ("DEPTH", 1, "Detune sway depth"),
-                    ("RATE", 2, "Modulation speed"),
-                    ("MIX", 3, "Dry/wet blend"),
+                FxKind::Chorus => [
+                    (tr.tide_fx_depth, 1, tr.tide_fx_depth_hint),
+                    (tr.tide_fx_rate, 2, tr.tide_fx_rate_hint),
+                    (tr.tide_fx_mix, 3, tr.tide_fx_mix_hint),
                 ],
-                FxKind::Delay => &[
-                    ("TIME", 0, "Echo time in steps"),
-                    ("REPEAT", 1, "Feedback echoes"),
-                    ("WET", 4, "Echo level"),
+                FxKind::Delay => [
+                    (tr.tide_fx_time, 0, tr.tide_fx_time_hint),
+                    (tr.tide_fx_repeat, 1, tr.tide_fx_repeat_hint),
+                    (tr.tide_fx_wet, 4, tr.tide_fx_wet_hint),
                 ],
-                _ => &[
-                    ("SIZE", 0, "Room size"),
-                    ("DAMP", 1, "High-frequency damping"),
-                    ("WET", 4, "Reverb mix"),
+                _ => [
+                    (tr.tide_fx_size, 0, tr.tide_fx_size_hint),
+                    (tr.tide_fx_damp, 1, tr.tide_fx_damp_hint),
+                    (tr.tide_fx_wet, 4, tr.tide_fx_reverb_wet_hint),
                 ],
             }
         };
@@ -2955,7 +2982,7 @@ impl App {
                                     kind.builtin().name,
                                     on,
                                     t::TIDE_CYAN,
-                                    "Toggle this built-in synth effect",
+                                    tr.tide_fx_toggle_tip,
                                 )
                                 .clicked()
                                 {
@@ -2982,13 +3009,13 @@ impl App {
                                 let specs = kind.params();
                                 let slot_idx = p.fx.iter().position(|s| s.kind == kind);
                                 ui.add_enabled_ui(on, |ui| {
-                                    for &(label, n, hint) in knobs(kind) {
+                                    for (label, n, hint) in knobs(kind) {
                                         let Some(spec) = specs.get(n) else { continue };
                                         let mut v = slot_idx
                                             .map(|i| p.fx[i].params[n] as f64)
                                             .unwrap_or(spec.default as f64);
                                         let fmt = |x: f64| keyframexl::fx::format(spec, x as f32);
-                                        ui.push_id((id, kind.builtin().name, label, n), |ui| {
+                                        ui.push_id((id, kind.builtin().name, n), |ui| {
                                             ed.knob(
                                                 ui,
                                                 label,
@@ -3018,6 +3045,7 @@ impl App {
     }
 
     fn tide_deck_voices_macros(&mut self, ui: &mut Ui, id: u64, p: &mut SynthPatch, ed: &mut Edit) {
+        let tr = self.tr();
         pair(ui, |ui, col| {
             if col == 0 {
                 tide_bay(ui, |ui| {
@@ -3025,19 +3053,13 @@ impl App {
                         let (sq, _) = ui.allocate_exact_size(vec2(7.0, 7.0), Sense::hover());
                         ui.painter().rect_filled(sq, 1.5, t::TIDE_CYAN);
                         ui.label(
-                            egui::RichText::new("VOICES, GLIDE & MPE")
+                            egui::RichText::new(tr.tide_sec_voices_mpe)
                                 .font(t::mono(12.0))
                                 .color(t::TIDE_MIST),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if tide_toggle(
-                                ui,
-                                "MPE",
-                                p.mpe,
-                                t::TIDE_CYAN,
-                                "Per-note pitch bend (±48 st), pressure and slide (channels 2-16)",
-                            )
-                            .clicked()
+                            if tide_toggle(ui, "MPE", p.mpe, t::TIDE_CYAN, tr.tide_mpe_tip)
+                                .clicked()
                             {
                                 p.mpe = !p.mpe;
                                 ed.started = true;
@@ -3051,54 +3073,60 @@ impl App {
                         let mut voices = p.unison as f64;
                         ed.knob(
                             ui,
-                            "VOICES",
+                            tr.tide_k_voices,
                             c,
                             &mut voices,
                             (1.0, 7.0, 1.0),
                             false,
                             &|v| format!("{:.0}", v.round()),
-                            "Stacked unison voices",
+                            tr.tide_k_voices_hint,
                         );
                         p.unison = voices.round().clamp(1.0, 7.0) as u8;
                         ed.knob(
                             ui,
-                            "DETUNE",
+                            tr.tide_k_detune,
                             c,
                             &mut p.detune,
                             (0.0, 1.0, 0.0),
                             false,
                             &pct,
-                            "Unison pitch spread",
+                            tr.tide_k_detune_hint,
                         );
                         ed.knob(
                             ui,
-                            "SPREAD",
+                            tr.tide_k_spread,
                             c,
                             &mut p.spread,
                             (0.0, 1.0, 0.0),
                             false,
                             &pct,
-                            "Stereo width",
+                            tr.tide_k_spread_hint,
                         );
                         ed.knob(
                             ui,
-                            "GLIDE",
+                            tr.tide_k_glide,
                             t::enc_white(),
                             &mut p.glide,
                             (0.0, 10.0, 0.0),
                             true,
-                            &|v| if v < 0.0011 { "off".into() } else { secs(v) },
-                            "Portamento glide time",
+                            &|v| {
+                                if v < 0.0011 {
+                                    tr.tide_off_lower.into()
+                                } else {
+                                    secs(v)
+                                }
+                            },
+                            tr.tide_k_glide_hint,
                         );
                         ed.knob(
                             ui,
-                            "BEND",
+                            tr.tide_k_bend,
                             t::enc_white(),
                             &mut p.bend_range,
                             (0.0, 48.0, 2.0),
                             false,
                             &|v| format!("±{:.0} st", v.round()),
-                            "MIDI pitch wheel range",
+                            tr.tide_k_bend_hint,
                         );
                         p.bend_range = p.bend_range.round();
                     });
@@ -3109,7 +3137,7 @@ impl App {
                         let (sq, _) = ui.allocate_exact_size(vec2(7.0, 7.0), Sense::hover());
                         ui.painter().rect_filled(sq, 1.5, t::enc_white());
                         ui.label(
-                            egui::RichText::new("MACRO ROUTING")
+                            egui::RichText::new(tr.tide_sec_macro_routing)
                                 .font(t::mono(12.0))
                                 .color(t::TIDE_MIST),
                         );
@@ -3124,10 +3152,12 @@ impl App {
                                 ui.vertical(|ui| {
                                     ui.set_width(width);
                                     ui.label(
-                                        egui::RichText::new(format!(
-                                            "MACRO {}  ({})",
-                                            i + 1,
-                                            pct(m.value)
+                                        egui::RichText::new(fill(
+                                            tr.tide_macro_heading,
+                                            &[
+                                                ("n", &(i + 1).to_string()),
+                                                ("value", &pct(m.value)),
+                                            ],
                                         ))
                                         .font(t::mono(12.0))
                                         .color(t::text()),
@@ -3141,7 +3171,7 @@ impl App {
                                         ui.horizontal(|ui| {
                                             egui::ComboBox::from_id_salt(("tide-route", id, i, j))
                                                 .width((width - 82.0).max(70.0))
-                                                .selected_text(param_name(route.target))
+                                                .selected_text(tr.tide_param(route.target))
                                                 .show_ui(ui, |ui| {
                                                     kit::menu_style(ui);
                                                     for v in PARAMS {
@@ -3149,7 +3179,7 @@ impl App {
                                                             .selectable_value(
                                                                 &mut route.target,
                                                                 v,
-                                                                param_name(v),
+                                                                tr.tide_param(v),
                                                             )
                                                             .changed()
                                                         {
@@ -3164,14 +3194,14 @@ impl App {
                                                 68.0,
                                                 t::TIDE_CYAN,
                                                 &mut route.depth,
-                                                "Macro route depth (double-click removes)",
+                                                tr.tide_macro_depth_hint,
                                             );
                                             ed.started |= s;
                                             ed.changed |= c;
                                         });
                                     }
                                     if let Some(j) = free {
-                                        let add = egui::RichText::new("+ Target")
+                                        let add = egui::RichText::new(tr.tide_add_target)
                                             .font(t::sans(12.0))
                                             .color(t::TIDE_MIST);
                                         egui::ComboBox::from_id_salt(("tide-add", id, i))
@@ -3181,7 +3211,7 @@ impl App {
                                                 kit::menu_style(ui);
                                                 for v in PARAMS {
                                                     if ui
-                                                        .selectable_label(false, param_name(v))
+                                                        .selectable_label(false, tr.tide_param(v))
                                                         .clicked()
                                                     {
                                                         m.routes[j] = keyframexl::synth::Route {
@@ -3212,6 +3242,7 @@ impl App {
         view: &mut TideView,
         ed: &mut Edit,
     ) {
+        let tr = self.tr();
         egui::Frame::new()
             .fill(t::TIDE_DECK)
             .stroke(Stroke::new(1.0_f32, t::TIDE_LINE))
@@ -3220,16 +3251,7 @@ impl App {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 let wide = ui.available_width() >= TWO_COLUMNS;
-                let short_param = |param: Param| match param {
-                    Param::Position => "POS",
-                    Param::Warp => "WARP",
-                    Param::Cutoff => "CUT",
-                    Param::Resonance => "RESO",
-                    Param::Sub => "SUB",
-                    Param::Noise => "NOISE",
-                    Param::Detune => "DET",
-                    Param::Spread => "SPR",
-                };
+                let short_param = |param: Param| tr.tide_param_short(param);
                 let draw_macros = |ui: &mut Ui, p: &mut SynthPatch, ed: &mut Edit| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
@@ -3241,7 +3263,7 @@ impl App {
                                 .map(|r| short_param(r.target));
                             let label = match assigned {
                                 Some(tgt) => format!("M{} {tgt}", i + 1),
-                                None => format!("MACRO {}", i + 1),
+                                None => fill(tr.tide_macro_knob_n, &[("n", &(i + 1).to_string())]),
                             };
                             ed.knob(
                                 ui,
@@ -3255,7 +3277,7 @@ impl App {
                                 (0.0, 1.0, 0.0),
                                 false,
                                 &pct,
-                                "Performance macro: moves its assigned targets in Voices & Macros",
+                                tr.tide_macro_knob_hint,
                             );
                         }
                     });

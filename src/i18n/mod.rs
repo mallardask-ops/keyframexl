@@ -469,6 +469,112 @@ define_strings! {
         vocal_k_breath, vocal_k_breath_hint, vocal_sec_default_lyric, vocal_default_lyric_desc,
         vocal_sec_singing, vocal_singing_p1, vocal_singing_p2, vocal_singing_p3,
         vocal_lyrics_title, vocal_lyrics_desc, vocal_lyrics_summary,
+        // KeyFrame Tide synth editor
+        tide_tbl_sine_saw, tide_tbl_square, tide_tbl_organ, tide_tbl_vowel,
+        tide_wrp_bend, tide_wrp_sync, tide_wrp_mirror, tide_wrp_fm_sub,
+        tide_p_position, tide_p_warp, tide_p_cutoff, tide_p_resonance,
+        tide_p_sub, tide_p_noise, tide_p_detune, tide_p_spread,
+        tide_ps_position, tide_ps_warp, tide_ps_cutoff, tide_ps_resonance,
+        tide_ps_sub, tide_ps_noise, tide_ps_detune, tide_ps_spread,
+        tide_ms_filter_env, tide_ms_velocity, tide_ms_macro_1, tide_ms_macro_2,
+        tide_ms_macro_3, tide_ms_macro_4, tide_ms_invalid_macro, tide_ms_mod_wheel,
+        tide_ms_pressure, tide_ms_slide,
+        tide_mt_pos_b, tide_mt_warp_b, tide_mt_level_b, tide_mt_pitch_a,
+        tide_mt_pitch_b, tide_mt_level_c, tide_mt_tilt_c, tide_mt_odd_c,
+        tide_bipolar_tip, tide_hud_pos, tide_hud_muted, tide_hud_xy_wave, tide_wave_scope_tip,
+        tide_hud_spectral, tide_hud_xy_spec, tide_spec_scope_tip,
+        tide_hud_reso, tide_hud_env, tide_flt_scope_tip,
+        tide_env_view_tip, tide_k_attack, tide_k_attack_hint, tide_k_decay, tide_k_decay_hint,
+        tide_k_sustain, tide_k_sustain_hint, tide_k_release, tide_k_release_hint,
+        tide_lfo_off, tide_lfo_sync_prefix, tide_osc_off, tide_osc_toggle_tip,
+        tide_kb_oct_down, tide_kb_oct_up, tide_kb_tip,
+        tide_jump_osc_a, tide_jump_osc_b, tide_jump_osc_c, tide_open_fx_bay,
+        tide_prev_preset, tide_next_preset, tide_preset_edited, tide_preset_saved_group,
+        tide_ab_tip, tide_mutate, tide_mutate_tip, tide_init, tide_init_tip,
+        tide_save_btn, tide_save_tip, tide_load_btn, tide_load_tip,
+        tide_k_pos, tide_k_pos_a_hint, tide_k_warp, tide_k_warp_a_hint,
+        tide_k_level, tide_k_level_a_hint, tide_k_coarse, tide_k_coarse_hint,
+        tide_k_fine, tide_k_fine_hint, tide_k_sub, tide_k_sub_hint,
+        tide_k_noise, tide_k_noise_hint,
+        tide_k_pos_b_hint, tide_k_warp_b_hint, tide_k_level_b_hint,
+        tide_k_level_c_hint, tide_k_partials, tide_k_partials_hint,
+        tide_k_tilt, tide_k_tilt_hint, tide_k_odd, tide_k_odd_hint,
+        tide_k_shimmer, tide_k_shimmer_hint,
+        tide_sec_filter, tide_k_cutoff, tide_k_cutoff_hint, tide_k_reso, tide_k_reso_hint,
+        tide_k_key, tide_k_key_hint, tide_k_env, tide_k_env_hint,
+        tide_unison_lbl, tide_unison_less, tide_unison_more, tide_voice_strip,
+        tide_off_lower, tide_edit_btn, tide_edit_voices_tip,
+        tide_tab_envelopes, tide_tab_lfo_mod, tide_tab_lfo_mod_n,
+        tide_tab_effects, tide_tab_effects_n, tide_tab_voices_macros,
+        tide_sec_amp_env, tide_sec_flt_env,
+        tide_retrig, tide_retrig_tip, tide_sync, tide_sync_tip,
+        tide_shp_off, tide_shp_sine, tide_shp_tri, tide_shp_saw, tide_shp_sq, tide_shp_sh,
+        tide_k_rate, tide_k_rate_hint,
+        tide_sec_mod_matrix, tide_add_route, tide_mod_empty,
+        tide_qr_lfo1_cut, tide_qr_lfo1_pos, tide_qr_vel_cut, tide_qr_wheel_warp,
+        tide_mod_depth_hint, tide_remove_route,
+        tide_fx_toggle_tip,
+        tide_fx_drive, tide_fx_drive_hint, tide_fx_tone, tide_fx_tone_hint,
+        tide_fx_mix, tide_fx_mix_hint, tide_fx_depth, tide_fx_depth_hint,
+        tide_fx_rate, tide_fx_rate_hint, tide_fx_time, tide_fx_time_hint,
+        tide_fx_repeat, tide_fx_repeat_hint, tide_fx_wet, tide_fx_wet_hint,
+        tide_fx_size, tide_fx_size_hint, tide_fx_damp, tide_fx_damp_hint,
+        tide_fx_reverb_wet_hint,
+        tide_sec_voices_mpe, tide_mpe_tip,
+        tide_k_voices, tide_k_voices_hint, tide_k_detune, tide_k_detune_hint,
+        tide_k_spread, tide_k_spread_hint, tide_k_glide, tide_k_glide_hint,
+        tide_k_bend, tide_k_bend_hint,
+        tide_sec_macro_routing, tide_macro_heading, tide_macro_depth_hint,
+        tide_add_target, tide_macro_knob_n, tide_macro_knob_hint,
+        // Forge editor
+        forge_added, forge_play, forge_play_caps, forge_play_tip,
+        forge_start_from, forge_my_sounds, forge_save_my_sounds, forge_save_my_sounds_tip,
+        forge_game_style_caps, forge_style_any, forge_style_retro, forge_style_cartoon,
+        forge_style_heavy, forge_style_scifi, forge_game_style_tip,
+        forge_make_it_caps, forge_style_retro_tip, forge_style_cartoon_tip,
+        forge_style_heavy_tip, forge_style_scifi_tip,
+        forge_sec_sound, forge_peak_hud, forge_rendering_caps, forge_click_to_hear,
+        forge_sec_character, forge_macro_size, forge_macro_energy, forge_macro_dirt, forge_macro_space,
+        forge_macro_size_hint, forge_macro_energy_hint, forge_macro_dirt_hint, forge_macro_space_hint,
+        forge_k_pitch, forge_k_pitch_hint, forge_k_output, forge_k_output_hint,
+        forge_sec_ideas, forge_growing, forge_mutate, forge_mutate_tip, forge_clear,
+        forge_ideas_empty, forge_idea_tile_tip, forge_use_idea, forge_use_idea_tip,
+        forge_sec_layer, forge_sec_master_fx, forge_sec_export,
+        forge_k_files, forge_k_files_hint, forge_normalize, forge_normalize_hint,
+        forge_mono, forge_mono_hint, forge_export_btn, forge_export_tip,
+        forge_style_any_msg, forge_style_set_msg,
+        forge_render_stopped, forge_bounce_err, forge_bounce_silence,
+        forge_layers_full_bounce, forge_bounced_ok,
+        forge_saved_ok, forge_save_err, forge_export_dlg_title, forge_export_err,
+        forge_sample_filter, forge_sample_dlg_title, forge_sample_read_err, forge_sample_loaded,
+        forge_deleted_channel,
+        forge_sec_layers, forge_solo_tip, forge_edit_layer_tip, forge_tide_synth_lbl,
+        forge_delete_layer_tip, forge_bouncing_new, forge_bouncing_layer,
+        forge_layers_empty, forge_add_layer, forge_src_osc, forge_src_noise,
+        forge_src_sample_menu, forge_src_sample, forge_src_synth, forge_src_channel_note,
+        forge_src_channel_note_tip, forge_src_tide_note,
+        forge_layers_max_tip, forge_add_layer_tip, forge_duplicate, forge_duplicate_tip,
+        forge_layer_copy_suffix, forge_layer_name_hint,
+        forge_k_osc_pitch_hint, forge_k_vibrato, forge_k_vibrato_hint,
+        forge_k_rate, forge_k_vib_rate_hint, forge_k_digital_rate_hint, forge_k_crackle_rate_hint,
+        forge_k_note, forge_k_bounce_note_hint, forge_k_hold, forge_k_hold_hint,
+        forge_bounce_btn, forge_bounce_btn_tip, forge_replace_btn, forge_reverse_lbl,
+        forge_edited_patch, forge_k_synth_note_hint,
+        forge_k_start, forge_k_start_hint, forge_k_length, forge_k_length_hint,
+        forge_k_gain, forge_k_gain_hint, forge_k_pan, forge_k_pan_hint,
+        forge_line_pitch, forge_line_volume, forge_line_filter,
+        forge_k_reso, forge_k_reso_hint, forge_layer_fx_caps,
+        forge_curve_pitch_tip, forge_curve_tip, forge_remove_fx_tip, forge_add_fx,
+        forge_cat_ui, forge_cat_steps, forge_cat_actions, forge_cat_weapons,
+        forge_cat_pickups, forge_cat_magic, forge_cat_damage, forge_cat_doors,
+        forge_cat_ambience, forge_cat_creatures,
+        forge_wave_square, forge_wave_pulse25, forge_wave_pulse12,
+        forge_wave_tri, forge_wave_saw, forge_wave_sine,
+        forge_noise_white, forge_noise_pink, forge_noise_brown,
+        forge_noise_crackle, forge_noise_digital,
+        forge_noise_white_full, forge_noise_pink_full, forge_noise_brown_full,
+        forge_noise_crackle_full, forge_noise_digital_full,
+        forge_flt_off, forge_flt_lp, forge_flt_hp, forge_flt_bp,
     },
     plurals: {
         clips_deleted,
@@ -526,6 +632,8 @@ define_strings! {
         vocal_notes_in_channel,
         vocal_notes_selected,
         vocal_lyrics_set,
+        tide_unison_voices,
+        forge_exported_files,
     },
 }
 
@@ -927,6 +1035,204 @@ impl Strings {
             M::Emphasis2 => self.smp_mt_emph2,
             M::Lfo1Rate => self.smp_mt_lfo1,
             M::Lfo2Rate => self.smp_mt_lfo2,
+        }
+    }
+
+    pub fn tide_table(&self, v: keyframexl::synth::Table) -> &'static str {
+        use keyframexl::synth::Table as T;
+        match v {
+            T::SineSaw => self.tide_tbl_sine_saw,
+            T::SquarePulse => self.tide_tbl_square,
+            T::Organ => self.tide_tbl_organ,
+            T::Vowel => self.tide_tbl_vowel,
+        }
+    }
+
+    pub fn tide_warp(&self, v: keyframexl::synth::Warp) -> &'static str {
+        use keyframexl::synth::Warp as W;
+        match v {
+            W::Bend => self.tide_wrp_bend,
+            W::Sync => self.tide_wrp_sync,
+            W::PwmMirror => self.tide_wrp_mirror,
+            W::FmSub => self.tide_wrp_fm_sub,
+        }
+    }
+
+    pub fn tide_param(&self, v: keyframexl::synth::Param) -> &'static str {
+        use keyframexl::synth::Param as P;
+        match v {
+            P::Position => self.tide_p_position,
+            P::Warp => self.tide_p_warp,
+            P::Cutoff => self.tide_p_cutoff,
+            P::Resonance => self.tide_p_resonance,
+            P::Sub => self.tide_p_sub,
+            P::Noise => self.tide_p_noise,
+            P::Detune => self.tide_p_detune,
+            P::Spread => self.tide_p_spread,
+        }
+    }
+
+    pub fn tide_param_short(&self, v: keyframexl::synth::Param) -> &'static str {
+        use keyframexl::synth::Param as P;
+        match v {
+            P::Position => self.tide_ps_position,
+            P::Warp => self.tide_ps_warp,
+            P::Cutoff => self.tide_ps_cutoff,
+            P::Resonance => self.tide_ps_resonance,
+            P::Sub => self.tide_ps_sub,
+            P::Noise => self.tide_ps_noise,
+            P::Detune => self.tide_ps_detune,
+            P::Spread => self.tide_ps_spread,
+        }
+    }
+
+    pub fn tide_mod_source(&self, s: keyframexl::synth::ModSource) -> &'static str {
+        use keyframexl::synth::ModSource as M;
+        match s {
+            M::Lfo1 => "LFO 1",
+            M::Lfo2 => "LFO 2",
+            M::FilterEnv => self.tide_ms_filter_env,
+            M::Velocity => self.tide_ms_velocity,
+            M::Macro(0) => self.tide_ms_macro_1,
+            M::Macro(1) => self.tide_ms_macro_2,
+            M::Macro(2) => self.tide_ms_macro_3,
+            M::Macro(3) => self.tide_ms_macro_4,
+            M::Macro(_) => self.tide_ms_invalid_macro,
+            M::ModWheel => self.tide_ms_mod_wheel,
+            M::Pressure => self.tide_ms_pressure,
+            M::Slide => self.tide_ms_slide,
+        }
+    }
+
+    pub fn tide_mod_target(&self, t: keyframexl::synth::ModTarget) -> &'static str {
+        use keyframexl::synth::ModTarget as M;
+        match t {
+            M::Position => self.tide_p_position,
+            M::Warp => self.tide_p_warp,
+            M::Cutoff => self.tide_p_cutoff,
+            M::Resonance => self.tide_p_resonance,
+            M::Sub => self.tide_p_sub,
+            M::Noise => self.tide_p_noise,
+            M::Detune => self.tide_p_detune,
+            M::Spread => self.tide_p_spread,
+            M::PositionB => self.tide_mt_pos_b,
+            M::WarpB => self.tide_mt_warp_b,
+            M::LevelB => self.tide_mt_level_b,
+            M::PitchA => self.tide_mt_pitch_a,
+            M::PitchB => self.tide_mt_pitch_b,
+            M::LevelC => self.tide_mt_level_c,
+            M::TiltC => self.tide_mt_tilt_c,
+            M::OddC => self.tide_mt_odd_c,
+        }
+    }
+
+    pub fn tide_lfo_shapes(&self) -> [&'static str; 6] {
+        [
+            self.tide_shp_off,
+            self.tide_shp_sine,
+            self.tide_shp_tri,
+            self.tide_shp_saw,
+            self.tide_shp_sq,
+            self.tide_shp_sh,
+        ]
+    }
+
+    pub fn forge_style(&self, s: keyframexl::forge::recipes::Style) -> &'static str {
+        use keyframexl::forge::recipes::Style as S;
+        match s {
+            S::Retro => self.forge_style_retro,
+            S::Cartoon => self.forge_style_cartoon,
+            S::Heavy => self.forge_style_heavy,
+            S::SciFi => self.forge_style_scifi,
+        }
+    }
+
+    pub fn forge_style_hint(&self, s: keyframexl::forge::recipes::Style) -> &'static str {
+        use keyframexl::forge::recipes::Style as S;
+        match s {
+            S::Retro => self.forge_style_retro_tip,
+            S::Cartoon => self.forge_style_cartoon_tip,
+            S::Heavy => self.forge_style_heavy_tip,
+            S::SciFi => self.forge_style_scifi_tip,
+        }
+    }
+
+    pub fn forge_game_styles(&self) -> [&'static str; 5] {
+        [
+            self.forge_style_any,
+            self.forge_style_retro,
+            self.forge_style_cartoon,
+            self.forge_style_heavy,
+            self.forge_style_scifi,
+        ]
+    }
+
+    pub fn forge_macros(&self) -> [(&'static str, &'static str); 4] {
+        [
+            (self.forge_macro_size, self.forge_macro_size_hint),
+            (self.forge_macro_energy, self.forge_macro_energy_hint),
+            (self.forge_macro_dirt, self.forge_macro_dirt_hint),
+            (self.forge_macro_space, self.forge_macro_space_hint),
+        ]
+    }
+
+    pub fn forge_category(&self, c: keyframexl::forge::library::Category) -> &'static str {
+        use keyframexl::forge::library::Category as C;
+        match c {
+            C::Ui => self.forge_cat_ui,
+            C::Steps => self.forge_cat_steps,
+            C::Actions => self.forge_cat_actions,
+            C::Weapons => self.forge_cat_weapons,
+            C::Pickups => self.forge_cat_pickups,
+            C::Magic => self.forge_cat_magic,
+            C::Damage => self.forge_cat_damage,
+            C::Doors => self.forge_cat_doors,
+            C::Ambience => self.forge_cat_ambience,
+            C::Creatures => self.forge_cat_creatures,
+        }
+    }
+
+    pub fn forge_wave(&self, w: keyframexl::forge::Wave) -> &'static str {
+        use keyframexl::forge::Wave as W;
+        match w {
+            W::Square => self.forge_wave_square,
+            W::Pulse25 => self.forge_wave_pulse25,
+            W::Pulse12 => self.forge_wave_pulse12,
+            W::Triangle => self.forge_wave_tri,
+            W::Saw => self.forge_wave_saw,
+            W::Sine => self.forge_wave_sine,
+        }
+    }
+
+    pub fn forge_noise_color(&self, c: keyframexl::forge::NoiseColor) -> &'static str {
+        use keyframexl::forge::NoiseColor as N;
+        match c {
+            N::White => self.forge_noise_white,
+            N::Pink => self.forge_noise_pink,
+            N::Brown => self.forge_noise_brown,
+            N::Crackle => self.forge_noise_crackle,
+            N::Digital => self.forge_noise_digital,
+        }
+    }
+
+    pub fn forge_noise_full(&self, c: keyframexl::forge::NoiseColor) -> &'static str {
+        use keyframexl::forge::NoiseColor as N;
+        match c {
+            N::White => self.forge_noise_white_full,
+            N::Pink => self.forge_noise_pink_full,
+            N::Brown => self.forge_noise_brown_full,
+            N::Crackle => self.forge_noise_crackle_full,
+            N::Digital => self.forge_noise_digital_full,
+        }
+    }
+
+    pub fn forge_filter_mode(&self, m: keyframexl::forge::FilterMode) -> &'static str {
+        use keyframexl::forge::FilterMode as F;
+        match m {
+            F::Off => self.forge_flt_off,
+            F::LowPass => self.forge_flt_lp,
+            F::HighPass => self.forge_flt_hp,
+            F::BandPass => self.forge_flt_bp,
         }
     }
 }
