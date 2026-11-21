@@ -237,13 +237,20 @@ pub(crate) const fn groups(lang: Language) -> &'static [Group] {
 
 /// The shortcuts chapter of the manual (written by the test below).
 #[cfg(test)]
-pub(crate) fn markdown() -> String {
-    let mut s = String::from(
-        "# Keyboard shortcuts\n\n\
-         The same list opens with `F1`. This page is generated from the program\n\
-         (`src/ui/shortcuts.rs`); edit that file, not this one.\n",
-    );
-    for g in GROUPS {
+pub(crate) fn markdown(lang: Language) -> String {
+    let mut s = match lang {
+        Language::English => String::from(
+            "# Keyboard shortcuts\n\n\
+             The same list opens with `F1`. This page is generated from the program\n\
+             (`src/ui/shortcuts.rs`); edit that file, not this one.\n",
+        ),
+        Language::Ukrainian => String::from(
+            "# Клавіатурні скорочення\n\n\
+             Той самий список відкривається клавішею `F1`. Цю сторінку згенеровано з\n\
+             програми (`src/ui/shortcuts.rs`); редагуйте той файл, а не цей.\n",
+        ),
+    };
+    for g in groups(lang) {
         s.push_str(&format!("\n## {}\n\n", g.title));
         for (k, what) in g.rows {
             let keys: Vec<String> = k.split(" · ").map(|k| format!("`{k}`")).collect();
@@ -257,17 +264,23 @@ pub(crate) fn markdown() -> String {
 mod tests {
     #[test]
     fn manual_page_matches_the_list() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/docs/manual/12-shortcuts.md");
-        let want = super::markdown();
-        if std::env::var_os("KFXL_WRITE_DOCS").is_some() {
-            std::fs::write(path, &want).unwrap();
+        use crate::i18n::Language;
+        for (lang, file) in [
+            (Language::English, "/docs/manual/12-shortcuts.md"),
+            (Language::Ukrainian, "/docs/manual/uk/12-shortcuts.md"),
+        ] {
+            let path = format!("{}{file}", env!("CARGO_MANIFEST_DIR"));
+            let want = super::markdown(lang);
+            if std::env::var_os("KFXL_WRITE_DOCS").is_some() {
+                std::fs::write(&path, &want).unwrap();
+            }
+            let have = std::fs::read_to_string(&path).unwrap_or_default();
+            assert!(
+                have == want,
+                "{file} is out of date: run \
+                 KFXL_WRITE_DOCS=1 cargo test --bin keyframexl manual_page"
+            );
         }
-        let have = std::fs::read_to_string(path).unwrap_or_default();
-        assert!(
-            have == want,
-            "docs/manual/12-shortcuts.md is out of date: run \
-             KFXL_WRITE_DOCS=1 cargo test --bin keyframexl manual_page"
-        );
     }
 
     #[test]

@@ -43,7 +43,74 @@ pub(crate) const CHAPTERS: &[(&str, &str)] = &[
     ("13-help.md", include_str!("../../docs/manual/13-help.md")),
 ];
 
+/// The Ukrainian manual (`docs/manual/uk/`), the same files in the same order.
+pub(crate) const CHAPTERS_UK: &[(&str, &str)] = &[
+    (
+        "01-start.md",
+        include_str!("../../docs/manual/uk/01-start.md"),
+    ),
+    (
+        "02-first-beat.md",
+        include_str!("../../docs/manual/uk/02-first-beat.md"),
+    ),
+    (
+        "03-sequencing.md",
+        include_str!("../../docs/manual/uk/03-sequencing.md"),
+    ),
+    (
+        "04-automation.md",
+        include_str!("../../docs/manual/uk/04-automation.md"),
+    ),
+    (
+        "05-instruments.md",
+        include_str!("../../docs/manual/uk/05-instruments.md"),
+    ),
+    (
+        "06-forge.md",
+        include_str!("../../docs/manual/uk/06-forge.md"),
+    ),
+    (
+        "07-vocal.md",
+        include_str!("../../docs/manual/uk/07-vocal.md"),
+    ),
+    (
+        "08-mixer.md",
+        include_str!("../../docs/manual/uk/08-mixer.md"),
+    ),
+    (
+        "09-audio-midi.md",
+        include_str!("../../docs/manual/uk/09-audio-midi.md"),
+    ),
+    (
+        "10-plugins-fl.md",
+        include_str!("../../docs/manual/uk/10-plugins-fl.md"),
+    ),
+    (
+        "11-files.md",
+        include_str!("../../docs/manual/uk/11-files.md"),
+    ),
+    (
+        "12-shortcuts.md",
+        include_str!("../../docs/manual/uk/12-shortcuts.md"),
+    ),
+    (
+        "13-help.md",
+        include_str!("../../docs/manual/uk/13-help.md"),
+    ),
+];
+
+/// The chapters in the interface language.
+pub(crate) const fn chapters(
+    lang: crate::i18n::Language,
+) -> &'static [(&'static str, &'static str)] {
+    match lang {
+        crate::i18n::Language::English => CHAPTERS,
+        crate::i18n::Language::Ukrainian => CHAPTERS_UK,
+    }
+}
+
 const ONLINE: &str = "https://github.com/mallardask-ops/keyframexl/blob/main/docs/manual/";
+const ONLINE_UK: &str = "https://github.com/mallardask-ops/keyframexl/blob/main/docs/manual/uk/";
 
 /// A chapter's title: its first `# ` heading.
 pub(crate) fn title(src: &str) -> &str {
@@ -55,12 +122,12 @@ pub(crate) fn title(src: &str) -> &str {
 
 /// Chapters that contain every word of `query` (case-insensitive), with
 /// how many times the first word occurs.
-pub(crate) fn search(query: &str) -> Vec<(usize, usize)> {
+pub(crate) fn search(chapters: &[(&str, &str)], query: &str) -> Vec<(usize, usize)> {
     let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
     if words.is_empty() {
-        return (0..CHAPTERS.len()).map(|i| (i, 0)).collect();
+        return (0..chapters.len()).map(|i| (i, 0)).collect();
     }
-    CHAPTERS
+    chapters
         .iter()
         .enumerate()
         .filter_map(|(i, (_, src))| {
@@ -74,9 +141,9 @@ pub(crate) fn search(query: &str) -> Vec<(usize, usize)> {
 }
 
 /// The chapter a link points at (`03-sequencing.md`, `./03-sequencing.md#x`).
-fn chapter_of(url: &str) -> Option<usize> {
+fn chapter_of(chapters: &[(&str, &str)], url: &str) -> Option<usize> {
     let file = url.trim_start_matches("./").split('#').next()?;
-    CHAPTERS.iter().position(|(f, _)| *f == file)
+    chapters.iter().position(|(f, _)| *f == file)
 }
 
 impl App {
@@ -85,10 +152,18 @@ impl App {
             return;
         }
         let tr = self.tr();
+        let chapters = chapters(tr.lang);
+        let online = match tr.lang {
+            crate::i18n::Language::English => ONLINE,
+            crate::i18n::Language::Ukrainian => ONLINE_UK,
+        };
         let mut open = true;
         let page_id = egui::Id::new("manual-page");
         let query_id = egui::Id::new("manual-query");
-        let mut page: usize = ctx.data(|d| d.get_temp(page_id)).unwrap_or(0);
+        let mut page: usize = ctx
+            .data(|d| d.get_temp(page_id))
+            .unwrap_or(0usize)
+            .min(chapters.len() - 1);
         let mut query: String = ctx.data(|d| d.get_temp(query_id)).unwrap_or_default();
         let mut follow = None;
         let screen = ctx.screen_rect();
@@ -112,7 +187,7 @@ impl App {
                                 .desired_width(190.0),
                         );
                         ui.add_space(4.0);
-                        let hits = search(&query);
+                        let hits = search(chapters, &query);
                         if hits.is_empty() {
                             ui.label(
                                 RichText::new(tr.manual_no_match)
@@ -124,7 +199,7 @@ impl App {
                             .id_salt("manual-toc")
                             .show(ui, |ui| {
                                 for (i, n) in hits {
-                                    let name = title(CHAPTERS[i].1);
+                                    let name = title(chapters[i].1);
                                     let label = if n > 0 {
                                         format!("{name}  ·  {n}")
                                     } else {
@@ -145,7 +220,7 @@ impl App {
                                     .on_hover_text(tr.manual_open_online_tip)
                                     .clicked()
                                 {
-                                    follow = Some(format!("{ONLINE}{}", CHAPTERS[page].0));
+                                    follow = Some(format!("{online}{}", chapters[page].0));
                                 }
                             });
                     });
@@ -156,7 +231,7 @@ impl App {
                         .show(ui, |ui| {
                             ui.vertical(|ui| {
                                 ui.set_width(ui.available_width().min(640.0));
-                                if let Some(url) = markdown::show(ui, CHAPTERS[page].1, 13.0) {
+                                if let Some(url) = markdown::show(ui, chapters[page].1, 13.0) {
                                     follow = Some(url);
                                 }
                                 ui.add_space(12.0);
@@ -164,7 +239,7 @@ impl App {
                                     if page > 0 && ui.button(tr.manual_prev).clicked() {
                                         page -= 1;
                                     }
-                                    if page + 1 < CHAPTERS.len()
+                                    if page + 1 < chapters.len()
                                         && ui.button(tr.manual_next).clicked()
                                     {
                                         page += 1;
@@ -175,7 +250,7 @@ impl App {
                 });
             });
         if let Some(url) = follow {
-            match chapter_of(&url) {
+            match chapter_of(chapters, &url) {
                 Some(i) => page = i,
                 None => {
                     if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
@@ -211,7 +286,12 @@ mod tests {
         files.sort();
         let built: Vec<&str> = CHAPTERS.iter().map(|(f, _)| *f).collect();
         assert_eq!(files, built, "add new chapters to CHAPTERS");
-        for (f, src) in CHAPTERS {
+        let uk: Vec<&str> = CHAPTERS_UK.iter().map(|(f, _)| *f).collect();
+        assert_eq!(
+            built, uk,
+            "every chapter needs a Ukrainian translation in docs/manual/uk"
+        );
+        for (f, src) in CHAPTERS.iter().chain(CHAPTERS_UK) {
             assert_ne!(title(src), "Untitled", "{f} has no # title");
         }
     }
@@ -222,10 +302,15 @@ mod tests {
             .iter()
             .position(|(f, _)| *f == "06-forge.md")
             .unwrap();
-        assert!(search("mutate KFXforge").iter().any(|(i, _)| *i == forge));
-        assert!(search("zzqqxx").is_empty());
-        assert_eq!(search("").len(), CHAPTERS.len());
-        assert_eq!(chapter_of("./06-forge.md#layers"), Some(forge));
-        assert_eq!(chapter_of("https://example.com"), None);
+        assert!(
+            search(CHAPTERS, "mutate KFXforge")
+                .iter()
+                .any(|(i, _)| *i == forge)
+        );
+        assert!(search(CHAPTERS, "zzqqxx").is_empty());
+        assert!(!search(CHAPTERS_UK, "мутація").is_empty());
+        assert_eq!(search(CHAPTERS, "").len(), CHAPTERS.len());
+        assert_eq!(chapter_of(CHAPTERS, "./06-forge.md#layers"), Some(forge));
+        assert_eq!(chapter_of(CHAPTERS, "https://example.com"), None);
     }
 }

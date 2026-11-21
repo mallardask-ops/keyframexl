@@ -17,6 +17,7 @@ Environment variables:
 - `KFXL_X11=0` runs on pure Wayland (plugin editors open in their own
   windows).
 - `KFXL_NO_BRIDGE=1` loads every plugin inside the program.
+- `KFXL_LANG=en|uk` sets the interface language for this run.
 - `KEYFRAMEXL_RECORDINGS` is the folder for recorded takes.
 - `CLAP_PATH`, `VST3_PATH`, `VST_PATH` add plugin folders.
 
