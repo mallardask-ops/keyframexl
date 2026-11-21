@@ -333,7 +333,7 @@ impl App {
             egui::Button::new(RichText::new(label).font(t::sans(13.0))),
         );
         let r = if path.is_none() {
-            r.on_disabled_hover_text("No autosave yet: unsaved work is written every two minutes.")
+            r.on_disabled_hover_text(tr.proj_no_autosave)
         } else {
             r
         };
@@ -344,36 +344,40 @@ impl App {
     }
 
     pub(crate) fn recent_menu(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button(RichText::new("Open recent").font(t::sans(13.0)), |ui| {
-            kit::menu_style(ui);
-            if self.recent.is_empty() {
-                ui.add_enabled(
-                    false,
-                    egui::Button::new(RichText::new("No recent projects").font(t::sans(13.0))),
-                );
-                return;
-            }
-            for path in self.recent.clone() {
-                let name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                let r = ui
-                    .add(egui::Button::new(RichText::new(name).font(t::sans(13.0))))
-                    .on_hover_text(path.display().to_string());
-                if r.clicked() {
-                    ui.close_menu();
-                    self.request(Pending::Open(Some(path)));
+        let tr = self.tr();
+        ui.menu_button(
+            RichText::new(tr.file_open_recent).font(t::sans(13.0)),
+            |ui| {
+                kit::menu_style(ui);
+                if self.recent.is_empty() {
+                    ui.add_enabled(
+                        false,
+                        egui::Button::new(RichText::new(tr.proj_no_recent).font(t::sans(13.0))),
+                    );
+                    return;
                 }
-            }
-            ui.separator();
-            if ui
-                .button(RichText::new("Clear list").font(t::sans(13.0)))
-                .clicked()
-            {
-                ui.close_menu();
-                self.clear_recent();
-            }
-        });
+                for path in self.recent.clone() {
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    let r = ui
+                        .add(egui::Button::new(RichText::new(name).font(t::sans(13.0))))
+                        .on_hover_text(path.display().to_string());
+                    if r.clicked() {
+                        ui.close_menu();
+                        self.request(Pending::Open(Some(path)));
+                    }
+                }
+                ui.separator();
+                if ui
+                    .button(RichText::new(tr.proj_clear_list).font(t::sans(13.0)))
+                    .clicked()
+                {
+                    ui.close_menu();
+                    self.clear_recent();
+                }
+            },
+        );
     }
 }

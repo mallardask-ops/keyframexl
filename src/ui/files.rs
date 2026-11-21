@@ -5,6 +5,7 @@
 //! window. Roots and open folders persist in ~/.config/keyframexl/browser.ron.
 
 use super::{App, Tone, kit};
+use crate::i18n::fill;
 use crate::theme as t;
 use eframe::egui::{self, Align2, Rect, Sense, Stroke, Ui, pos2, vec2};
 use std::collections::{HashMap, HashSet};
@@ -77,12 +78,12 @@ pub enum Sort {
 
 impl Sort {
     pub const ALL: [Sort; 4] = [Sort::Name, Sort::Type, Sort::Newest, Sort::Largest];
-    pub fn label(self) -> &'static str {
+    pub fn label(self, tr: &crate::i18n::Strings) -> &'static str {
         match self {
-            Sort::Name => "Name",
-            Sort::Type => "Type",
-            Sort::Newest => "Newest",
-            Sort::Largest => "Largest",
+            Sort::Name => tr.fb_sort_name,
+            Sort::Type => tr.fb_sort_type,
+            Sort::Newest => tr.fb_sort_newest,
+            Sort::Largest => tr.fb_sort_largest,
         }
     }
     fn order(self, v: &mut [Entry]) {
@@ -433,19 +434,20 @@ impl Files {
 
 impl App {
     pub(super) fn files_tab(&mut self, ui: &mut Ui, filter: &str) {
+        let tr = self.tr();
         if self.files.poll() {
             ui.ctx().request_repaint();
         }
         ui.horizontal(|ui| {
-            if kit::tool_button(ui, "Add folder", kit::Kind::Normal, true)
-                .on_hover_text("Add a folder to the browser")
+            if kit::tool_button(ui, tr.fb_add_folder, kit::Kind::Normal, true)
+                .on_hover_text(tr.fb_add_folder_tip)
                 .clicked()
                 && let Some(dir) = rfd::FileDialog::new().pick_folder()
             {
                 self.files.add_root(dir);
             }
-            if kit::tool_button(ui, "Refresh", kit::Kind::Ghost, true)
-                .on_hover_text("Read the folders again")
+            if kit::tool_button(ui, tr.fb_refresh, kit::Kind::Ghost, true)
+                .on_hover_text(tr.fb_refresh_tip)
                 .clicked()
             {
                 self.files.refresh();
@@ -458,16 +460,16 @@ impl App {
                 ui.painter(),
                 pos2(r.left() + 2.0, r.center().y),
                 Align2::LEFT_CENTER,
-                "sort",
+                tr.fb_sort_caps,
                 11.0,
                 t::faint(),
             );
             let mut pick = None;
             let w = ui.available_width() - 2.0;
-            kit::dropdown(ui, "files-sort", self.files.sort.label(), w, |ui| {
+            kit::dropdown(ui, "files-sort", self.files.sort.label(tr), w, |ui| {
                 for s in Sort::ALL {
                     if ui
-                        .selectable_label(self.files.sort == s, s.label())
+                        .selectable_label(self.files.sort == s, s.label(tr))
                         .clicked()
                     {
                         pick = Some(s);
@@ -475,7 +477,7 @@ impl App {
                     }
                 }
             })
-            .on_hover_text("Sort files: name, type, newest or largest first. Folders stay on top.");
+            .on_hover_text(tr.fb_sort_tip);
             if let Some(s) = pick {
                 self.files.set_sort(s);
             }
@@ -485,9 +487,10 @@ impl App {
         if !filter.is_empty() {
             let (dirs, done) = self.files.index_state();
             let text = if done {
-                format!("{} match(es) in {dirs} folders", rows.len())
+                tr.fb_matches
+                    .fmt_with(tr.lang, rows.len(), &[("dirs", &dirs.to_string())])
             } else {
-                format!("Searching… {dirs} folders read")
+                fill(tr.fb_searching, &[("dirs", &dirs.to_string())])
             };
             ui.label(
                 egui::RichText::new(text)
@@ -501,7 +504,7 @@ impl App {
         }
         if rows.is_empty() && filter.is_empty() {
             ui.label(
-                egui::RichText::new("No folders. Add one above.")
+                egui::RichText::new(tr.fb_no_folders)
                     .font(t::sans(12.0))
                     .color(t::faint()),
             );
@@ -579,7 +582,7 @@ impl App {
                     let layer =
                         egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("file-drag"));
                     let lp = ui.ctx().layer_painter(layer);
-                    let label = format!("{}  →  drop on a channel", e.name);
+                    let label = fill(tr.fb_drag, &[("name", &e.name)]);
                     let wdt = kit::text_width(&lp, &label, t::sans(13.0)) + 20.0;
                     let r = Rect::from_min_size(pos + vec2(14.0, 8.0), vec2(wdt, 26.0));
                     kit::control(&lp, r, 6.0, 0.0, false);
@@ -608,28 +611,28 @@ impl App {
                 kit::menu_style(ui);
                 let key = e.path.display().to_string();
                 let fav = if super::browser::is_favorite(ui.ctx(), &key) {
-                    "Remove from favorites"
+                    tr.fb_fav_remove
                 } else {
-                    "Add to favorites"
+                    tr.fb_fav_add
                 };
                 if ui.button(fav).clicked() {
                     super::browser::toggle_favorite(ui.ctx(), key.clone());
                     ui.close_menu();
                 }
                 super::browser::tag_menu(ui, &key);
-                if !e.dir && ui.button("Load into the selected channel").clicked() {
+                if !e.dir && ui.button(tr.fb_load_selected).clicked() {
                     action = Some((e.path.clone(), "load"));
                     ui.close_menu();
                 }
-                if !e.dir && ui.button("Load into a new channel").clicked() {
+                if !e.dir && ui.button(tr.fb_load_new).clicked() {
                     action = Some((e.path.clone(), "new"));
                     ui.close_menu();
                 }
-                if is_root && ui.button("Remove from browser").clicked() {
+                if is_root && ui.button(tr.fb_remove_root).clicked() {
                     action = Some((e.path.clone(), "remove"));
                     ui.close_menu();
                 }
-                if ui.button("Copy path").clicked() {
+                if ui.button(tr.fb_copy_path).clicked() {
                     ui.ctx().copy_text(e.path.display().to_string());
                     ui.close_menu();
                 }
@@ -761,6 +764,7 @@ impl App {
 
     /// Hand a decoded preview to the audio thread.
     pub(super) fn poll_preview(&mut self) {
+        let tr = self.tr();
         let Some((path, rx)) = &self.preview_rx else {
             return;
         };
@@ -780,7 +784,7 @@ impl App {
                         .unwrap_or_default()
                         .to_string_lossy()
                         .to_string();
-                    self.say(Tone::Quiet, format!("Previewing {name}. Click it again or Esc to stop, double-click to load."));
+                    self.say(Tone::Quiet, fill(tr.fb_previewing, &[("name", &name)]));
                 }
             }
             Err(e) => {

@@ -653,6 +653,7 @@ impl App {
 
     /// The envelope editor (FL: the automation clip window).
     pub(crate) fn automation_window(&mut self, ctx: &egui::Context) {
+        let tr = self.tr();
         let Some(id) = self.auto_open else { return };
         let Some(pi) = self
             .song
@@ -663,7 +664,7 @@ impl App {
             self.auto_open = None;
             return;
         };
-        let title = format!("Automation · {}", self.song.patterns[pi].name);
+        let title = fill(tr.ae_title, &[("name", &self.song.patterns[pi].name)]);
         let mut open = true;
         egui::Window::new(title)
             .id(egui::Id::new("automation-editor"))
@@ -679,6 +680,7 @@ impl App {
     }
 
     fn automation_body(&mut self, ui: &mut egui::Ui, pi: usize) {
+        let tr = self.tr();
         let env = self.song.patterns[pi].automation.clone().expect("checked");
         let len = self.song.patterns[pi].length.max(STEP);
         let (lo, hi) = env.target.range(&self.song);
@@ -687,31 +689,35 @@ impl App {
             let (ok, note) = if env.target.exists(&self.song) {
                 (t::muted(), self.auto_label(env.target))
             } else {
-                (t::bad(), "Its control is gone".to_string())
+                (t::bad(), tr.ae_control_gone.to_string())
             };
             ui.label(egui::RichText::new(note).font(t::sans(13.0)).color(ok));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let bars = len / BAR;
                 if kit::tool_button(ui, "+", kit::Kind::Ghost, bars < 64)
-                    .on_hover_text("One bar longer")
+                    .on_hover_text(tr.ae_longer)
                     .clicked()
                 {
                     self.set_auto_length(pi, len + BAR);
                 }
                 ui.label(
-                    egui::RichText::new(format!("{bars} bar{}", if bars == 1 { "" } else { "s" }))
+                    egui::RichText::new(tr.ae_bars.fmt(tr.lang, bars as usize))
                         .font(t::mono(12.0))
                         .color(t::text()),
                 );
                 if kit::tool_button(ui, "−", kit::Kind::Ghost, bars > 1)
-                    .on_hover_text("One bar shorter")
+                    .on_hover_text(tr.ae_shorter)
                     .clicked()
                 {
                     self.set_auto_length(pi, len - BAR);
                 }
             });
         });
-        ui.label(egui::RichText::new("Click to add a point, drag to move it, right-click to delete. Alt+drag up/down on a segment bends it.").font(t::sans(11.5)).color(t::faint()));
+        ui.label(
+            egui::RichText::new(tr.ae_help)
+                .font(t::sans(11.5))
+                .color(t::faint()),
+        );
         let size = vec2(ui.available_width(), ui.available_height().max(160.0));
         let (rect, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
         let p = ui.painter_at(rect);
@@ -952,6 +958,7 @@ impl App {
 
     /// A value as the control shows it.
     fn auto_value_text(&self, target: Target, v: f32) -> String {
+        let tr = self.tr();
         match target {
             Target::MixerVolume { .. } => {
                 if v <= 1e-5 {
@@ -978,7 +985,7 @@ impl App {
                 .and_then(|s| s.kind.params().get(param as usize))
                 .map(|spec| keyframexl::fx::format(spec, v))
                 .unwrap_or_else(|| format!("{v:.2}")),
-            Target::FxEnabled { .. } => if v >= 0.5 { "On" } else { "Off" }.into(),
+            Target::FxEnabled { .. } => if v >= 0.5 { tr.ae_on } else { tr.ae_off }.into(),
             Target::FxMix { .. } | Target::SendLevel { .. } | Target::PluginParam { .. } => {
                 format!("{:.0}%", v * 100.0)
             }

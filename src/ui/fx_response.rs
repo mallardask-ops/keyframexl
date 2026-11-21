@@ -12,67 +12,67 @@ struct Display {
     rate: f32,
 }
 
-fn display(kind: FxKind) -> Option<Display> {
+fn display(kind: FxKind, tr: &crate::i18n::Strings) -> Option<Display> {
     use FxKind::*;
     let (title, axis, rgb, samples, rate) = match kind {
         AutoPan => (
-            "Stereo motion",
+            tr.fxr_autopan,
             "L / R     ·     2 s",
             [95, 210, 203],
             16000,
             8000.,
         ),
         Tremolo => (
-            "Amplitude envelope",
+            tr.fxr_tremolo,
             "GAIN     ·     1 s",
             [162, 215, 121],
             8000,
             8000.,
         ),
         RingMod => (
-            "Carrier modulation",
+            tr.fxr_ringmod,
             "GAIN     ·     20 ms",
             [198, 150, 237],
             960,
             48000.,
         ),
         Phaser => (
-            "Notch sweep",
+            tr.fxr_phaser,
             "100 Hz – 10 kHz     ·     2 s",
             [246, 169, 103],
             256,
             48000.,
         ),
         Bitcrusher => (
-            "Sample & hold",
+            tr.fxr_sh,
             "1 kHz SINE     ·     3 ms",
             [245, 170, 85],
             144,
             48000.,
         ),
         Wavefolder => (
-            "Fold transfer",
+            tr.fxr_fold,
             "INPUT     −1 … +1",
             [247, 134, 142],
             256,
             48000.,
         ),
         TiltEq => (
-            "Shelf response",
+            tr.fxr_shelf,
             "20 Hz – 20 kHz     ·     ±12 dB",
             [126, 186, 246],
             256,
             48000.,
         ),
         NoiseGate => (
-            "Gate envelope",
+            tr.fxr_gate,
             "GAIN     ·     500 ms",
             [123, 216, 182],
             4000,
             8000.,
         ),
         Transient => (
-            "Attack & body",
+            tr.fxr_transient,
             "GAIN     ·     1 s",
             [244, 177, 100],
             8000,
@@ -160,7 +160,10 @@ fn trace(kind: FxKind, params: &[f32], view: &Display) -> Vec<[f32; 2]> {
 }
 
 pub fn panel(ui: &mut Ui, kind: FxKind, params: &[f32]) {
-    let Some(view) = display(kind) else { return };
+    let tr = crate::i18n::ctx_tr(ui.ctx());
+    let Some(view) = display(kind, tr) else {
+        return;
+    };
     let id = ui.id().with(("fx-response", kind.label()));
     let points = ui.data_mut(|data| {
         let cached = data.get_temp_mut_or_insert_with(id, || {

@@ -474,6 +474,7 @@ impl App {
     /// Notes of a MIDI file into channel `ch` of the current pattern: at the
     /// start when the channel has none there, else from the bar after its last note.
     pub(crate) fn drop_midi_notes(&mut self, path: &Path, ch: u64) {
+        let tr = self.tr();
         use keyframexl::sequence::{BAR, Note};
         let file = path
             .file_name()
@@ -485,8 +486,13 @@ impl App {
             .and_then(|b| midi::smf_notes(&b))
         {
             Ok(n) if !n.is_empty() => n,
-            Ok(_) => return self.say(Tone::Bad, format!("{file} has no notes")),
-            Err(e) => return self.say(Tone::Bad, format!("Cannot read {file}: {e}")),
+            Ok(_) => return self.say(Tone::Bad, fill(tr.midi_no_notes, &[("file", &file)])),
+            Err(e) => {
+                return self.say(
+                    Tone::Bad,
+                    fill(tr.midi_cannot_read, &[("path", &file), ("err", &e)]),
+                );
+            }
         };
         let pid = self.selected;
         let end = self
@@ -522,10 +528,14 @@ impl App {
         let name = self.instrument_name(ch);
         self.say(
             Tone::Done,
-            format!(
-                "{} note(s) from {file} into {name} at bar {}. Ctrl+Z undoes.",
+            tr.midi_notes_into.fmt_with(
+                tr.lang,
                 notes.len(),
-                at / BAR + 1
+                &[
+                    ("file", &file),
+                    ("name", &name),
+                    ("bar", &(at / BAR + 1).to_string()),
+                ],
             ),
         );
     }

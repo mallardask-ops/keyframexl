@@ -1,4 +1,5 @@
 use super::kit;
+use crate::i18n::fill;
 use crate::theme as t;
 use eframe::egui::{self, Color32, Rect, Sense, Stroke, Ui, pos2, vec2};
 use keyframexl::fx::FxKind;
@@ -143,6 +144,7 @@ pub fn eq(
     height: f32,
     focus: &mut Option<usize>,
 ) -> (bool, bool) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let full = canvas(ui, height);
     let p = ui.painter_at(full);
     // Room for the dB scale on the right and the Hz scale below.
@@ -379,23 +381,18 @@ pub fn eq(
         if response.dragged() {
             hot = Some(b);
         }
-        response.on_hover_text(
-            "Drag: frequency and gain · Shift: fine · wheel: Q · double-click: reset",
-        );
+        response.on_hover_text(tr.fxv_eq_tip);
     }
     // Readout of the band under the pointer, else the focused one.
     if let Some(b) = hot.or(*focus) {
         let i = b * 3;
         let fmt = |k: usize| keyframexl::fx::format(&specs[i + k], params[i + k]);
-        let name = [
-            "Low shelf",
-            "Band 2",
-            "Band 3",
-            "Band 4",
-            "Band 5",
-            "Band 6",
-            "High shelf",
-        ][b];
+        let band = fill(tr.fxv_band_n, &[("n", &(b + 1).to_string())]);
+        let name = match b {
+            0 => tr.fxv_low_shelf,
+            6 => tr.fxv_high_shelf,
+            _ => band.as_str(),
+        };
         let text = format!("{name}   {}   {}   Q {}", fmt(0), fmt(1), fmt(2));
         let at = pos2(r.left() + 8.0, full.top() + 6.0);
         let g = p.layout_no_wrap(text, t::mono(11.5), t::text());
@@ -416,6 +413,7 @@ const GR_RANGE: f32 = 24.0;
 /// Transfer curve of a compressor or limiter, with its gain reduction meter
 /// on the right (`gr` in dB, `None` without audio).
 pub fn dynamics(ui: &mut Ui, kind: FxKind, p: &[f32], gr: Option<f32>) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let full = canvas(ui, 130.0);
     let painter = ui.painter();
     // The meter: a strip on the right that fills down from the top, like a
@@ -490,19 +488,20 @@ pub fn dynamics(ui: &mut Ui, kind: FxKind, p: &[f32], gr: Option<f32>) {
     painter.text(
         r.left_top() + vec2(4.0, 3.0),
         egui::Align2::LEFT_TOP,
-        "OUT dB",
+        tr.fxv_out_db,
         t::sans(10.0),
         t::muted(),
     );
     painter.text(
         r.right_bottom() - vec2(4.0, 3.0),
         egui::Align2::RIGHT_BOTTOM,
-        "IN dB",
+        tr.fxv_in_db,
         t::sans(10.0),
         t::muted(),
     );
 }
 pub fn ambience(ui: &mut Ui, kind: FxKind, p: &[f32]) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let r = canvas(ui, 90.0);
     let painter = ui.painter();
     if kind == FxKind::Delay {
@@ -520,7 +519,7 @@ pub fn ambience(ui: &mut Ui, kind: FxKind, p: &[f32]) {
         painter.text(
             r.left_top() + vec2(4.0, 4.0),
             egui::Align2::LEFT_TOP,
-            format!("{} steps / tap", p[0] as i32),
+            fill(tr.fxv_steps_per_tap, &[("n", &(p[0] as i32).to_string())]),
             t::sans(11.0),
             t::muted(),
         );
@@ -544,7 +543,7 @@ pub fn ambience(ui: &mut Ui, kind: FxKind, p: &[f32]) {
         painter.text(
             r.left_top() + vec2(4.0, 4.0),
             egui::Align2::LEFT_TOP,
-            "Decay (approx.)",
+            tr.fxv_decay_approx,
             t::sans(11.0),
             t::muted(),
         );
@@ -588,14 +587,15 @@ pub fn bloom(
     params: &mut [f32],
     enabled: bool,
 ) -> (bool, bool) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     use super::kit;
     use egui::Align2;
 
     let modes = [
-        ("A", "Balanced", Color32::from_rgb(119, 206, 246)),
-        ("B", "Warm", Color32::from_rgb(244, 177, 100)),
-        ("C", "Presence", Color32::from_rgb(140, 224, 172)),
-        ("D", "Dense", Color32::from_rgb(211, 162, 242)),
+        ("A", tr.fxv_bloom_balanced, Color32::from_rgb(119, 206, 246)),
+        ("B", tr.fxv_bloom_warm, Color32::from_rgb(244, 177, 100)),
+        ("C", tr.fxv_bloom_presence, Color32::from_rgb(140, 224, 172)),
+        ("D", tr.fxv_bloom_dense, Color32::from_rgb(211, 162, 242)),
     ];
     let selected = (params[1].round() as usize).min(3);
     let accent = if enabled {
@@ -610,14 +610,14 @@ pub fn bloom(
         .rect_filled(panel, 8.0, Color32::from_rgb(27, 31, 35));
     let mut amount = params[0] as f64;
     let knob = kit::Knob {
-        label: "Amount",
+        label: tr.fxv_amount,
         color: accent,
         min: 0.0,
         max: 100.0,
         default: 40.0,
         log: false,
         fmt: &|x| format!("{x:.0}%"),
-        hint: "Blend in the enhanced signal",
+        hint: tr.fxv_amount_hint,
     };
     kit::automatable(
         ui,
@@ -657,7 +657,7 @@ pub fn bloom(
         paint,
         center + vec2(0.0, 76.0),
         Align2::CENTER_CENTER,
-        "Amount",
+        tr.fxv_amount,
         11.0,
         t::muted(),
     );
@@ -699,8 +699,9 @@ pub fn bloom(
 
 /// FL Gross Beat's time side: 16 steps of 1/16, each one a playback mode.
 pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     use super::kit;
-    use keyframexl::fx::{TIME_HINTS, TIME_MODES, TIME_STEPS};
+    use keyframexl::fx::{TIME_MODES, TIME_STEPS};
     let colors = [
         Color32::from_rgb(64, 69, 74),
         t::enc_blue(),
@@ -714,7 +715,7 @@ pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
     let mut steps = params[0].round().clamp(1.0, TIME_STEPS as f32) as usize;
     ui.horizontal(|ui| {
         ui.label(
-            egui::RichText::new("Loop")
+            egui::RichText::new(tr.fxv_loop)
                 .font(t::sans(13.0))
                 .color(t::muted()),
         );
@@ -722,7 +723,7 @@ pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
             .add(
                 egui::DragValue::new(&mut steps)
                     .range(1..=TIME_STEPS)
-                    .suffix(" steps"),
+                    .suffix(tr.fxv_steps_suffix),
             )
             .changed()
         {
@@ -732,8 +733,8 @@ pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
-                .small_button("Clear")
-                .on_hover_text("Every step plays through")
+                .small_button(tr.fxv_clear)
+                .on_hover_text(tr.fxv_clear_tip)
                 .clicked()
             {
                 params[3..3 + TIME_STEPS].fill(0.0);
@@ -741,8 +742,8 @@ pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
                 changed = true;
             }
             if ui
-                .small_button("Dice")
-                .on_hover_text("Random time pattern")
+                .small_button(tr.fxv_dice)
+                .on_hover_text(tr.fxv_dice_tip)
                 .clicked()
             {
                 let mut seed = (ui.input(|i| i.time) * 1000.0) as u64 ^ 0x9e37_79b9;
@@ -779,7 +780,7 @@ pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
     ui.painter().text(
         inner.left_top(),
         egui::Align2::LEFT_TOP,
-        "1/16 steps · click to change · right-click to reset",
+        tr.fxv_time_note,
         t::sans(10.5),
         t::faint(),
     );
@@ -798,11 +799,13 @@ pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
         let active = i < steps;
         let response = ui
             .interact(rect, ui.id().with(("time-step", i)), Sense::click())
-            .on_hover_text(format!(
-                "Step {} · {}\n{}",
-                i + 1,
-                TIME_MODES[mode],
-                TIME_HINTS[mode]
+            .on_hover_text(fill(
+                tr.fxv_step_tip,
+                &[
+                    ("n", &(i + 1).to_string()),
+                    ("mode", tr.fx_time_modes()[mode]),
+                    ("hint", tr.fx_time_hints()[mode]),
+                ],
             ));
         if response.clicked() {
             params[3 + i] = ((mode + 1) % TIME_MODES.len()) as f32;
@@ -842,7 +845,7 @@ pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
         paint.text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            TIME_MODES[mode],
+            tr.fx_time_modes()[mode],
             t::mono(9.5),
             ink,
         );
@@ -862,13 +865,13 @@ pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
                 &mut smooth,
                 keyframexl::fx::FxKind::Time.params()[1],
                 t::enc_white(),
-                "Fade at step edges",
+                tr.fxv_smooth_hint,
             ),
             (
                 &mut slice,
                 keyframexl::fx::FxKind::Time.params()[2],
                 Color32::from_rgb(211, 162, 242),
-                "How much of a step a stutter repeats",
+                tr.fxv_slice_hint,
             ),
         ] {
             let fmt = |x: f64| keyframexl::fx::format(&spec, x as f32);
@@ -895,11 +898,12 @@ pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
 /// Three bands side by side, each with its threshold and ratio (FL: Maximus,
 /// simplified). Shared attack/release/output below.
 pub fn multiband(ui: &mut Ui, track: usize, slot: usize, params: &mut [f32]) -> (bool, bool) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     use super::kit;
     let specs = keyframexl::fx::FxKind::Multiband.params();
     let mut started = false;
     let mut changed = false;
-    let names = ["LOW", "MID", "HIGH"];
+    let names = [tr.fxv_low, tr.fxv_mid, tr.fxv_high];
     let colors = [t::enc_orange(), t::enc_green(), t::enc_blue()];
     ui.horizontal(|ui| {
         for band in 0..3 {
@@ -920,7 +924,11 @@ pub fn multiband(ui: &mut Ui, track: usize, slot: usize, params: &mut [f32]) -> 
                         let mut v = params[pi] as f64;
                         let fmt = |x: f64| keyframexl::fx::format(&spec, x as f32);
                         let knob = kit::Knob {
-                            label: if k == 0 { "Threshold" } else { "Ratio" },
+                            label: if k == 0 {
+                                tr.fxv_threshold
+                            } else {
+                                tr.fxv_ratio
+                            },
                             color: colors[band],
                             min: spec.min as f64,
                             max: spec.max as f64,
@@ -928,9 +936,9 @@ pub fn multiband(ui: &mut Ui, track: usize, slot: usize, params: &mut [f32]) -> 
                             log: spec.log,
                             fmt: &fmt,
                             hint: if k == 0 {
-                                "Level where this band starts to be turned down"
+                                tr.fxv_threshold_hint
                             } else {
-                                "How much it is turned down above the threshold"
+                                tr.fxv_ratio_hint
                             },
                         };
                         kit::automatable(
@@ -1186,6 +1194,7 @@ fn curve_point(rect: Rect, x: f32, y: f32) -> egui::Pos2 {
 
 /// Fruity Filter: one big cutoff dial, a filter-type switch and a live curve.
 pub fn filter(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, bool) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let specs = FxKind::Filter.params();
     let (mut started, mut changed) = (false, false);
     let kind = p[0].round() as usize;
@@ -1255,7 +1264,7 @@ pub fn filter(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, b
         ui.vertical(|ui| {
             ui.add_space(8.0);
             ui.label(
-                egui::RichText::new("TYPE")
+                egui::RichText::new(tr.fxv_type)
                     .font(t::sans(10.0))
                     .color(t::faint()),
             );
@@ -1398,13 +1407,14 @@ pub fn chorus(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, b
 
 /// Hyper Chorus: the FL three X/Y pads, line count and filters below.
 pub fn hyper_chorus(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, bool) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let specs = FxKind::HyperChorus.params();
     let (mut started, mut changed) = (false, false);
     ui.horizontal(|ui| {
         for (xpi, ypi, title, color) in [
-            (0, 1, "DELAY", t::enc_blue()),
-            (2, 3, "MOD", t::enc_green()),
-            (4, 5, "MOVE", t::enc_orange()),
+            (0, 1, tr.fxv_delay, t::enc_blue()),
+            (2, 3, tr.fxv_mod, t::enc_green()),
+            (4, 5, tr.fxv_move, t::enc_orange()),
         ] {
             let (s, c) = xy_pad(
                 ui,
@@ -1428,7 +1438,7 @@ pub fn hyper_chorus(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (b
             ui.painter(),
             ui.cursor().min + vec2(0.0, 10.0),
             egui::Align2::LEFT_CENTER,
-            "Lines",
+            tr.fxv_lines,
             10.0,
             t::faint(),
         );
@@ -1464,6 +1474,7 @@ pub fn hyper_chorus(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (b
 
 /// Squeeze: the puncher's keep/hit pattern and a bit staircase.
 pub fn squeeze(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, bool) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let specs = FxKind::Squeeze.params();
     let (mut started, mut changed) = (false, false);
     let (face, paint) = face_bg(ui, 104.0);
@@ -1540,13 +1551,21 @@ pub fn squeeze(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, 
     });
     ui.horizontal(|ui| {
         ui.label(
-            egui::RichText::new("RELATION")
+            egui::RichText::new(tr.fxv_relation)
                 .font(t::sans(10.0))
                 .color(t::faint()),
         );
         ui.add_space(6.0);
         let mut rel = p[3].round() as usize;
-        for (i, name) in ["None", "Equal", "Double", "Half"].iter().enumerate() {
+        for (i, name) in [
+            tr.fxv_rel_none,
+            tr.fxv_rel_equal,
+            tr.fxv_rel_double,
+            tr.fxv_rel_half,
+        ]
+        .iter()
+        .enumerate()
+        {
             if ui
                 .selectable_label(rel == i, egui::RichText::new(*name).font(t::mono(11.0)))
                 .clicked()
@@ -1559,7 +1578,7 @@ pub fn squeeze(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, 
         }
         ui.add_space(8.0);
         let mut pre = p[9] >= 0.5;
-        if ui.checkbox(&mut pre, "Pre").changed() {
+        if ui.checkbox(&mut pre, tr.fxv_pre).changed() {
             p[9] = if pre { 1.0 } else { 0.0 };
             started = true;
             changed = true;
@@ -1676,14 +1695,15 @@ pub fn balance(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, 
 
 /// Mid/Side: the mid and side levels as two bars, width and mono below.
 pub fn mid_side(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, bool) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let specs = FxKind::MidSide.params();
     let (mut started, mut changed) = (false, false);
     let (face, paint) = face_bg(ui, 92.0);
     let plot = face.shrink2(vec2(24.0, 14.0));
     let side = (p[0] / 100.0).clamp(0.0, 2.0);
     for (i, (g, name, color)) in [
-        (1.0f32, "MID", t::enc_blue()),
-        (side, "SIDE", t::enc_green()),
+        (1.0f32, tr.fxv_mid, t::enc_blue()),
+        (side, tr.fxv_side, t::enc_green()),
     ]
     .into_iter()
     .enumerate()
@@ -1725,12 +1745,15 @@ pub fn mid_side(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool,
     });
     ui.horizontal(|ui| {
         ui.label(
-            egui::RichText::new("SOLO")
+            egui::RichText::new(tr.fxv_solo)
                 .font(t::sans(10.0))
                 .color(t::faint()),
         );
         let mut solo = p[4].round() as usize;
-        for (i, name) in ["Off", "Mid", "Side"].iter().enumerate() {
+        for (i, name) in [tr.fxv_solo_off, tr.fxv_solo_mid, tr.fxv_solo_side]
+            .iter()
+            .enumerate()
+        {
             if ui
                 .selectable_label(solo == i, egui::RichText::new(*name).font(t::mono(11.0)))
                 .clicked()
@@ -1832,6 +1855,7 @@ pub fn has_face(kind: FxKind) -> bool {
 
 /// 3-band EQ: three console columns over a response curve.
 pub fn eq3(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, bool) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let specs = FxKind::Eq.params();
     let (mut started, mut changed) = (false, false);
     let (face, paint) = face_bg(ui, 132.0);
@@ -1873,9 +1897,9 @@ pub fn eq3(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, bool
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         for (name, color, idxs) in [
-            ("LOW", t::enc_orange(), vec![0usize, 1]),
-            ("MID", t::enc_green(), vec![2, 3, 4]),
-            ("HIGH", t::enc_blue(), vec![5, 6]),
+            (tr.fxv_low, t::enc_orange(), vec![0usize, 1]),
+            (tr.fxv_mid, t::enc_green(), vec![2, 3, 4]),
+            (tr.fxv_high, t::enc_blue(), vec![5, 6]),
         ] {
             ui.vertical(|ui| {
                 ui.label(egui::RichText::new(name).font(t::sans(9.0)).color(color));
@@ -2227,6 +2251,7 @@ pub fn wavefolder(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (boo
 
 /// Transient: the attack and the body as an envelope.
 pub fn transient(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, bool) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let specs = FxKind::Transient.params();
     let (mut started, mut changed) = (false, false);
     let (face, paint) = face_bg(ui, 112.0);
@@ -2248,14 +2273,14 @@ pub fn transient(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool
     paint.text(
         plot.left_bottom() + vec2(0.0, 2.0),
         egui::Align2::LEFT_TOP,
-        "HIT",
+        tr.fxv_hit,
         t::mono(9.0),
         t::faint(),
     );
     paint.text(
         plot.right_bottom() + vec2(0.0, 2.0),
         egui::Align2::RIGHT_TOP,
-        "BODY",
+        tr.fxv_body,
         t::mono(9.0),
         t::faint(),
     );
@@ -2276,6 +2301,7 @@ pub fn transient(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool
 
 /// Vocoder: the band bank lit by the modulator.
 pub fn vocoder(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, bool) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let specs = FxKind::Vocoder.params();
     let (mut started, mut changed) = (false, false);
     let (face, paint) = face_bg(ui, 112.0);
@@ -2306,7 +2332,7 @@ pub fn vocoder(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, 
     paint.text(
         plot.left_top(),
         egui::Align2::LEFT_TOP,
-        format!("{bands} bands"),
+        fill(tr.fxv_bands, &[("n", &bands.to_string())]),
         t::mono(9.0),
         t::faint(),
     );
@@ -2328,6 +2354,7 @@ pub fn vocoder(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, 
 
 /// Convolution: the impulse response's own decay.
 pub fn convolution(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bool, bool) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let specs = FxKind::Convolution.params();
     let (mut started, mut changed) = (false, false);
     let (face, paint) = face_bg(ui, 100.0);
@@ -2350,7 +2377,7 @@ pub fn convolution(ui: &mut Ui, track: usize, slot: usize, p: &mut [f32]) -> (bo
     paint.text(
         plot.left_top(),
         egui::Align2::LEFT_TOP,
-        "IMPULSE",
+        tr.fxv_impulse,
         t::mono(9.0),
         t::faint(),
     );
