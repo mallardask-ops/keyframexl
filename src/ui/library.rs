@@ -171,6 +171,7 @@ impl App {
 
     /// Add every sound of a built-in kit as a Forge channel.
     pub(crate) fn add_kit(&mut self, kit: keyframexl::kits::Kit) {
+        let tr = self.tr();
         self.checkpoint();
         let pieces = kit.pieces();
         let count = pieces.len();
@@ -186,7 +187,8 @@ impl App {
         self.publish();
         self.say(
             super::Tone::Done,
-            format!("{}: {count} channels added. Ctrl+Z undoes.", kit.label()),
+            tr.lib_kit_added
+                .fmt_with(tr.lang, count, &[("kit", kit.label())]),
         );
     }
 

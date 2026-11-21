@@ -43,10 +43,11 @@ impl App {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 self.transport_keys(ui);
                 ui.add_space(8.0);
+                let tr = self.tr();
                 let (pick, _) = kit::chips(
                     ui,
                     "mode",
-                    &["Pattern", "Song"],
+                    &[tr.deck_pattern, tr.deck_song],
                     self.song_mode as usize,
                     None,
                 );
@@ -55,8 +56,8 @@ impl App {
                 }
                 ui.add_space(8.0);
                 self.lcd(ui);
-                let r = kit::button(ui, "Tap", kit::Kind::Normal, true);
-                if kit::bar_hint(r, "Tap tempo: click three or more times on the beat").clicked() {
+                let r = kit::button(ui, tr.deck_tap, kit::Kind::Normal, true);
+                if kit::bar_hint(r, tr.deck_tap_hint).clicked() {
                     self.tap();
                 }
                 ui.add_space(4.0);
@@ -126,6 +127,7 @@ impl App {
     /// FL: one button per window with an open lamp. Click opens or focuses,
     /// the F-key toggles.
     fn window_buttons(&mut self, ui: &mut Ui) {
+        let tr = self.tr();
         let roll = Tab::Roll {
             instrument: self.instrument,
         };
@@ -199,10 +201,10 @@ impl App {
                 .any(|(_, t)| t.kind() == kind);
             let current = focus == Some(kind);
             let label = match kind {
-                Kind::Playlist => "Playlist",
-                Kind::Rack => "Rack",
-                Kind::Mixer => "Mixer",
-                _ => "Roll",
+                Kind::Playlist => tr.deck_playlist,
+                Kind::Rack => tr.deck_rack,
+                Kind::Mixer => tr.deck_mixer,
+                _ => tr.deck_roll,
             };
             let r = button(ui, label, open, current, &|p, c, col| match kind {
                 Kind::Playlist => kit::icon_playlist(p, c, col),
@@ -214,8 +216,8 @@ impl App {
                 r,
                 format!(
                     "{}  {key}{}",
-                    kind.title(),
-                    if open { " · open" } else { "" }
+                    tr.kind_title(kind),
+                    if open { tr.deck_win_open_suffix } else { "" }
                 ),
             );
             if r.clicked() {
@@ -223,7 +225,7 @@ impl App {
             }
         }
         let on = self.ws.browser;
-        let r = button(ui, "Browser", on, false, &|p, c, col| {
+        let r = button(ui, tr.deck_browser, on, false, &|p, c, col| {
             p.rect_stroke(
                 Rect::from_center_size(c, vec2(14.0, 11.0)),
                 1.5,
@@ -235,21 +237,23 @@ impl App {
                 Stroke::new(1.5_f32, col),
             );
         });
-        if kit::bar_hint(r, "Browser  Alt+F8").clicked() {
+        if kit::bar_hint(r, tr.deck_browser_hint).clicked() {
             self.ws.browser = !self.ws.browser;
         }
     }
 
     /// Global snap (FL: main snap). The piano roll follows it.
     fn snap_selector(&mut self, ui: &mut Ui) {
-        let label = format!("Snap  {}", self.snap.label());
+        let tr = self.tr();
+        let label = format!("{}  {}", tr.deck_snap_label, tr.snap_label(self.snap));
+        let w = (kit::text_width(ui.painter(), &label, t::sans(13.0)) + 34.0).max(110.0);
         let mut pick = None;
-        let r = kit::dropdown(ui, "snap", &label, 110.0, |ui| {
+        let r = kit::dropdown(ui, "snap", &label, w, |ui| {
             for s in Snap::ALL {
                 if ui
                     .selectable_label(
                         s == self.snap,
-                        egui::RichText::new(s.label()).font(t::sans(13.0)),
+                        egui::RichText::new(tr.snap_label(s)).font(t::sans(13.0)),
                     )
                     .clicked()
                 {
@@ -257,10 +261,7 @@ impl App {
                 }
             }
         });
-        kit::bar_hint(
-            r,
-            "Grid for drawing and moving notes. Off places notes freely. Alt skips snap while dragging.",
-        );
+        kit::bar_hint(r, tr.deck_snap_hint);
         if let Some(s) = pick {
             self.snap = s;
         }
@@ -268,6 +269,7 @@ impl App {
 
     /// FL pattern selector: − previous, the list, + next (a new one after the last).
     fn pattern_selector(&mut self, ui: &mut Ui) {
+        let tr = self.tr();
         let idx = self.pattern_index(self.selected);
         let prev = prev_note_pattern(&self.song.patterns, idx);
         let next = next_note_pattern(&self.song.patterns, idx);
@@ -287,7 +289,7 @@ impl App {
                 );
             },
         );
-        if kit::bar_hint(r, "Previous pattern").clicked()
+        if kit::bar_hint(r, tr.deck_prev_pattern).clicked()
             && let Some(j) = prev
         {
             let id = self.song.patterns[j].id;
@@ -344,10 +346,7 @@ impl App {
         if target != idx {
             pick = Some(self.song.patterns[target].id);
         }
-        kit::bar_hint(
-            r,
-            "Pattern to edit and play. Scroll to switch, right-click for pattern actions, double-click or F2 to rename.",
-        );
+        kit::bar_hint(r, tr.deck_pattern_hint);
         if let Some(id) = pick {
             self.select_pattern(id);
         }
@@ -370,9 +369,9 @@ impl App {
         if kit::bar_hint(
             r,
             if next.is_some() {
-                "Next pattern"
+                tr.deck_next_pattern
             } else {
-                "New pattern"
+                tr.deck_new_pattern
             },
         )
         .clicked()
@@ -388,19 +387,22 @@ impl App {
 
     /// CPU load of the audio callback and sounding voices (FL: CPU / polyphony).
     fn meters(&mut self, ui: &mut Ui) {
+        let tr = self.tr();
         let (text, tip) = match &self.audio {
             Some(a) => {
                 let load = a.load.load(std::sync::atomic::Ordering::Relaxed) as f32 / 10.0;
                 let voices = a.voices.load(std::sync::atomic::Ordering::Relaxed);
+                let load_s = format!("{load:>3.0}");
+                let voices_s = format!("{voices:>3}");
                 (
-                    format!("cpu {load:>3.0}%   voices {voices:>3}"),
-                    "Audio thread load and sounding voices",
+                    crate::i18n::fill(
+                        tr.deck_cpu_voices,
+                        &[("load", &load_s), ("voices", &voices_s)],
+                    ),
+                    tr.deck_cpu_voices_hint,
                 )
             }
-            None => (
-                "no audio".to_string(),
-                "No audio output: check PipeWire, then restart",
-            ),
+            None => (tr.deck_no_audio.to_string(), tr.deck_no_audio_hint),
         };
         let g = kit::caps_galley(ui.painter(), &text, 12.0, t::muted());
         let (r, resp) = ui.allocate_exact_size(g.size(), Sense::hover());
@@ -430,8 +432,9 @@ impl App {
                 3.5,
                 if lit { t::bad() } else { t::lcd_off() },
             );
-            let response = response.on_hover_text(format!(
-                "Audio overloads: {count} since start. Click to reset."
+            let response = response.on_hover_text(crate::i18n::fill(
+                tr.deck_overloads_tip,
+                &[("count", &count.to_string())],
             ));
             if response.clicked() {
                 a.overruns.store(0, Ordering::Relaxed);
@@ -448,6 +451,7 @@ impl App {
         use crate::settings::DeckMonitor;
         use std::sync::atomic::Ordering;
 
+        let tr = self.tr();
         let mode = self.settings.general.deck_monitor;
         let Some(a) = &self.audio else { return };
         if mode == DeckMonitor::Off {
@@ -564,10 +568,8 @@ impl App {
         }
 
         let tip = match mode {
-            DeckMonitor::Scope => "Master oscilloscope · click for spectrum, right-click for mode",
-            DeckMonitor::Spectrum => {
-                "Master spectrum · click for oscilloscope, right-click for mode"
-            }
+            DeckMonitor::Scope => tr.deck_scope_tip,
+            DeckMonitor::Spectrum => tr.deck_spectrum_tip,
             DeckMonitor::Off => "",
         };
         let resp = kit::bar_hint(resp, tip);
@@ -582,7 +584,10 @@ impl App {
         resp.context_menu(|ui| {
             kit::menu_style(ui);
             for opt in DeckMonitor::ALL {
-                if ui.selectable_label(mode == opt, opt.label()).clicked() {
+                if ui
+                    .selectable_label(mode == opt, tr.deck_monitor_label(opt))
+                    .clicked()
+                {
                     self.set_deck_monitor(opt);
                     ui.close_menu();
                 }
@@ -605,6 +610,7 @@ impl App {
     /// Metronome, count-in and wait-for-input (FL's three small keys by the
     /// transport). A lit key has a green lamp.
     fn transport_toggles(&mut self, ui: &mut Ui) {
+        let tr = self.tr();
         let size = vec2(34.0, 34.0);
         let counting = self
             .audio
@@ -625,7 +631,7 @@ impl App {
             size,
             kit::Kind::Normal,
             true,
-            "Metronome",
+            tr.deck_metronome,
             |p, face, ink| {
                 let c = face.center() + vec2(0.0, 1.0);
                 let ink = if g.metronome { ink } else { t::faint() };
@@ -646,9 +652,9 @@ impl App {
         if kit::bar_hint(
             r,
             if g.metronome {
-                "Metronome on: clicks every beat while playing  Ctrl+M"
+                tr.deck_metronome_on_tip
             } else {
-                "Metronome: click every beat while playing  Ctrl+M"
+                tr.deck_metronome_off_tip
             },
         )
         .clicked()
@@ -662,7 +668,7 @@ impl App {
             size,
             kit::Kind::Normal,
             true,
-            "Count-in",
+            tr.deck_count_in,
             |p, face, ink| {
                 let c = face.center() + vec2(0.0, 1.5);
                 let ink = if g.count_in || counting {
@@ -683,14 +689,14 @@ impl App {
                 .request_repaint_after(std::time::Duration::from_millis(60));
         }
         let when = if g.count_in_always {
-            "before every Play"
+            tr.deck_count_in_every_play
         } else {
-            "before recording"
+            tr.deck_count_in_recording
         };
         let tip = if g.count_in {
-            format!("Count-in on: one bar of clicks {when} · right-click for when")
+            crate::i18n::fill(tr.deck_count_in_on_tip, &[("when", when)])
         } else {
-            format!("Count-in: one bar of clicks {when} · right-click for when")
+            crate::i18n::fill(tr.deck_count_in_off_tip, &[("when", when)])
         };
         let r = kit::bar_hint(r, tip);
         if r.clicked() {
@@ -699,19 +705,19 @@ impl App {
             self.say(
                 Tone::Quiet,
                 if self.settings.general.count_in {
-                    format!("Count-in on: one bar {when}.")
+                    crate::i18n::fill(tr.deck_count_in_on_status, &[("when", when)])
                 } else {
-                    "Count-in off.".to_string()
+                    tr.deck_count_in_off_status.to_string()
                 },
             );
         }
         r.context_menu(|ui| {
             kit::menu_style(ui);
             let mut always = self.settings.general.count_in_always;
-            if ui.radio(!always, "Only when recording").clicked() {
+            if ui.radio(!always, tr.deck_count_in_menu_rec).clicked() {
                 always = false;
             }
-            if ui.radio(always, "Before every Play").clicked() {
+            if ui.radio(always, tr.deck_count_in_menu_always).clicked() {
                 always = true;
             }
             if always != self.settings.general.count_in_always {
@@ -729,7 +735,7 @@ impl App {
             size,
             kit::Kind::Normal,
             true,
-            "Wait for input",
+            tr.deck_wait_input,
             |p, face, ink| {
                 let c = face.center() + vec2(0.0, 1.0);
                 let ink = if g.wait_input || waiting {
@@ -756,9 +762,9 @@ impl App {
                 .request_repaint_after(std::time::Duration::from_millis(60));
         }
         let tip = if g.wait_input {
-            "Wait for input on: with Record on, Play waits for your first note"
+            tr.deck_wait_input_on_tip
         } else {
-            "Wait for input: with Record on, Play waits for your first note"
+            tr.deck_wait_input_off_tip
         };
         if kit::bar_hint(r, tip).clicked() {
             self.settings.general.wait_input = !g.wait_input;
@@ -769,19 +775,20 @@ impl App {
             self.say(
                 Tone::Quiet,
                 if self.settings.general.wait_input {
-                    "Wait for input on: with Record on, Play starts at your first note."
+                    tr.deck_wait_input_on_status
                 } else {
-                    "Wait for input off."
+                    tr.deck_wait_input_off_status
                 },
             );
         }
     }
 
     fn transport_keys(&mut self, ui: &mut Ui) {
+        let tr = self.tr();
         let playing = self.is_playing();
         let enabled = self.audio.is_some();
         let size = vec2(48.0, 40.0);
-        let name = if playing { "Pause" } else { "Play" };
+        let name = if playing { tr.deck_pause } else { tr.deck_play };
         let r = kit::button_sized(ui, size, kit::Kind::Brand, enabled, name, |p, face, ink| {
             if playing {
                 kit::icon_pause(p, face.center(), 14.0, ink);
@@ -792,9 +799,9 @@ impl App {
         if kit::bar_hint(
             r,
             if playing {
-                "Pause in place  Ctrl+Space"
+                tr.deck_pause_tip
             } else {
-                "Play  Space"
+                tr.deck_play_tip
             },
         )
         .clicked()
@@ -806,12 +813,12 @@ impl App {
             size,
             kit::Kind::Normal,
             enabled,
-            "Stop",
+            tr.deck_stop,
             |p, face, ink| {
                 kit::icon_stop(p, face.center(), 13.0, ink);
             },
         );
-        if kit::bar_hint(r, "Stop and return to the start  Space").clicked() {
+        if kit::bar_hint(r, tr.deck_stop_tip).clicked() {
             self.stop();
         }
         // Record: armed mixer tracks record while playing (FL: R).
@@ -835,7 +842,7 @@ impl App {
             vec2(40.0, 40.0),
             kit::Kind::Normal,
             enabled,
-            "Record",
+            tr.deck_record,
             |p, face, _| {
                 let c = if on || taking { t::brand() } else { t::faint() };
                 if taking {
@@ -860,20 +867,14 @@ impl App {
         );
         let auto_taking = !self.auto_take.lanes.is_empty();
         let tip = if taking {
-            format!(
-                "Recording {} track(s). Stop or press R to finish the take.",
-                self.rec.parts.len()
-            )
+            tr.deck_rec_tracks_tip.fmt(tr.lang, self.rec.parts.len())
         } else if auto_taking {
-            format!(
-                "Recording automation ({} control(s)). Stop or press R to finish.",
-                self.auto_take.lanes.len()
-            )
+            tr.deck_rec_auto_tip
+                .fmt(tr.lang, self.auto_take.lanes.len())
         } else if on {
-            "Record is on: armed mixer tracks, MIDI notes, and tweaked controls record while playing  R · Right-click for filters".to_string()
+            tr.deck_rec_on_tip.to_string()
         } else {
-            "Record audio, MIDI notes, and automation while playing  R · Right-click for filters"
-                .to_string()
+            tr.deck_rec_off_tip.to_string()
         };
         let r = kit::bar_hint(r, tip);
         if r.clicked() {
@@ -882,15 +883,12 @@ impl App {
         r.context_menu(|ui| {
             kit::menu_style(ui);
             let mut auto_rec = self.rec.automation;
-            if ui.checkbox(&mut auto_rec, "Record automation").clicked() {
+            if ui.checkbox(&mut auto_rec, tr.opt_record_auto).clicked() {
                 self.toggle_record_automation();
                 ui.close_menu();
             }
             let mut input_rec = self.rec.input;
-            if ui
-                .checkbox(&mut input_rec, "Record audio input (mic / line)")
-                .clicked()
-            {
+            if ui.checkbox(&mut input_rec, tr.opt_record_input).clicked() {
                 self.toggle_input();
                 ui.close_menu();
             }
@@ -908,6 +906,7 @@ impl App {
 
     /// Recessed segment display: position and tempo. Ghost segments stay visible.
     fn lcd(&mut self, ui: &mut Ui) {
+        let tr = self.tr();
         let (rect, _) = ui.allocate_exact_size(vec2(272.0, 42.0), Sense::hover());
         let p = ui.painter();
         let well = kit::sunken(p, rect, 8.0);
@@ -934,7 +933,7 @@ impl App {
             p,
             pos2(x0, well.top() + 3.0),
             Align2::LEFT_TOP,
-            "bar",
+            tr.lcd_bar,
             12.0,
             t::faint(),
         );
@@ -953,7 +952,7 @@ impl App {
             p,
             pos2(x2, well.top() + 3.0),
             Align2::LEFT_TOP,
-            "step",
+            tr.lcd_step,
             12.0,
             t::faint(),
         );
@@ -1018,6 +1017,7 @@ impl App {
 
     /// ▲▼ on the LCD: ±1 BPM, Shift ±0.1; held, they repeat. One undo step per press.
     fn tempo_steppers(&mut self, ui: &mut Ui, rect: Rect) {
+        let tr = self.tr();
         let half = rect.height() / 2.0;
         let (shift, now) = ui.input(|i| (i.modifiers.shift, i.time));
         for (k, up) in [(0, true), (1, false)] {
@@ -1027,7 +1027,11 @@ impl App {
             );
             let id = ui.id().with(("tempo-step", up));
             let resp = ui.interact(r, id, Sense::click());
-            let name = if up { "Tempo up" } else { "Tempo down" };
+            let name = if up {
+                tr.deck_tempo_up
+            } else {
+                tr.deck_tempo_down
+            };
             kit::paint_button(
                 ui,
                 r,
@@ -1046,7 +1050,10 @@ impl App {
                     p.add(Shape::convex_polygon(pts, ink, Stroke::NONE));
                 },
             );
-            let resp = kit::bar_hint(resp, format!("{name} 1 BPM · Shift 0.1 · hold to repeat"));
+            let resp = kit::bar_hint(
+                resp,
+                crate::i18n::fill(tr.deck_tempo_step_tip, &[("name", name)]),
+            );
             // Press: one step and an undo point; held past 0.4 s it repeats every 60 ms.
             let held: Option<f64> = ui.data(|d| d.get_temp(id));
             let mut steps = 0;
@@ -1073,7 +1080,10 @@ impl App {
                 if tempo != self.edited_tempo() {
                     self.set_edited_tempo(tempo);
                     self.publish();
-                    self.say(Tone::Quiet, format!("Tempo {tempo:.1} BPM. Ctrl+Z undoes."));
+                    self.say(
+                        Tone::Quiet,
+                        crate::i18n::fill(tr.status_tempo_set, &[("bpm", &format!("{tempo:.1}"))]),
+                    );
                 }
             }
         }
@@ -1082,6 +1092,7 @@ impl App {
     /// FL tempo field: drag up/down (Shift fine), wheel ±1 BPM (Shift ±0.1),
     /// double-click to type, right-click to reset. One undo step per gesture.
     fn tempo_field(&mut self, ui: &mut Ui, rect: Rect, p: &egui::Painter) {
+        let tr = self.tr();
         let r = ui.interact(rect, ui.id().with("tempo-field"), Sense::click_and_drag());
         let type_id = ui.id().with("tempo-type");
         let wheel_id = ui.id().with("tempo-wheel");
@@ -1169,7 +1180,7 @@ impl App {
                         ui.data_mut(|m| m.remove::<String>(type_id));
                     }
                     _ => {
-                        self.say(Tone::Bad, "Tempo is 40 to 300 BPM.");
+                        self.say(Tone::Bad, tr.status_tempo_range_err);
                         ui.data_mut(|m| m.insert_temp(type_id, text));
                     }
                 }
@@ -1184,23 +1195,24 @@ impl App {
         if tempo != before {
             self.set_edited_tempo(tempo);
             self.publish();
+            let bpm_s = format!("{tempo:.1}");
             if self.tempo_table().is_some() {
                 let at = self.playhead_tick();
                 self.say(
                     Tone::Quiet,
-                    format!(
-                        "Tempo event at {} → {tempo:.1} BPM. Ctrl+Z undoes.",
-                        super::roll::bar_pos(at)
+                    crate::i18n::fill(
+                        tr.status_tempo_event_set,
+                        &[("pos", &super::roll::bar_pos(at)), ("bpm", &bpm_s)],
                     ),
                 );
             } else {
-                self.say(Tone::Quiet, format!("Tempo {tempo:.1} BPM. Ctrl+Z undoes."));
+                self.say(
+                    Tone::Quiet,
+                    crate::i18n::fill(tr.status_tempo_set, &[("bpm", &bpm_s)]),
+                );
             }
         }
-        kit::bar_hint(
-            r,
-            "Tempo: drag or wheel over a digit · double-click to type · right-click for 120",
-        );
+        kit::bar_hint(r, tr.deck_tempo_field_tip);
     }
 }
 

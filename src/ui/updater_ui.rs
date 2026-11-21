@@ -2,6 +2,7 @@
 //! and the "Check for updates" window (`HELP → Check for updates…`).
 
 use super::{App, Tone, kit};
+use crate::i18n::fill;
 use crate::theme as t;
 use crate::updater::{
     CURRENT_VERSION, CheckState, InstallState, RELEASES_URL, should_auto_check, unix_now,
@@ -92,7 +93,7 @@ impl App {
                 match self.updater.state.clone() {
                     CheckState::Idle => {
                         ui.label(
-                            RichText::new("Click Check now to look for newer releases on GitHub.")
+                            RichText::new(tr.upd_idle)
                                 .font(t::sans(13.0))
                                 .color(t::muted()),
                         );
@@ -328,13 +329,18 @@ impl App {
                                             kit::Kind::Primary,
                                             true,
                                         )
-                                        .on_hover_text(format!(
-                                            "Downloads v{} and replaces {}",
-                                            info.version,
-                                            target
-                                                .as_ref()
-                                                .map(|p| p.display().to_string())
-                                                .unwrap_or_default()
+                                        .on_hover_text(fill(
+                                            tr.upd_install_tip,
+                                            &[
+                                                ("ver", &info.version.to_string()),
+                                                (
+                                                    "target",
+                                                    &target
+                                                        .as_ref()
+                                                        .map(|p| p.display().to_string())
+                                                        .unwrap_or_default(),
+                                                ),
+                                            ],
                                         ))
                                         .clicked()
                                     {
@@ -404,7 +410,7 @@ impl App {
                         action_save_prefs = true;
                     }
                     ui.label(
-                        RichText::new("Check automatically (daily)")
+                        RichText::new(tr.upd_check_daily)
                             .font(t::sans(12.5))
                             .color(t::muted()),
                     );
@@ -443,20 +449,26 @@ impl App {
         }
         if let Some(url) = action_open_url {
             if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
-                self.say(Tone::Bad, format!("Could not open browser: {e}"));
+                self.say(
+                    Tone::Bad,
+                    fill(tr.upd_browser_err, &[("err", &e.to_string())]),
+                );
             } else {
-                self.say(Tone::Done, "Opened release page in browser.");
+                self.say(Tone::Done, tr.upd_opened_page);
             }
         }
         if action_copy_cmd {
             ctx.copy_text(SOURCE_UPDATE_CMD.to_string());
-            self.say(Tone::Done, format!("Copied: {SOURCE_UPDATE_CMD}"));
+            self.say(
+                Tone::Done,
+                fill(tr.upd_copied, &[("cmd", SOURCE_UPDATE_CMD)]),
+            );
         }
         if let Some(ver) = action_skip {
             self.settings.general.skipped_version = Some(ver.clone());
             self.save_settings();
             self.updater.dialog_open = false;
-            self.say(Tone::Quiet, format!("Skipped update v{ver}."));
+            self.say(Tone::Quiet, fill(tr.upd_skipped, &[("ver", &ver)]));
         }
     }
 }

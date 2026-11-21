@@ -260,11 +260,13 @@ fn set_tags(ctx: &egui::Context, map: TagMap) {
 /// The "Tags" submenu of an asset's context menu (FL: Tags / Add a tag):
 /// tick the tags in use, or type new ones, comma-separated.
 pub(super) fn tag_menu(ui: &mut Ui, key: &str) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     let mine = tags(ui.ctx()).get(key).cloned().unwrap_or_default();
     let title = if mine.is_empty() {
-        "Tags".to_string()
+        tr.browser_tags.to_string()
     } else {
-        format!("Tags · {}", mine.join(", "))
+        let list = mine.join(", ");
+        crate::i18n::fill(tr.browser_tags_with, &[("list", &list)])
     };
     ui.menu_button(title, |ui| {
         super::kit::menu_style(ui);
@@ -286,7 +288,7 @@ pub(super) fn tag_menu(ui: &mut Ui, key: &str) {
         let mut text: String = ui.data(|d| d.get_temp(id).unwrap_or_default());
         let r = ui.add(
             egui::TextEdit::singleline(&mut text)
-                .hint_text("Add tags: kick, 808")
+                .hint_text(tr.browser_add_tags_hint)
                 .desired_width(180.0),
         );
         if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -297,7 +299,7 @@ pub(super) fn tag_menu(ui: &mut Ui, key: &str) {
             changed = true;
         }
         ui.data_mut(|d| d.insert_temp(id, text));
-        if !mine.is_empty() && ui.button("Remove all tags").clicked() {
+        if !mine.is_empty() && ui.button(tr.browser_remove_all_tags).clicked() {
             map.remove(key);
             changed = true;
             ui.close_menu();
@@ -336,17 +338,18 @@ impl App {
     }
 
     fn browser_body(&mut self, ui: &mut Ui) {
+        let tr = self.tr();
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new("Browser")
+                RichText::new(tr.win_browser)
                     .font(t::medium(15.0))
                     .color(t::text()),
             );
             if self.previewing.is_some() {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if super::kit::tool_button(ui, "Stop", super::kit::Kind::Ghost, true)
-                        .on_hover_text("Stop sample preview")
+                    if super::kit::tool_button(ui, tr.deck_stop, super::kit::Kind::Ghost, true)
+                        .on_hover_text(tr.browser_stop_preview)
                         .clicked()
                     {
                         self.stop_preview();
@@ -359,7 +362,7 @@ impl App {
         let response = ui.add(
             egui::TextEdit::singleline(&mut q)
                 .id(id)
-                .hint_text("Search assets")
+                .hint_text(tr.browser_search_assets)
                 .font(t::sans(13.0))
                 .desired_width(f32::INFINITY),
         );
@@ -372,7 +375,11 @@ impl App {
         if let (Some(next), _) = super::kit::chips(
             ui,
             "browser-source",
-            &["All", "Library", "Files"],
+            &[
+                tr.browser_tab_all,
+                tr.browser_tab_library,
+                tr.browser_tab_files,
+            ],
             tab,
             None,
         ) {
@@ -408,16 +415,21 @@ impl App {
                 fxs.sort_by_cached_key(|p| p.name.to_lowercase());
                 let scanning = self.plugins.scan_rx.is_some();
                 egui::CollapsingHeader::new(
-                    RichText::new(format!("Instruments ({})", self.plugin_choices(true).len()))
-                        .font(t::sans(13.0)),
+                    RichText::new(format!(
+                        "{} ({})",
+                        tr.browser_instruments,
+                        self.plugin_choices(true).len()
+                    ))
+                    .font(t::sans(13.0)),
                 )
+                .id_salt("browser-instruments")
                 .default_open(true)
                 .show(ui, |ui| {
                     if insts.is_empty() {
                         let note = if scanning {
-                            "Checking plugins…"
+                            tr.mixer_checking_plugins
                         } else {
-                            "No instruments yet."
+                            tr.browser_no_instruments
                         };
                         ui.label(RichText::new(note).font(t::sans(12.0)).color(t::faint()));
                     }
@@ -432,9 +444,10 @@ impl App {
                             egui::DragAndDrop::set_payload(ui.ctx(), PluginDrag(plugin.clone()));
                         }
                         let r = r.on_hover_text(format!(
-                            "{}  ·  {}\nClick adds it to the channel rack",
+                            "{}  ·  {}\n{}",
                             plugin.vendor,
-                            plugin.path.display()
+                            plugin.path.display(),
+                            tr.browser_click_adds_rack
                         ));
                         if r.clicked() {
                             self.add_plugin_channel(plugin);
@@ -443,15 +456,15 @@ impl App {
                         let starred = is_favorite(ui.ctx(), &fav_key);
                         r.context_menu(|ui| {
                             super::kit::menu_style(ui);
-                            if ui.button("Add to channel rack").clicked() {
+                            if ui.button(tr.browser_add_to_rack_full).clicked() {
                                 self.add_plugin_channel(plugin);
                                 ui.close_menu();
                             }
                             if ui
                                 .button(if starred {
-                                    "Remove from favorites"
+                                    tr.browser_remove_fav
                                 } else {
-                                    "Add to favorites"
+                                    tr.browser_add_fav
                                 })
                                 .clicked()
                             {
@@ -467,7 +480,8 @@ impl App {
                     keyframexl::fx::BUILTINS.len() + self.plugin_choices(false).len();
                 let searching = !q.trim().is_empty();
                 egui::CollapsingHeader::new(
-                    RichText::new(format!("Effects ({effect_count})")).font(t::sans(13.0)),
+                    RichText::new(format!("{} ({effect_count})", tr.browser_effects))
+                        .font(t::sans(13.0)),
                 )
                 .id_salt("browser-effects")
                 .default_open(true)
@@ -478,24 +492,30 @@ impl App {
                     let room = next < keyframexl::sequence::FX_SLOTS;
                     let mut found = false;
                     for (&category, effects) in builtins {
-                        let visible = |name: &str| matches(&q, category) || matches(&q, name);
+                        let cat_label = tr.fx_category_label(category);
+                        let visible = |name: &str| {
+                            matches(&q, category) || matches(&q, cat_label) || matches(&q, name)
+                        };
                         if !effects.iter().any(|e| visible(e.name)) {
                             continue;
                         }
                         found = true;
-                        egui::CollapsingHeader::new(category)
+                        egui::CollapsingHeader::new(cat_label)
+                            .id_salt(("browser-fx-cat", category))
                             .open(searching.then_some(true))
                             .show(ui, |ui| {
                                 for effect in effects.iter().filter(|e| visible(e.name)) {
-                                    let button =
-                                        ui.add_enabled(
+                                    let add_tip = crate::i18n::fill(
+                                        tr.browser_add_to_mixer,
+                                        &[("track", &self.mixer_name(track))],
+                                    );
+                                    let button = ui
+                                        .add_enabled(
                                             room,
                                             egui::Button::new(effect.name).frame(false),
                                         )
-                                        .on_disabled_hover_text("All ten effect slots are occupied")
-                                        .on_hover_text(
-                                            format!("Add to {}", self.mixer_name(track)),
-                                        );
+                                        .on_disabled_hover_text(tr.browser_slots_full)
+                                        .on_hover_text(add_tip);
                                     if button.clicked() {
                                         self.set_slot(track, next, Some(effect.kind));
                                         self.open_fx_window(track, next);
@@ -505,14 +525,14 @@ impl App {
                     }
                     if !found && fxs.is_empty() {
                         ui.label(
-                            RichText::new("No matching effects")
+                            RichText::new(tr.browser_no_matching_fx)
                                 .font(t::sans(12.0))
                                 .color(t::faint()),
                         );
                     }
                     if !fxs.is_empty() {
                         ui.label(
-                            RichText::new("External plugins")
+                            RichText::new(tr.mixer_ext_plugins)
                                 .font(t::sans(12.0))
                                 .color(t::muted()),
                         );
@@ -523,7 +543,9 @@ impl App {
                                 .frame(false)
                                 .min_size(egui::vec2(ui.available_width(), 22.0)),
                         );
-                        let tip = format!("Click puts it on {}", self.mixer_name(self.mix_sel));
+                        let mix_name = self.mixer_name(self.mix_sel);
+                        let tip =
+                            crate::i18n::fill(tr.browser_click_puts_on, &[("track", &mix_name)]);
                         let r = r.on_hover_text(format!(
                             "{}  ·  {}\n{tip}",
                             plugin.vendor,
@@ -538,10 +560,9 @@ impl App {
                         let starred = is_favorite(ui.ctx(), &fav_key);
                         r.context_menu(|ui| {
                             super::kit::menu_style(ui);
-                            if ui
-                                .button(format!("Add to {}", self.mixer_name(self.mix_sel)))
-                                .clicked()
-                            {
+                            let add_lbl =
+                                crate::i18n::fill(tr.browser_add_to_mixer, &[("track", &mix_name)]);
+                            if ui.button(add_lbl).clicked() {
                                 let t = self.mix_sel;
                                 let k = self.song.mixer.get(t).map(|m| m.fx.len()).unwrap_or(0);
                                 self.set_slot_plugin(t, k, plugin);
@@ -549,9 +570,9 @@ impl App {
                             }
                             if ui
                                 .button(if starred {
-                                    "Remove from favorites"
+                                    tr.browser_remove_fav
                                 } else {
-                                    "Add to favorites"
+                                    tr.browser_add_fav
                                 })
                                 .clicked()
                             {
@@ -563,40 +584,43 @@ impl App {
                     }
                 });
                 self.synth_presets_section(ui, &q);
-                egui::CollapsingHeader::new(RichText::new("Presets").font(t::sans(13.0))).show(
-                    ui,
-                    |ui| {
+                egui::CollapsingHeader::new(RichText::new(tr.browser_presets).font(t::sans(13.0)))
+                    .id_salt("browser-presets")
+                    .show(ui, |ui| {
                         for kind in keyframexl::preset::Kind::ALL {
-                            egui::CollapsingHeader::new(kind.folder()).show(ui, |ui| {
-                                if let Some(base) = keyframexl::preset::dir(kind) {
-                                    self.browser_directory(ui, &base, &q);
-                                }
-                            });
+                            egui::CollapsingHeader::new(tr.preset_kind_folder_label(kind))
+                                .id_salt(("browser-preset-kind", kind.folder()))
+                                .show(ui, |ui| {
+                                    if let Some(base) = keyframexl::preset::dir(kind) {
+                                        self.browser_directory(ui, &base, &q);
+                                    }
+                                });
                         }
-                    },
-                );
+                    });
                 for (title, path) in [
-                    ("Packs", "Packs"),
-                    ("Libraries (.dwp)", "Libraries"),
-                    ("Recorded", "Recorded"),
-                    ("Rendered", "Rendered"),
+                    (tr.browser_packs, "Packs"),
+                    (tr.browser_libraries, "Libraries"),
+                    (tr.browser_recorded, "Recorded"),
+                    (tr.browser_rendered, "Rendered"),
                 ] {
-                    egui::CollapsingHeader::new(RichText::new(title).font(t::sans(13.0))).show(
-                        ui,
-                        |ui| {
+                    egui::CollapsingHeader::new(RichText::new(title).font(t::sans(13.0)))
+                        .id_salt(("browser-dir", path))
+                        .show(ui, |ui| {
                             let base = dirs::audio_dir()
                                 .or_else(dirs::home_dir)
                                 .unwrap_or_default()
                                 .join("KeyFrameXL")
                                 .join(path);
                             self.browser_directory(ui, &base, &q);
-                        },
-                    );
+                        });
                 }
                 if tab == 0 {
-                    egui::CollapsingHeader::new(RichText::new("Folders").font(t::sans(13.0)))
-                        .default_open(true)
-                        .show(ui, |ui| self.files_tab(ui, &q));
+                    egui::CollapsingHeader::new(
+                        RichText::new(tr.browser_folders).font(t::sans(13.0)),
+                    )
+                    .id_salt("browser-folders")
+                    .default_open(true)
+                    .show(ui, |ui| self.files_tab(ui, &q));
                 }
             });
     }
@@ -617,16 +641,13 @@ impl App {
         if issues.is_empty() || dismissed.as_ref() == Some(&issues) {
             return;
         }
+        let tr = self.tr();
         egui::Frame::new()
             .fill(t::wait_soft())
             .inner_margin(egui::Margin::same(4))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let text = if issues.len() == 1 {
-                        "1 plugin needs attention".to_string()
-                    } else {
-                        format!("{} plugins need attention", issues.len())
-                    };
+                    let text = tr.browser_plugin_problems.fmt(tr.lang, issues.len());
                     if ui
                         .link(RichText::new(text).color(t::wait()).font(t::sans(12.0)))
                         .clicked()
@@ -641,7 +662,7 @@ impl App {
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if super::kit::tool_button(ui, "×", super::kit::Kind::Ghost, true)
-                            .on_hover_text("Dismiss plugin warning")
+                            .on_hover_text(tr.browser_dismiss_warning)
                             .clicked()
                         {
                             ui.data_mut(|d| d.insert_temp(id, issues.clone()));
@@ -691,10 +712,14 @@ impl App {
         }
         files.sort();
         if files.is_empty() {
+            let p = path.display().to_string();
             ui.label(
-                RichText::new(format!("Files: {}", path.display()))
-                    .font(t::sans(12.0))
-                    .color(t::faint()),
+                RichText::new(crate::i18n::fill(
+                    self.tr().browser_files_path,
+                    &[("path", &p)],
+                ))
+                .font(t::sans(12.0))
+                .color(t::faint()),
             );
             return;
         }
@@ -794,6 +819,7 @@ impl App {
 
     /// One file row inside `browser_directory` (shared by top-level and subfolders).
     fn browser_file_row(&mut self, ui: &mut Ui, path: &Path, name: &str) {
+        let tr = self.tr();
         let path = path.to_path_buf();
         let label = name.to_owned();
         let r = ui.add(
@@ -802,9 +828,10 @@ impl App {
         );
         // Presets (FL: click a channel preset to add it, double-click a mixer state to load it).
         if keyframexl::preset::Kind::of_path(&path).is_some() {
-            let r = r.on_hover_text(format!(
-                "{}\nClick: load · right-click for more",
-                path.display()
+            let p_str = path.display().to_string();
+            let r = r.on_hover_text(crate::i18n::fill(
+                tr.browser_preset_hover,
+                &[("path", &p_str)],
             ));
             if r.clicked() {
                 self.open_preset_file(&path);
@@ -813,15 +840,15 @@ impl App {
             let starred = is_favorite(ui.ctx(), &fav_key);
             r.context_menu(|ui| {
                 super::kit::menu_style(ui);
-                if ui.button("Load").clicked() {
+                if ui.button(tr.browser_load).clicked() {
                     self.open_preset_file(&path);
                     ui.close_menu();
                 }
                 if ui
                     .button(if starred {
-                        "Remove from favorites"
+                        tr.browser_remove_fav
                     } else {
-                        "Add to favorites"
+                        tr.browser_add_fav
                     })
                     .clicked()
                 {
@@ -829,7 +856,7 @@ impl App {
                     ui.close_menu();
                 }
                 tag_menu(ui, &fav_key);
-                if ui.button("Open containing folder").clicked() {
+                if ui.button(tr.browser_open_folder).clicked() {
                     if let Some(parent) = path.parent() {
                         let _ = std::process::Command::new("xdg-open").arg(parent).spawn();
                     }
@@ -838,7 +865,11 @@ impl App {
             });
             return;
         }
-        let r = r.on_hover_text(format!("{}\nDrag onto the Channel Rack for a new sampler channel, or onto a row to replace it · double-click loads into the selected channel", path.display()));
+        let p_str = path.display().to_string();
+        let r = r.on_hover_text(crate::i18n::fill(
+            tr.browser_sample_hover,
+            &[("path", &p_str)],
+        ));
         if r.drag_started() {
             egui::DragAndDrop::set_payload(ui.ctx(), FileDrag(path.clone()));
         }
@@ -849,16 +880,16 @@ impl App {
         }
         r.context_menu(|ui| {
             super::kit::menu_style(ui);
-            if ui.button("Add to rack").clicked() {
+            if ui.button(tr.browser_add_to_rack).clicked() {
                 self.load_file(path.clone(), true);
                 ui.close_menu();
             }
             let fav_key = path.display().to_string();
             if ui
                 .button(if is_favorite(ui.ctx(), &fav_key) {
-                    "Remove from favorites"
+                    tr.browser_remove_fav
                 } else {
-                    "Add to favorites"
+                    tr.browser_add_fav
                 })
                 .clicked()
             {
@@ -866,7 +897,7 @@ impl App {
                 ui.close_menu();
             }
             tag_menu(ui, &fav_key);
-            if ui.button("Open containing folder").clicked() {
+            if ui.button(tr.browser_open_folder).clicked() {
                 if let Some(parent) = path.parent() {
                     let _ = std::process::Command::new("xdg-open").arg(parent).spawn();
                 }
@@ -880,13 +911,17 @@ impl App {
     /// adds a synth channel when the selected channel is something else.
     fn synth_presets_section(&mut self, ui: &mut Ui, q: &str) {
         use keyframexl::synth::SynthPatch;
+        let tr = self.tr();
         let user = super::presets_ui::cached_synth_presets(ui.ctx());
         let factory: Vec<(usize, &str)> = SynthPatch::PRESETS
             .iter()
             .copied()
             .enumerate()
             // A category name finds its presets too ("bass", "pad").
-            .filter(|(i, n)| matches(q, n) || matches(q, SynthPatch::CATEGORIES[*i]))
+            .filter(|(i, n)| {
+                let cat = SynthPatch::CATEGORIES[*i];
+                matches(q, n) || matches(q, cat) || matches(q, tr.synth_category_label(cat))
+            })
             .collect();
         let saved: Vec<&(PathBuf, keyframexl::preset::SynthPreset)> =
             user.iter().filter(|(_, u)| matches(q, &u.name)).collect();
@@ -898,8 +933,8 @@ impl App {
             .and_then(|id| self.song.instruments.iter().find(|i| i.id == id))
             .map(|i| i.name.clone());
         let tip = match &into {
-            Some(name) => format!("Click: load into {name} · right-click: a new channel"),
-            None => "Click: a new KeyFrame Tide channel with this patch".to_string(),
+            Some(name) => crate::i18n::fill(tr.browser_tide_load_tip, &[("name", name)]),
+            None => tr.browser_tide_new_tip.to_string(),
         };
         let mut pick: Option<(Option<u64>, String, SynthPatch)> = None;
         egui::CollapsingHeader::new(
@@ -909,6 +944,7 @@ impl App {
             ))
             .font(t::sans(13.0)),
         )
+        .id_salt("browser-tide-presets")
         .default_open(!q.trim().is_empty())
         .show(ui, |ui| {
             let mut row =
@@ -925,21 +961,23 @@ impl App {
                     r.context_menu(|ui| {
                         super::kit::menu_style(ui);
                         if let Some(n) = &into
-                            && ui.button(format!("Load into {n}")).clicked()
+                            && ui
+                                .button(crate::i18n::fill(tr.browser_load_into, &[("name", n)]))
+                                .clicked()
                         {
                             pick = Some((target, name.to_owned(), patch()));
                             ui.close_menu();
                         }
-                        if ui.button("Add as a new channel").clicked() {
+                        if ui.button(tr.browser_add_new_channel).clicked() {
                             pick = Some((None, name.to_owned(), patch()));
                             ui.close_menu();
                         }
                         if let Some(key) = &key {
                             if ui
                                 .button(if is_favorite(ui.ctx(), key) {
-                                    "Remove from favorites"
+                                    tr.browser_remove_fav
                                 } else {
-                                    "Add to favorites"
+                                    tr.browser_add_fav
                                 })
                                 .clicked()
                             {
@@ -957,7 +995,11 @@ impl App {
                     .filter(|(i, _)| SynthPatch::CATEGORIES[*i] == cat)
                 {
                     if first && cat != "Init" {
-                        ui.label(RichText::new(cat).font(t::sans(11.5)).color(t::faint()));
+                        ui.label(
+                            RichText::new(tr.synth_category_label(cat))
+                                .font(t::sans(11.5))
+                                .color(t::faint()),
+                        );
                     }
                     first = false;
                     let key = format!("factory:{}", name.to_lowercase().replace(' ', "-"));
@@ -965,7 +1007,11 @@ impl App {
                 }
             }
             if !saved.is_empty() {
-                ui.label(RichText::new("Saved").font(t::sans(11.5)).color(t::faint()));
+                ui.label(
+                    RichText::new(tr.browser_saved)
+                        .font(t::sans(11.5))
+                        .color(t::faint()),
+                );
             }
             for (path, u) in &saved {
                 row(
@@ -990,60 +1036,64 @@ impl App {
         if favs.is_empty() {
             return;
         }
-        egui::CollapsingHeader::new(RichText::new("Favorites").font(t::medium(13.0)))
-            .default_open(true)
-            .show(ui, |ui| {
-                let known: Vec<Scanned> = self
-                    .plugin_choices(true)
-                    .into_iter()
-                    .chain(self.plugin_choices(false))
-                    .collect();
-                let mut act = None;
-                let mut order = None;
-                for fav in &favs {
-                    let name = known
-                        .iter()
-                        .find(|p| p.path.as_path() == Path::new(fav))
-                        .map(|p| std::borrow::Cow::Borrowed(p.name.as_str()))
-                        .unwrap_or_else(|| {
-                            Path::new(fav)
-                                .file_name()
-                                .unwrap_or_default()
-                                .to_string_lossy()
-                        });
-                    if !matches(query, &name) {
-                        continue;
-                    }
-                    let row = ui
-                        .push_id(fav, |ui| {
-                            ui.horizontal(|ui| {
-                                let handle = ui
-                                    .add(egui::Label::new("⠿").sense(egui::Sense::drag()))
-                                    .on_hover_and_drag_cursor(egui::CursorIcon::Grab)
-                                    .on_hover_text("Drag to reorder favorites");
-                                handle.dnd_set_drag_payload(FavoriteOrder(fav.clone()));
-                                act = self.asset_row(ui, fav, "", &known).or(act.take());
-                            })
-                            .response
+        egui::CollapsingHeader::new(
+            RichText::new(self.tr().browser_favorites).font(t::medium(13.0)),
+        )
+        .id_salt("browser-favorites-header")
+        .default_open(true)
+        .show(ui, |ui| {
+            let known: Vec<Scanned> = self
+                .plugin_choices(true)
+                .into_iter()
+                .chain(self.plugin_choices(false))
+                .collect();
+            let mut act = None;
+            let mut order = None;
+            for fav in &favs {
+                let name = known
+                    .iter()
+                    .find(|p| p.path.as_path() == Path::new(fav))
+                    .map(|p| std::borrow::Cow::Borrowed(p.name.as_str()))
+                    .unwrap_or_else(|| {
+                        Path::new(fav)
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                    });
+                if !matches(query, &name) {
+                    continue;
+                }
+                let row = ui
+                    .push_id(fav, |ui| {
+                        ui.horizontal(|ui| {
+                            let handle = ui
+                                .add(egui::Label::new("⠿").sense(egui::Sense::drag()))
+                                .on_hover_and_drag_cursor(egui::CursorIcon::Grab)
+                                .on_hover_text("Drag to reorder favorites");
+                            handle.dnd_set_drag_payload(FavoriteOrder(fav.clone()));
+                            act = self.asset_row(ui, fav, "", &known).or(act.take());
                         })
-                        .inner;
-                    if let Some((from, after)) = sort_drop::<FavoriteOrder>(ui, &row) {
-                        order = Some((from, fav.clone(), after));
-                    }
+                        .response
+                    })
+                    .inner;
+                if let Some((from, after)) = sort_drop::<FavoriteOrder>(ui, &row) {
+                    order = Some((from, fav.clone(), after));
                 }
-                if let Some((from, to, after)) = order
-                    && reorder(&mut favs, &from.0, &to, after)
-                {
-                    set_favorites(ui.ctx(), favs);
-                }
-                self.asset_act(ui, act);
-            });
+            }
+            if let Some((from, to, after)) = order
+                && reorder(&mut favs, &from.0, &to, after)
+            {
+                set_favorites(ui.ctx(), favs);
+            }
+            self.asset_act(ui, act);
+        });
     }
 
     /// Tagged plugins and files (FL: the browser's TAGS filter): the tags in
     /// use as chips, Any/All, and what carries the picked ones. Typing in
     /// the search lists what has a matching tag too. Hidden with no tags.
     fn tags_section(&mut self, ui: &mut Ui, q: &str) {
+        let tr = self.tr();
         let map = tags(ui.ctx());
         let counts = tag_counts(&map);
         if counts.is_empty() {
@@ -1055,8 +1105,9 @@ impl App {
         picked.retain(|p| counts.iter().any(|(t, _)| t == p));
         let mut all: bool = ui.data(|d| d.get_temp(all_id).unwrap_or(false));
         egui::CollapsingHeader::new(
-            RichText::new(format!("Tags ({})", counts.len())).font(t::sans(13.0)),
+            RichText::new(format!("{} ({})", tr.browser_tags, counts.len())).font(t::sans(13.0)),
         )
+        .id_salt("browser-tags-header")
         .default_open(true)
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
@@ -1079,11 +1130,15 @@ impl App {
             });
             if picked.len() > 1 {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Match").font(t::sans(12.0)).color(t::faint()));
-                    if ui.selectable_label(!all, "Any").clicked() {
+                    ui.label(
+                        RichText::new(tr.browser_match)
+                            .font(t::sans(12.0))
+                            .color(t::faint()),
+                    );
+                    if ui.selectable_label(!all, tr.browser_match_any).clicked() {
                         all = false;
                     }
-                    if ui.selectable_label(all, "All").clicked() {
+                    if ui.selectable_label(all, tr.browser_match_all).clicked() {
                         all = true;
                     }
                 });
@@ -1097,7 +1152,7 @@ impl App {
                     .collect()
             } else {
                 ui.label(
-                    RichText::new("Pick tags to list what has them.")
+                    RichText::new(tr.browser_pick_tags_hint)
                         .font(t::sans(12.0))
                         .color(t::faint()),
                 );
@@ -1105,7 +1160,7 @@ impl App {
             };
             if (!picked.is_empty() || !q.trim().is_empty()) && keys.is_empty() {
                 ui.label(
-                    RichText::new("Nothing has these tags.")
+                    RichText::new(tr.browser_no_tags_match)
                         .font(t::sans(12.0))
                         .color(t::faint()),
                 );
@@ -1135,15 +1190,16 @@ impl App {
         mark: &str,
         known: &[Scanned],
     ) -> Option<AssetAct> {
+        let tr = self.tr();
         let mut act = None;
         let starred = is_favorite(ui.ctx(), key);
         let menu_tail = |ui: &mut Ui, act: &mut Option<AssetAct>| {
             super::kit::menu_style(ui);
             if ui
                 .button(if starred {
-                    "Remove from favorites"
+                    tr.browser_remove_fav
                 } else {
-                    "Add to favorites"
+                    tr.browser_add_fav
                 })
                 .clicked()
             {
@@ -1160,9 +1216,12 @@ impl App {
                     .truncate(),
             );
             let tip = if p.instrument {
-                "Click adds it to the channel rack".to_string()
+                tr.browser_click_adds_rack.to_string()
             } else {
-                format!("Click puts it on {}", self.mixer_name(self.mix_sel))
+                crate::i18n::fill(
+                    tr.browser_click_puts_on,
+                    &[("track", &self.mixer_name(self.mix_sel))],
+                )
             };
             let r = r.on_hover_text(format!("{}  ·  {}\n{tip}", p.vendor, p.path.display()));
             if r.clicked() {
@@ -1184,7 +1243,7 @@ impl App {
                             .font(t::sans(13.0))
                             .color(t::faint()),
                     )
-                    .on_hover_text(format!("{key} is missing"));
+                    .on_hover_text(crate::i18n::fill(tr.browser_asset_missing, &[("key", key)]));
                 r.context_menu(|ui| menu_tail(ui, &mut act));
             });
             return act;
@@ -1213,7 +1272,7 @@ impl App {
         }
         r.context_menu(|ui| {
             super::kit::menu_style(ui);
-            if !preset && ui.button("Load into the selected channel").clicked() {
+            if !preset && ui.button(tr.browser_load_selected_ch).clicked() {
                 act = Some(AssetAct::Load(path.clone()));
                 ui.close_menu();
             }
@@ -1247,6 +1306,7 @@ impl App {
     /// focus request live in egui memory, so this needs no App fields.
     /// Called every frame from `update`.
     pub(super) fn plugin_picker(&mut self, ctx: &egui::Context) {
+        let tr = self.tr();
         let open_id = egui::Id::new("kfxl-picker-open");
         if !ctx.data(|d| d.get_temp(open_id).unwrap_or(false)) {
             return;
@@ -1263,7 +1323,8 @@ impl App {
         }
         let mut pick: Option<Pick> = None;
         let mut open = true;
-        egui::Window::new("Add plugin")
+        egui::Window::new(tr.browser_add_plugin_title)
+            .id(egui::Id::new("kfxl-plugin-picker-window"))
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
             .max_size(egui::vec2(720.0, 480.0))
             .collapsible(false)
@@ -1273,7 +1334,7 @@ impl App {
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut query)
                         .id(qid)
-                        .hint_text("Search plugins")
+                        .hint_text(tr.browser_search_plugins)
                         .font(t::sans(13.0))
                         .desired_width(f32::INFINITY),
                 );
@@ -1298,9 +1359,9 @@ impl App {
                     .collect();
                 if inst.is_empty() && fx.is_empty() {
                     let note = if self.plugins.scan_rx.is_some() {
-                        "Checking plugins…"
+                        tr.mixer_checking_plugins
                     } else {
-                        "No plugins found. Options → Plugins adds folders."
+                        tr.browser_no_plugins_found
                     };
                     ui.label(RichText::new(note).font(t::sans(13.0)).color(t::faint()));
                 }
@@ -1309,9 +1370,10 @@ impl App {
                     .auto_shrink([false, true])
                     .id_salt("plugin-picker-list")
                     .show(ui, |ui| {
-                        for (title, items, is_inst) in
-                            [("Instruments", &inst, true), ("Effects", &fx, false)]
-                        {
+                        for (title, items, is_inst) in [
+                            (tr.browser_instruments, &inst, true),
+                            (tr.browser_effects, &fx, false),
+                        ] {
                             if items.is_empty() {
                                 continue;
                             }
@@ -1332,9 +1394,12 @@ impl App {
                                     egui::DragAndDrop::set_payload(ctx, PluginDrag(p.clone()));
                                 }
                                 let tip = if is_inst {
-                                    "Click adds it to the channel rack".to_string()
+                                    tr.browser_click_adds_rack.to_string()
                                 } else {
-                                    format!("Click puts it on {}", self.mixer_name(self.mix_sel))
+                                    crate::i18n::fill(
+                                        tr.browser_click_puts_on,
+                                        &[("track", &self.mixer_name(self.mix_sel))],
+                                    )
                                 };
                                 if r.on_hover_text(format!("{}\n{tip}", p.path.display()))
                                     .clicked()

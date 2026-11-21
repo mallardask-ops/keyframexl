@@ -906,6 +906,7 @@ impl App {
                 .map_or(0, |d| d.as_millis())
         ));
         let wav_out = wav_path.clone();
+        let tr = crate::i18n::strings(self.settings.general.language);
 
         std::thread::spawn(move || {
             let mut noop = |_: f32| {};
@@ -921,7 +922,7 @@ impl App {
                 &mut noop,
             );
             let res = match rendered {
-                None => Err("Recording cancelled.".into()),
+                None => Err(tr.show_rec_cancelled.into()),
                 Some(frames) => keyframexl::render::write_wav_at(
                     &wav_out,
                     &frames,
@@ -930,7 +931,9 @@ impl App {
                     rate,
                 )
                 .map(|()| wav_out)
-                .map_err(|e| format!("Audio render write failed: {e}")),
+                .map_err(|e| {
+                    crate::i18n::fill(tr.show_rec_audio_write_err, &[("err", &e.to_string())])
+                }),
             };
             let _ = tx.send(res);
             ctx_bg.request_repaint();
@@ -952,6 +955,7 @@ impl App {
     }
 
     fn tick_show_record(&mut self, ctx: &egui::Context) {
+        let tr = crate::i18n::strings(self.settings.general.language);
         let rate = self.rate() as u64;
         let shot = ctx.input(|i| {
             i.events.iter().find_map(|e| match e {
@@ -1043,9 +1047,8 @@ impl App {
                                 drop(tx.take());
                                 let _ = std::fs::remove_file(&*audio_wav);
                                 restore_hud_cursor = true;
-                                transition = Some(RecordPhase::Error(
-                                    "Window resized during recording. Keep window size fixed and try again.".into(),
-                                ));
+                                transition =
+                                    Some(RecordPhase::Error(tr.show_rec_resized_err.into()));
                             }
                         } else {
                             *expected_size = Some(sz);
@@ -1063,6 +1066,7 @@ impl App {
                                 dtx,
                                 job.cancel.clone(),
                                 ctx.clone(),
+                                tr,
                             );
                         }
                         if transition.is_none() {
@@ -1075,9 +1079,7 @@ impl App {
                                     .try_recv()
                                     .ok()
                                     .and_then(Result::err)
-                                    .unwrap_or_else(|| {
-                                        "Video encoder stopped unexpectedly.".into()
-                                    });
+                                    .unwrap_or_else(|| tr.show_rec_encoder_stopped.into());
                                 drop(tx.take());
                                 restore_hud_cursor = true;
                                 transition = Some(RecordPhase::Error(msg));
@@ -1098,9 +1100,8 @@ impl App {
                         drop(tx.take());
                         let _ = std::fs::remove_file(&*audio_wav);
                         restore_hud_cursor = true;
-                        transition = Some(RecordPhase::Error(
-                            "Screenshot timed out (window may be minimized).".into(),
-                        ));
+                        transition =
+                            Some(RecordPhase::Error(tr.show_rec_screenshot_timeout.into()));
                     }
                 } else if *next_frame < *total_frames {
                     let f = *start_frame
@@ -1355,9 +1356,10 @@ impl App {
         } else {
             format!("{stem}-demo.mp4")
         };
+        let tr = crate::i18n::strings(self.settings.general.language);
         if let Some(path) = rfd::FileDialog::new()
             .set_file_name(&file)
-            .add_filter("MP4 video", &["mp4"])
+            .add_filter(tr.show_mp4_filter, &["mp4"])
             .save_file()
         {
             self.start_show_record(path, ctx);
@@ -2416,7 +2418,7 @@ impl App {
                     if cancellable && hud_btn(ui, tr.show_cancel, false) {
                         cancel_now = true;
                     }
-                    if dismissible && hud_btn(ui, tr.update_close, false) {
+                    if dismissible && hud_btn(ui, tr.common_close, false) {
                         dismiss_now = true;
                     }
                 });
@@ -2584,14 +2586,16 @@ fn spawn_video_encoder(
     done_tx: mpsc::Sender<Result<String, String>>,
     cancel: Arc<AtomicBool>,
     ctx: egui::Context,
+    tr: &'static crate::i18n::Strings,
 ) {
     std::thread::spawn(move || {
-        let res = encode_stream(&out_path, &audio_wav, width, height, fps, rx, &cancel);
+        let res = encode_stream(&out_path, &audio_wav, width, height, fps, rx, &cancel, tr);
         let _ = done_tx.send(res);
         ctx.request_repaint();
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn encode_stream(
     out_path: &Path,
     audio_wav: &Path,
@@ -2600,6 +2604,7 @@ fn encode_stream(
     fps: u32,
     rx: mpsc::Receiver<Vec<u8>>,
     cancel: &AtomicBool,
+    tr: &'static crate::i18n::Strings,
 ) -> Result<String, String> {
     let size_arg = format!("{width}x{height}");
     let fps_arg = fps.to_string();
@@ -2649,43 +2654,54 @@ fn encode_stream(
             let mut stdin = child
                 .stdin
                 .take()
-                .ok_or_else(|| "ffmpeg stdin unavailable.".to_string())?;
+                .ok_or_else(|| tr.show_rec_ffmpeg_stdin.to_string())?;
             for frame in rx {
                 if cancel.load(Ordering::Relaxed) {
                     let _ = child.kill();
                     let _ = child.wait();
                     let _ = std::fs::remove_file(out_path);
-                    return Err("Recording cancelled.".into());
+                    return Err(tr.show_rec_cancelled.into());
                 }
                 if let Err(e) = stdin.write_all(&frame) {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err(format!("ffmpeg write failed: {e}"));
+                    return Err(crate::i18n::fill(
+                        tr.show_rec_ffmpeg_write_err,
+                        &[("err", &e.to_string())],
+                    ));
                 }
             }
             drop(stdin);
-            let output = child
-                .wait_with_output()
-                .map_err(|e| format!("ffmpeg wait failed: {e}"))?;
+            let output = child.wait_with_output().map_err(|e| {
+                crate::i18n::fill(tr.show_rec_ffmpeg_wait_err, &[("err", &e.to_string())])
+            })?;
             if !output.status.success() {
                 let err = String::from_utf8_lossy(&output.stderr);
-                return Err(format!("ffmpeg failed: {}", err.trim()));
+                return Err(crate::i18n::fill(
+                    tr.show_rec_ffmpeg_err,
+                    &[("err", err.trim())],
+                ));
             }
-            Ok(format!("Saved video to {}", out_path.display()))
+            Ok(crate::i18n::fill(
+                tr.show_rec_saved_video,
+                &[("path", &out_path.display().to_string())],
+            ))
         }
         Err(_) => {
             // Fallback when `ffmpeg` is not installed: write PNG frames + audio.wav + encode.sh.
             let dir = out_path.with_extension("frames");
-            std::fs::create_dir_all(&dir)
-                .map_err(|e| format!("Failed to create frames folder: {e}"))?;
+            std::fs::create_dir_all(&dir).map_err(|e| {
+                crate::i18n::fill(tr.show_rec_frames_dir_err, &[("err", &e.to_string())])
+            })?;
             let mut idx = 0u64;
             for frame in rx {
                 if cancel.load(Ordering::Relaxed) {
-                    return Err("Recording cancelled.".into());
+                    return Err(tr.show_rec_cancelled.into());
                 }
                 let p = dir.join(format!("frame-{idx:06}.png"));
-                image::save_buffer(&p, &frame, width, height, image::ColorType::Rgba8)
-                    .map_err(|e| format!("PNG save failed: {e}"))?;
+                image::save_buffer(&p, &frame, width, height, image::ColorType::Rgba8).map_err(
+                    |e| crate::i18n::fill(tr.show_rec_png_save_err, &[("err", &e.to_string())]),
+                )?;
                 idx += 1;
             }
             let copied_wav = dir.join("audio.wav");
@@ -2695,9 +2711,10 @@ fn encode_stream(
                 out_path.display()
             );
             let _ = std::fs::write(dir.join("encode.sh"), script);
-            Ok(format!(
-                "ffmpeg not found: saved {idx} PNG frames to {}",
-                dir.display()
+            Ok(tr.show_rec_saved_frames.fmt_with(
+                tr.lang,
+                idx as usize,
+                &[("path", &dir.display().to_string())],
             ))
         }
     }

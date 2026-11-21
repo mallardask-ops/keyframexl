@@ -3,6 +3,7 @@
 //! title on the project name.
 
 use super::{App, Tone, kit};
+use crate::i18n::fill;
 use crate::theme as t;
 use eframe::egui::{self, RichText, vec2};
 use std::path::{Path, PathBuf};
@@ -48,6 +49,7 @@ impl App {
     }
 
     fn perform(&mut self, cmd: Pending) {
+        let tr = self.tr();
         match cmd {
             Pending::New => self.new_project(),
             Pending::Open(None) => self.open(),
@@ -59,7 +61,7 @@ impl App {
                     self.saved_edits = self.edits.wrapping_sub(1);
                     self.recent.retain(|p| p != &path);
                     self.save_recent();
-                    self.say(Tone::Done, "Recovered the autosave. Save it to keep it.");
+                    self.say(Tone::Done, tr.proj_recovered);
                 }
             }
             Pending::Quit => self.quit_ok = true,
@@ -71,7 +73,7 @@ impl App {
             .as_ref()
             .and_then(|p| p.file_stem())
             .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "Untitled".into())
+            .unwrap_or_else(|| self.tr().untitled.into())
     }
 
     /// Move `path` to the top of Open recent.
@@ -147,6 +149,7 @@ impl App {
     /// Text edits collapse into one undo step per field; MP3 exports embed
     /// populated metadata as ID3v2.4 frames.
     fn info_window(&mut self, ctx: &egui::Context) {
+        let tr = self.tr();
         let id = egui::Id::new("kfxl-project-info");
         let mut open = ctx.data(|d| d.get_temp(id).unwrap_or(false));
         if self.open_info_next {
@@ -157,7 +160,6 @@ impl App {
         if !open {
             return;
         }
-        let tr = crate::i18n::strings(self.settings.general.language);
         let tab_id = egui::Id::new("kfxl-project-info-tab");
         let mut tab = ctx
             .data(|d| d.get_temp::<usize>(tab_id).unwrap_or(0))
@@ -249,29 +251,27 @@ impl App {
                         ui.horizontal_wrapped(|ui| {
                             ui.spacing_mut().item_spacing = vec2(6.0, 2.0);
                             let summary = format!(
-                                "{} {} · {} {} · {} {} · {} {} · {}",
-                                stats.channels,
-                                tr.info_stat_channels,
-                                stats.patterns,
-                                tr.info_stat_patterns,
-                                stats.clips,
-                                tr.info_stat_clips,
-                                stats.bars,
-                                tr.info_stat_bars,
+                                "{} · {} · {} · {} · {}",
+                                tr.info_stat_channels.fmt(tr.lang, stats.channels),
+                                tr.info_stat_patterns.fmt(tr.lang, stats.patterns),
+                                tr.info_stat_clips.fmt(tr.lang, stats.clips),
+                                tr.info_stat_bars.fmt(tr.lang, stats.bars as usize),
                                 format_duration(stats.seconds),
                             );
                             ui.label(RichText::new(summary).font(t::sans(12.0)).color(t::muted()));
                             if stats.plugins > 0 {
                                 let p_text = if stats.missing_plugins > 0 {
                                     format!(
-                                        "· {} {} ({} {})",
-                                        stats.plugins,
-                                        tr.info_stat_plugins,
-                                        stats.missing_plugins,
+                                        "· {} ({})",
+                                        tr.info_stat_plugins.fmt(tr.lang, stats.plugins),
                                         tr.info_stat_missing_plugins
+                                            .fmt(tr.lang, stats.missing_plugins),
                                     )
                                 } else {
-                                    format!("· {} {}", stats.plugins, tr.info_stat_plugins)
+                                    format!(
+                                        "· {}",
+                                        tr.info_stat_plugins.fmt(tr.lang, stats.plugins)
+                                    )
                                 };
                                 ui.label(RichText::new(p_text).font(t::sans(12.0)).color(
                                     if stats.missing_plugins > 0 {
@@ -473,11 +473,18 @@ impl App {
                                                 info_first_edit |= kit::first_edit(ui, &r);
                                             }
                                             edit_responses.push(r);
+                                            let license_presets = [
+                                                "CC0 1.0",
+                                                "CC BY 4.0",
+                                                "CC BY-SA 4.0",
+                                                "CC BY-NC 4.0",
+                                                tr.info_license_all_rights,
+                                            ];
                                             if let Some(pick) = preset_picker(
                                                 ui,
                                                 "project-info-license-presets",
                                                 &info.copyright,
-                                                LICENSE_PRESETS,
+                                                &license_presets,
                                                 false,
                                             ) {
                                                 info.copyright = pick.into();
@@ -821,10 +828,10 @@ impl App {
                                         });
                                         if extra_meters > 0 {
                                             ui.label(
-                                                RichText::new(format!(
-                                                    "+{extra_meters} {}",
+                                                RichText::new(
                                                     tr.info_set_meter_changes
-                                                ))
+                                                        .fmt(tr.lang, extra_meters),
+                                                )
                                                 .font(t::sans(12.0))
                                                 .color(t::faint()),
                                             );
@@ -949,7 +956,7 @@ impl App {
                                             Some(s) => format!(
                                                 "{} {}",
                                                 ROOTS[(s.root as usize) % 12],
-                                                s.kind.label()
+                                                tr.scale_kind_label(s.kind)
                                             ),
                                             None => tr.info_set_key_off.to_string(),
                                         };
@@ -963,7 +970,7 @@ impl App {
                                                     let sel =
                                                         proj_scale.is_some_and(|s| s.kind == k);
                                                     if ui
-                                                        .selectable_label(sel, k.label())
+                                                        .selectable_label(sel, tr.scale_kind_label(k))
                                                         .clicked()
                                                     {
                                                         set_scale_req = Some(Some(Scale {
@@ -990,7 +997,7 @@ impl App {
                                         use keyframexl::forge::recipes::Style;
                                         section_caps(ui, tr.info_set_game_style, w);
                                         let mut labels = vec![tr.info_set_game_style_none];
-                                        labels.extend(Style::ALL.iter().map(|s| s.label()));
+                                        labels.extend(Style::ALL.iter().map(|s| tr.forge_style(*s)));
                                         let cur = self.song.game_style.map_or(0, |s| {
                                             Style::ALL.iter().position(|x| *x == s).unwrap_or(0) + 1
                                         });
@@ -1029,7 +1036,6 @@ impl App {
                 for r in &edit_responses {
                     kit::end_edit(ui, r);
                 }
-
                 ui.separator();
                 ui.allocate_ui_with_layout(
                     vec2(win_w, kit::TOOL_H),
@@ -1062,9 +1068,15 @@ impl App {
         }
         if let Some(url) = open_url {
             if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
-                self.say(Tone::Bad, format!("Could not open link: {e}"));
+                self.say(
+                    Tone::Bad,
+                    crate::i18n::fill(tr.info_url_open_err, &[("err", &e.to_string())]),
+                );
             } else {
-                self.say(Tone::Done, format!("Opened {url}"));
+                self.say(
+                    Tone::Done,
+                    crate::i18n::fill(tr.info_url_opened, &[("url", &url)]),
+                );
             }
         }
         if open_export {
@@ -1116,24 +1128,26 @@ impl App {
 
     /// "Save changes?" for the pending command: Save / Don't save / Cancel.
     pub(crate) fn unsaved_window(&mut self, ctx: &egui::Context) {
+        let tr = self.tr();
         let Some(cmd) = self.pending.clone() else {
             return;
         };
         let mut answer = None;
         let what = match &cmd {
-            Pending::New => "starting a new project",
-            Pending::Open(_) => "opening another project",
-            Pending::Quit => "closing",
+            Pending::New => tr.proj_before_new,
+            Pending::Open(_) => tr.proj_before_open,
+            Pending::Quit => tr.proj_before_quit,
         };
-        egui::Window::new("Unsaved changes")
+        egui::Window::new(tr.proj_unsaved_title)
+            .id(egui::Id::new("unsaved-changes-window"))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_TOP, vec2(0.0, 140.0))
             .show(ctx, |ui| {
                 ui.label(
-                    RichText::new(format!(
-                        "Save changes to {} before {what}?",
-                        self.project_name()
+                    RichText::new(fill(
+                        tr.proj_save_before,
+                        &[("name", &self.project_name()), ("what", what)],
                     ))
                     .font(t::sans(14.0))
                     .color(t::text()),
@@ -1146,13 +1160,13 @@ impl App {
                     )
                 });
                 ui.horizontal(|ui| {
-                    if kit::button(ui, "Save", kit::Kind::Primary, true).clicked() || enter {
+                    if kit::button(ui, tr.file_save, kit::Kind::Primary, true).clicked() || enter {
                         answer = Some(true);
                     }
-                    if kit::button(ui, "Don't save", kit::Kind::Normal, true).clicked() {
+                    if kit::button(ui, tr.proj_dont_save, kit::Kind::Normal, true).clicked() {
                         answer = Some(false);
                     }
-                    if kit::button(ui, "Cancel", kit::Kind::Normal, true).clicked() || esc {
+                    if kit::button(ui, tr.common_cancel, kit::Kind::Normal, true).clicked() || esc {
                         self.pending = None;
                         // A cancelled close is not a restart into the update either.
                         self.relaunch = None;
@@ -1165,7 +1179,7 @@ impl App {
                 self.save();
                 if self.dirty() {
                     // Save as… was cancelled or failed: keep the work open.
-                    self.say(Tone::Bad, "Not saved, so nothing was replaced.");
+                    self.say(Tone::Bad, tr.proj_not_saved);
                 } else {
                     self.perform(cmd);
                 }
@@ -1179,26 +1193,27 @@ impl App {
     }
 
     pub(crate) fn recover_item(&mut self, ui: &mut egui::Ui) {
+        let tr = self.tr();
         let path = autosave_path().filter(|p| p.exists());
         let when = path
             .as_ref()
             .and_then(|p| p.metadata().ok()?.modified().ok()?.elapsed().ok())
             .map(|d| match d.as_secs() {
-                s if s < 120 => "just now".to_string(),
-                s if s < 7200 => format!("{} min ago", s / 60),
-                s if s < 172800 => format!("{} h ago", s / 3600),
-                s => format!("{} days ago", s / 86400),
+                s if s < 120 => tr.proj_just_now.to_string(),
+                s if s < 7200 => tr.proj_min_ago.fmt(tr.lang, (s / 60) as usize),
+                s if s < 172800 => tr.proj_h_ago.fmt(tr.lang, (s / 3600) as usize),
+                s => tr.proj_days_ago.fmt(tr.lang, (s / 86400) as usize),
             });
         let label = match &when {
-            Some(w) => format!("Recover autosave ({w})"),
-            None => "Recover autosave".into(),
+            Some(w) => fill(tr.proj_recover_autosave_when, &[("when", w)]),
+            None => tr.proj_recover_autosave.into(),
         };
         let r = ui.add_enabled(
             path.is_some(),
             egui::Button::new(RichText::new(label).font(t::sans(13.0))),
         );
         let r = if path.is_none() {
-            r.on_disabled_hover_text("No autosave yet: unsaved work is written every two minutes.")
+            r.on_disabled_hover_text(tr.proj_no_autosave)
         } else {
             r
         };
@@ -1209,37 +1224,41 @@ impl App {
     }
 
     pub(crate) fn recent_menu(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button(RichText::new("Open recent").font(t::sans(13.0)), |ui| {
-            kit::menu_style(ui);
-            if self.recent.is_empty() {
-                ui.add_enabled(
-                    false,
-                    egui::Button::new(RichText::new("No recent projects").font(t::sans(13.0))),
-                );
-                return;
-            }
-            for path in self.recent.clone() {
-                let name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                let r = ui
-                    .add(egui::Button::new(RichText::new(name).font(t::sans(13.0))))
-                    .on_hover_text(path.display().to_string());
-                if r.clicked() {
-                    ui.close_menu();
-                    self.request(Pending::Open(Some(path)));
+        let tr = self.tr();
+        ui.menu_button(
+            RichText::new(tr.file_open_recent).font(t::sans(13.0)),
+            |ui| {
+                kit::menu_style(ui);
+                if self.recent.is_empty() {
+                    ui.add_enabled(
+                        false,
+                        egui::Button::new(RichText::new(tr.proj_no_recent).font(t::sans(13.0))),
+                    );
+                    return;
                 }
-            }
-            ui.separator();
-            if ui
-                .button(RichText::new("Clear list").font(t::sans(13.0)))
-                .clicked()
-            {
-                ui.close_menu();
-                self.clear_recent();
-            }
-        });
+                for path in self.recent.clone() {
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    let r = ui
+                        .add(egui::Button::new(RichText::new(name).font(t::sans(13.0))))
+                        .on_hover_text(path.display().to_string());
+                    if r.clicked() {
+                        ui.close_menu();
+                        self.request(Pending::Open(Some(path)));
+                    }
+                }
+                ui.separator();
+                if ui
+                    .button(RichText::new(tr.proj_clear_list).font(t::sans(13.0)))
+                    .clicked()
+                {
+                    ui.close_menu();
+                    self.clear_recent();
+                }
+            },
+        );
     }
 }
 
@@ -1261,14 +1280,6 @@ const GENRE_PRESETS: &[&str] = &[
     "Synthwave",
     "Techno",
     "Trap",
-];
-
-const LICENSE_PRESETS: &[&str] = &[
-    "CC0 1.0",
-    "CC BY 4.0",
-    "CC BY-SA 4.0",
-    "CC BY-NC 4.0",
-    "All rights reserved",
 ];
 
 struct ProjectStats {

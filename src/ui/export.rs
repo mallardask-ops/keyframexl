@@ -3,6 +3,7 @@
 //! Start renders on a worker thread with progress and Cancel.
 
 use super::{App, Tone, kit};
+use crate::i18n::fill;
 use crate::theme as t;
 use eframe::egui::{self, Align2, RichText, vec2};
 use keyframexl::render::{self, Format, Progress, Tail};
@@ -73,6 +74,7 @@ fn clock(seconds: f64) -> String {
 impl App {
     /// Ctrl+R / FILE → Export → Audio file: pick the file, then the dialog.
     pub(crate) fn export(&mut self) {
+        let tr = self.tr();
         let song_mode = !self.song.clips.is_empty();
         let name = format!(
             "{}.{}",
@@ -85,7 +87,7 @@ impl App {
                 .unwrap_or("wav")
         );
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Audio", &["wav", "flac", "mp3"])
+            .add_filter(tr.exp_audio_filter, &["wav", "flac", "mp3"])
             .set_file_name(name)
             .save_file()
         {
@@ -198,6 +200,7 @@ impl App {
 
     /// Start rendering on a worker thread.
     pub(crate) fn start_export(&mut self) {
+        let tr = self.tr();
         if self.export.is_none() {
             return;
         }
@@ -215,7 +218,7 @@ impl App {
                         "{} — {}",
                         i.name,
                         live.and_then(|l| l.error.as_deref())
-                            .unwrap_or("waiting for the FL Studio bridge")
+                            .unwrap_or(tr.exp_waiting_fl)
                     )
                 })
             })
@@ -281,7 +284,7 @@ impl App {
         if let Some(d) = &mut self.export {
             d.running = Some((rx, cancel));
             d.progress = 0.0;
-            d.stage = "Rendering…".into();
+            d.stage = tr.exp_rendering.into();
             d.error = None;
         }
     }
@@ -411,6 +414,7 @@ impl App {
 
     /// Progress from the worker; the result closes the dialog or shows the error.
     pub(crate) fn poll_export(&mut self) {
+        let tr = self.tr();
         let Some(d) = &mut self.export else { return };
         let Some((rx, _)) = &d.running else { return };
         let mut finished = None;
@@ -418,9 +422,12 @@ impl App {
             match p {
                 Progress::Rendering(f) => {
                     d.progress = f;
-                    d.stage = format!("Rendering… {:.0}%", f * 100.0);
+                    d.stage = fill(
+                        tr.exp_rendering_pct,
+                        &[("pct", &format!("{:.0}", f * 100.0))],
+                    );
                 }
-                Progress::Encoding(f) => d.stage = format!("Writing {}…", f.label()),
+                Progress::Encoding(f) => d.stage = fill(tr.exp_writing, &[("format", f.label())]),
                 other => finished = Some(other),
             }
         }
@@ -434,29 +441,28 @@ impl App {
                 if names.len() > 3 {
                     let more = names.len() - 1;
                     names.truncate(1);
-                    names.push(format!("{more} stem files"));
+                    names.push(tr.exp_stem_files.fmt(tr.lang, more));
                 }
-                let clip = if stats.clipped {
-                    " It clipped: lower Master or turn on Normalize."
-                } else {
-                    ""
-                };
+                let clip = if stats.clipped { tr.exp_clipped } else { "" };
                 let tone = if stats.clipped { Tone::Bad } else { Tone::Done };
                 self.export = None;
                 self.say(
                     tone,
-                    format!(
-                        "Exported {} ({}, peak {:.1} dB).{clip}",
-                        names.join(", "),
-                        clock(stats.seconds),
-                        stats.peak_db
+                    fill(
+                        tr.exp_done,
+                        &[
+                            ("files", &names.join(", ")),
+                            ("len", &clock(stats.seconds)),
+                            ("db", &format!("{:.1}", stats.peak_db)),
+                            ("clip", clip),
+                        ],
                     ),
                 );
             }
             Some(Progress::Cancelled) => {
                 d.running = None;
                 d.stage.clear();
-                d.error = Some("Cancelled. Nothing was written.".into());
+                d.error = Some(tr.exp_cancelled.into());
             }
             Some(Progress::Failed(e)) => {
                 d.running = None;
@@ -468,6 +474,7 @@ impl App {
     }
 
     pub(crate) fn export_window(&mut self, ctx: &egui::Context) {
+        let tr = self.tr();
         self.poll_export();
         let Some(d) = &self.export else { return };
         let running = d.running.is_some();
@@ -509,7 +516,7 @@ impl App {
         let has_clips = !self.song.clips.is_empty();
         let stem_count = render::stems(&self.song).len();
         let mut prefs = self.export_prefs.clone();
-        egui::Window::new("Export audio")
+        egui::Window::new(tr.exp_title)
             .collapsible(false)
             .open(&mut open)
             .resizable(true)
@@ -520,149 +527,297 @@ impl App {
                 ui.spacing_mut().item_spacing.y = 6.0;
                 let label = |ui: &mut egui::Ui, text: &str| {
                     ui.add_space(4.0);
-                    let r = ui.allocate_exact_size(vec2(ui.available_width(), 14.0), egui::Sense::hover()).0;
-                    kit::caps(ui.painter(), r.left_center(), Align2::LEFT_CENTER, text, 12.0, t::faint());
+                    let r = ui
+                        .allocate_exact_size(vec2(ui.available_width(), 14.0), egui::Sense::hover())
+                        .0;
+                    kit::caps(
+                        ui.painter(),
+                        r.left_center(),
+                        Align2::LEFT_CENTER,
+                        text,
+                        12.0,
+                        t::faint(),
+                    );
                 };
                 egui::ScrollArea::vertical()
                     .max_height((ui.available_height() - 96.0).max(130.0))
                     .auto_shrink([false, true])
-                    .show(ui, |ui| ui.add_enabled_ui(!running, |ui| {
-                    label(ui, "file");
-                    // The name matters most; the folder is context.
-                    let stem = path.file_stem().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                    let folder = path.parent().map(|p| p.display().to_string()).unwrap_or_default();
-                    ui.horizontal(|ui| {
-                        let shown = kit::elide(ui.painter(), &stem, t::medium(16.0), (ui.available_width() - 90.0).max(70.0));
-                        ui.label(RichText::new(shown).font(t::medium(16.0)).color(t::text())).on_hover_text(path.display().to_string());
-                        if kit::tool_button(ui, "Change…", kit::Kind::Ghost, true).clicked() {
-                            pick_path = true;
-                        }
-                    });
-                    let folder = kit::elide(ui.painter(), &folder, t::sans(12.0), 400.0);
-                    ui.label(RichText::new(format!("in {folder}")).font(t::sans(12.0)).color(t::faint()));
-                    ui.separator();
-                    label(ui, "source");
-                    let mut items = vec![format!("Pattern “{pattern_name}”  {}", clock(len_pattern)), format!("Song  {}", clock(len_song))];
-                    if let Some((a, b, secs)) = &sel {
-                        items.push(format!("Selection {a}–{b}  {}", clock(*secs)));
-                    }
-                    let items: Vec<&str> = items.iter().map(String::as_str).collect();
-                    let at = if selection { 2 } else { song_mode as usize };
-                    let (pick, _) = kit::chips(ui, "export-source", &items, at, None);
-                    if let Some(i) = pick {
-                        set_song = Some(i >= 1);
-                        set_sel = Some(i == 2);
-                    }
-                    if !has_clips {
-                        ui.label(RichText::new("The playlist is empty, so Song renders one empty bar.").font(t::sans(12.0)).color(t::faint()));
-                    }
-                    label(ui, "tail");
-                    let tails: Vec<&str> = Tail::ALL.iter().map(|x| x.label()).collect();
-                    let (pick, _) = kit::chips(ui, "export-tail", &tails, Tail::ALL.iter().position(|x| *x == prefs.tail).unwrap_or(0), None);
-                    if let Some(i) = pick {
-                        prefs.tail = Tail::ALL[i];
-                    }
-                    ui.label(RichText::new(prefs.tail.hint()).font(t::sans(12.0)).color(t::faint()));
-                    ui.separator();
-                    label(ui, "formats");
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("WAV").font(t::sans(13.0)).color(t::muted()));
-                        let names = ["Off", "16-bit", "24-bit", "32 float"];
-                        let (pick, _) = kit::chips(ui, "export-wav", &names, WAV.iter().position(|f| *f == prefs.wav).unwrap_or(0), None);
-                        if let Some(i) = pick {
-                            prefs.wav = WAV[i];
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("FLAC").font(t::sans(13.0)).color(t::muted()));
-                        let names = ["Off", "16-bit", "24-bit"];
-                        let (pick, _) = kit::chips(ui, "export-flac", &names, FLAC.iter().position(|f| *f == prefs.flac).unwrap_or(0), None);
-                        if let Some(i) = pick {
-                            prefs.flac = FLAC[i];
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("MP3").font(t::sans(13.0)).color(t::muted()));
-                        if keyframexl::mp3::available() {
-                            let names = ["Off", "128", "192", "320 kbps"];
-                            let (pick, _) = kit::chips(ui, "export-mp3", &names, MP3.iter().position(|f| *f == prefs.mp3).unwrap_or(0), None);
+                    .show(ui, |ui| {
+                        ui.add_enabled_ui(!running, |ui| {
+                            label(ui, tr.exp_sec_file);
+                            // The name matters most; the folder is context.
+                            let stem = path
+                                .file_stem()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_default();
+                            let folder = path
+                                .parent()
+                                .map(|p| p.display().to_string())
+                                .unwrap_or_default();
+                            ui.horizontal(|ui| {
+                                let shown = kit::elide(
+                                    ui.painter(),
+                                    &stem,
+                                    t::medium(16.0),
+                                    (ui.available_width() - 90.0).max(70.0),
+                                );
+                                ui.label(
+                                    RichText::new(shown).font(t::medium(16.0)).color(t::text()),
+                                )
+                                .on_hover_text(path.display().to_string());
+                                if kit::tool_button(ui, tr.exp_change, kit::Kind::Ghost, true)
+                                    .clicked()
+                                {
+                                    pick_path = true;
+                                }
+                            });
+                            let folder = kit::elide(ui.painter(), &folder, t::sans(12.0), 400.0);
+                            ui.label(
+                                RichText::new(fill(tr.exp_in_folder, &[("folder", &folder)]))
+                                    .font(t::sans(12.0))
+                                    .color(t::faint()),
+                            );
+                            ui.separator();
+                            label(ui, tr.exp_sec_source);
+                            let mut items = vec![
+                                fill(
+                                    tr.exp_src_pattern,
+                                    &[("name", &pattern_name), ("len", &clock(len_pattern))],
+                                ),
+                                fill(tr.exp_src_song, &[("len", &clock(len_song))]),
+                            ];
+                            if let Some((a, b, secs)) = &sel {
+                                items.push(fill(
+                                    tr.exp_src_selection,
+                                    &[
+                                        ("a", &a.to_string()),
+                                        ("b", &b.to_string()),
+                                        ("len", &clock(*secs)),
+                                    ],
+                                ));
+                            }
+                            let items: Vec<&str> = items.iter().map(String::as_str).collect();
+                            let at = if selection { 2 } else { song_mode as usize };
+                            let (pick, _) = kit::chips(ui, "export-source", &items, at, None);
                             if let Some(i) = pick {
-                                prefs.mp3 = MP3[i];
+                                set_song = Some(i >= 1);
+                                set_sel = Some(i == 2);
                             }
-                        } else {
-                            ui.label(RichText::new("Needs LAME (libmp3lame): install the lame package").font(t::sans(12.0)).color(t::faint()));
-                        }
-                    });
-                    let mut open_project_info = false;
-                    if prefs.mp3.is_some() && keyframexl::mp3::available() {
-                        let tr = crate::i18n::strings(self.settings.general.language);
-                        let i = &self.song.info;
-                        let mut tags = [
-                            ("title", &i.title),
-                            ("author", &i.author),
-                            ("album", &i.album),
-                            ("genre", &i.genre),
-                            ("year", &i.year),
-                            ("copyright", &i.copyright),
-                        ]
-                        .iter()
-                        .filter(|(_, v)| !v.trim().is_empty())
-                        .map(|(k, v)| format!("{k} “{}”", v.trim()))
-                        .collect::<Vec<_>>();
-                        if !i.url.trim().is_empty() {
-                            tags.push("url".into());
-                        }
-                        if !i.comments.trim().is_empty() {
-                            tags.push("comments".into());
-                        }
-                        let note = if tags.is_empty() {
-                            "MP3 tags: none yet · FILE → Project info (F11)".to_string()
-                        } else {
-                            format!("MP3 tags: {}", tags.join(", "))
-                        };
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label(RichText::new(note).font(t::sans(12.0)).color(t::faint()));
-                            if kit::tool_button(ui, tr.info_edit_from_export, kit::Kind::Ghost, !running).clicked() {
-                                open_project_info = true;
+                            if !has_clips {
+                                ui.label(
+                                    RichText::new(tr.exp_empty_playlist)
+                                        .font(t::sans(12.0))
+                                        .color(t::faint()),
+                                );
                             }
+                            label(ui, tr.exp_sec_tail);
+                            let tails: Vec<&str> =
+                                Tail::ALL.iter().map(|x| tr.export_tail(*x)).collect();
+                            let (pick, _) = kit::chips(
+                                ui,
+                                "export-tail",
+                                &tails,
+                                Tail::ALL.iter().position(|x| *x == prefs.tail).unwrap_or(0),
+                                None,
+                            );
+                            if let Some(i) = pick {
+                                prefs.tail = Tail::ALL[i];
+                            }
+                            ui.label(
+                                RichText::new(tr.export_tail_hint(prefs.tail))
+                                    .font(t::sans(12.0))
+                                    .color(t::faint()),
+                            );
+                            ui.separator();
+                            label(ui, tr.exp_sec_formats);
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new("WAV").font(t::sans(13.0)).color(t::muted()),
+                                );
+                                let names = [tr.exp_off, "16-bit", "24-bit", "32 float"];
+                                let (pick, _) = kit::chips(
+                                    ui,
+                                    "export-wav",
+                                    &names,
+                                    WAV.iter().position(|f| *f == prefs.wav).unwrap_or(0),
+                                    None,
+                                );
+                                if let Some(i) = pick {
+                                    prefs.wav = WAV[i];
+                                }
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new("FLAC").font(t::sans(13.0)).color(t::muted()),
+                                );
+                                let names = [tr.exp_off, "16-bit", "24-bit"];
+                                let (pick, _) = kit::chips(
+                                    ui,
+                                    "export-flac",
+                                    &names,
+                                    FLAC.iter().position(|f| *f == prefs.flac).unwrap_or(0),
+                                    None,
+                                );
+                                if let Some(i) = pick {
+                                    prefs.flac = FLAC[i];
+                                }
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new("MP3").font(t::sans(13.0)).color(t::muted()),
+                                );
+                                if keyframexl::mp3::available() {
+                                    let names = [tr.exp_off, "128", "192", "320 kbps"];
+                                    let (pick, _) = kit::chips(
+                                        ui,
+                                        "export-mp3",
+                                        &names,
+                                        MP3.iter().position(|f| *f == prefs.mp3).unwrap_or(0),
+                                        None,
+                                    );
+                                    if let Some(i) = pick {
+                                        prefs.mp3 = MP3[i];
+                                    }
+                                } else {
+                                    ui.label(
+                                        RichText::new(tr.exp_needs_lame)
+                                            .font(t::sans(12.0))
+                                            .color(t::faint()),
+                                    );
+                                }
+                            });
+                            let mut open_project_info = false;
+                            if prefs.mp3.is_some() && keyframexl::mp3::available() {
+                                let i = &self.song.info;
+                                let mut tags = [
+                                    (tr.exp_tag_title, &i.title),
+                                    (tr.exp_tag_author, &i.author),
+                                    (tr.exp_tag_album, &i.album),
+                                    (tr.exp_tag_genre, &i.genre),
+                                    (tr.exp_tag_year, &i.year),
+                                    (tr.exp_tag_copyright, &i.copyright),
+                                ]
+                                .iter()
+                                .filter(|(_, v)| !v.trim().is_empty())
+                                .map(|(k, v)| format!("{k} “{}”", v.trim()))
+                                .collect::<Vec<_>>();
+                                if !i.url.trim().is_empty() {
+                                    tags.push(tr.exp_tag_url.into());
+                                }
+                                if !i.comments.trim().is_empty() {
+                                    tags.push(tr.exp_tag_comments.into());
+                                }
+                                let note = if tags.is_empty() {
+                                    tr.exp_tags_none.to_string()
+                                } else {
+                                    fill(tr.exp_tags, &[("tags", &tags.join(", "))])
+                                };
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.label(
+                                        RichText::new(note).font(t::sans(12.0)).color(t::faint()),
+                                    );
+                                    if kit::tool_button(
+                                        ui,
+                                        tr.info_edit_from_export,
+                                        kit::Kind::Ghost,
+                                        !running,
+                                    )
+                                    .clicked()
+                                    {
+                                        open_project_info = true;
+                                    }
+                                });
+                            }
+                            if open_project_info {
+                                self.open_info(ui.ctx());
+                            }
+                            label(ui, tr.exp_sec_options);
+                            ui.checkbox(
+                                &mut prefs.normalize,
+                                RichText::new(tr.exp_normalize).font(t::sans(13.0)),
+                            );
+                            let any16 = prefs.wav == Some(Format::Wav16)
+                                || prefs.flac == Some(Format::Flac16);
+                            ui.add_enabled(
+                                any16,
+                                egui::Checkbox::new(
+                                    &mut prefs.dither,
+                                    RichText::new(tr.exp_dither).font(t::sans(13.0)),
+                                ),
+                            )
+                            .on_disabled_hover_text(tr.exp_dither_only16);
+                            ui.checkbox(
+                                &mut prefs.split,
+                                RichText::new(tr.exp_split.fmt(tr.lang, stem_count))
+                                    .font(t::sans(13.0)),
+                            )
+                            .on_hover_text(tr.exp_split_tip);
                         });
-                    }
-                    if open_project_info {
-                        self.open_info(ui.ctx());
-                    }
-                    label(ui, "options");
-                    ui.checkbox(&mut prefs.normalize, RichText::new("Normalize to −1 dB peak").font(t::sans(13.0)));
-                    let any16 = prefs.wav == Some(Format::Wav16) || prefs.flac == Some(Format::Flac16);
-                    ui.add_enabled(any16, egui::Checkbox::new(&mut prefs.dither, RichText::new("Dither 16-bit output").font(t::sans(13.0))))
-                        .on_disabled_hover_text("Dither only applies to 16-bit files");
-                    ui.checkbox(&mut prefs.split, RichText::new(format!("Split mixer tracks ({stem_count} stems)")).font(t::sans(13.0)))
-                        .on_hover_text("Also a file per used mixer insert, named after the track. Master effects stay out of the stems, as in FL.");
-                }));
+                    });
                 // Size estimate (FLAC: upper bound) and the result line.
-                let secs = if selection { sel.as_ref().map_or(len_song, |s| s.2) } else if song_mode { len_song } else { len_pattern } + if prefs.tail == Tail::Leave { 2.0 } else { 0.0 };
-                let secs = secs * if prefs.split { 1.0 + stem_count as f64 } else { 1.0 };
-                let bytes: u64 = prefs.wav.into_iter().chain(prefs.flac).chain(prefs.mp3).map(|f| (f.bytes_per_second() as f64 * secs) as u64).sum();
+                let secs = if selection {
+                    sel.as_ref().map_or(len_song, |s| s.2)
+                } else if song_mode {
+                    len_song
+                } else {
+                    len_pattern
+                } + if prefs.tail == Tail::Leave { 2.0 } else { 0.0 };
+                let secs = secs
+                    * if prefs.split {
+                        1.0 + stem_count as f64
+                    } else {
+                        1.0
+                    };
+                let bytes: u64 = prefs
+                    .wav
+                    .into_iter()
+                    .chain(prefs.flac)
+                    .chain(prefs.mp3)
+                    .map(|f| (f.bytes_per_second() as f64 * secs) as u64)
+                    .sum();
                 ui.separator();
                 let rate = self.rate();
                 let mb = bytes as f64 / 1e6 * rate as f64 / render::RATE as f64;
-                ui.label(RichText::new(format!("About {mb:.1} MB · {:.1} kHz stereo", rate as f64 / 1000.0)).font(t::sans(12.0)).color(t::faint()));
+                ui.label(
+                    RichText::new(fill(
+                        tr.exp_size,
+                        &[
+                            ("mb", &format!("{mb:.1}")),
+                            ("khz", &format!("{:.1}", rate as f64 / 1000.0)),
+                        ],
+                    ))
+                    .font(t::sans(12.0))
+                    .color(t::faint()),
+                );
                 if let Some(e) = &error {
                     ui.label(RichText::new(e).font(t::sans(13.0)).color(t::bad()));
                 }
                 if running {
-                    ui.add(egui::ProgressBar::new(progress).desired_width(400.0).text(RichText::new(&stage).font(t::sans(12.0))));
+                    ui.add(
+                        egui::ProgressBar::new(progress)
+                            .desired_width(400.0)
+                            .text(RichText::new(&stage).font(t::sans(12.0))),
+                    );
                 }
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    let none = prefs.wav.is_none() && prefs.flac.is_none() && (prefs.mp3.is_none() || !keyframexl::mp3::available());
+                    let none = prefs.wav.is_none()
+                        && prefs.flac.is_none()
+                        && (prefs.mp3.is_none() || !keyframexl::mp3::available());
                     if !running {
-                        let r = kit::button(ui, "Export", kit::Kind::Primary, !none);
-                        let r = if none { r.on_disabled_hover_text("Choose WAV, FLAC or MP3") } else { r };
+                        let r = kit::button(ui, tr.exp_start, kit::Kind::Primary, !none);
+                        let r = if none {
+                            r.on_disabled_hover_text(tr.exp_choose_format)
+                        } else {
+                            r
+                        };
                         if r.clicked() || (!none && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
                             start = true;
                         }
                     }
-                    if kit::button(ui, "Cancel", kit::Kind::Normal, true).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    if kit::button(ui, tr.common_cancel, kit::Kind::Normal, true).clicked()
+                        || ui.input(|i| i.key_pressed(egui::Key::Escape))
+                    {
                         close = true;
                     }
                 });
@@ -684,7 +839,7 @@ impl App {
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
             if let Some(p) = rfd::FileDialog::new()
-                .add_filter("Audio", &["wav", "flac", "mp3"])
+                .add_filter(tr.exp_audio_filter, &["wav", "flac", "mp3"])
                 .set_file_name(name)
                 .save_file()
                 && let Some(d) = &mut self.export

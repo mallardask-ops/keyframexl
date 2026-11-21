@@ -76,15 +76,15 @@ impl App {
                 ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
                 ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
                 ui.add_space(4.0);
+                let tr = self.tr();
                 let (mark_rect, mark_resp) =
                     ui.allocate_exact_size(vec2(16.0, 16.0), egui::Sense::click());
                 kit::icon_brand(ui.painter(), mark_rect);
-                if mark_resp.on_hover_text("About KeyFrameXL").clicked() {
+                if mark_resp.on_hover_text(tr.help_about).clicked() {
                     ui.ctx()
                         .data_mut(|d| d.insert_temp(egui::Id::new("about-open"), true));
                 }
                 ui.add_space(6.0);
-                let tr = crate::i18n::strings(self.settings.general.language);
                 let title = |s: &str| {
                     RichText::new(s)
                         .font(t::medium(12.0))
@@ -152,6 +152,7 @@ impl App {
     /// Minimise, maximise / restore and close, flush with the window's top
     /// right corner. Returns where they start (the title stays left of it).
     fn title_buttons(&mut self, ui: &mut Ui, bar: egui::Rect) -> f32 {
+        let tr = self.tr();
         let w = 44.0;
         let maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
         let left = bar.right() - 3.0 * w;
@@ -205,10 +206,10 @@ impl App {
                 }
             }
             let tip = match kind {
-                "min" => "Minimise",
-                "max" if maximized => "Restore",
-                "max" => "Maximise",
-                _ => "Close",
+                "min" => tr.win_minimise,
+                "max" if maximized => tr.win_restore,
+                "max" => tr.win_maximise,
+                _ => tr.common_close,
             };
             if resp.on_hover_text(tip).clicked() {
                 let cmd = match kind {
@@ -307,7 +308,7 @@ impl App {
 
     fn menu_file(&mut self, ui: &mut Ui) {
         kit::menu_style(ui);
-        let tr = crate::i18n::strings(self.settings.general.language);
+        let tr = self.tr();
         if item(ui, tr.file_new, "Ctrl+Shift+N", true, "") {
             self.request(super::Pending::New);
         }
@@ -333,7 +334,7 @@ impl App {
             self.toggle_info(ui.ctx());
         }
         ui.separator();
-        ui.menu_button(RichText::new("Export").font(t::sans(13.0)), |ui| {
+        ui.menu_button(RichText::new(tr.file_export).font(t::sans(13.0)), |ui| {
             kit::menu_style(ui);
             if item(ui, tr.file_export_audio, "Ctrl+R", true, "") {
                 self.export();
@@ -357,13 +358,13 @@ impl App {
 
     fn menu_edit(&mut self, ui: &mut Ui) {
         kit::menu_style(ui);
-        let tr = crate::i18n::strings(self.settings.general.language);
+        let tr = self.tr();
         if item(
             ui,
             tr.edit_undo,
             "Ctrl+Z",
             !self.history.is_empty(),
-            "Nothing to undo",
+            tr.edit_nothing_undo,
         ) {
             self.undo();
         }
@@ -372,7 +373,7 @@ impl App {
             tr.edit_redo,
             "Ctrl+Y",
             !self.future.is_empty(),
-            "Nothing to redo",
+            tr.edit_nothing_redo,
         ) {
             self.redo();
         }
@@ -381,30 +382,30 @@ impl App {
         let sel = !self.roll_sel.is_empty();
         if item(
             ui,
-            "Cut notes",
+            tr.edit_cut_notes,
             "Ctrl+X",
             sel,
-            "Select notes in the piano roll first",
+            tr.edit_select_notes_first,
         ) {
             self.roll_inst = self.instrument;
             self.copy_notes(true);
         }
         if item(
             ui,
-            "Copy notes",
+            tr.edit_copy_notes,
             "Ctrl+C",
             sel,
-            "Select notes in the piano roll first",
+            tr.edit_select_notes_first,
         ) {
             self.roll_inst = self.instrument;
             self.copy_notes(false);
         }
         if item(
             ui,
-            "Paste notes",
+            tr.edit_paste_notes,
             "Ctrl+V",
             !self.note_clip.is_empty(),
-            "Copy notes first",
+            tr.edit_copy_notes_first,
         ) {
             self.roll_inst = self.instrument;
             self.paste_notes();
@@ -413,25 +414,27 @@ impl App {
 
     fn menu_add(&mut self, ui: &mut Ui) {
         kit::menu_style(ui);
-        ui.menu_button(RichText::new("Channel").font(t::sans(13.0)), |ui| {
+        let tr = self.tr();
+        ui.menu_button(RichText::new(tr.add_channel).font(t::sans(13.0)), |ui| {
             self.add_channel_menu(ui)
         });
-        if item(ui, "Effect (opens the mixer)", "F9", true, "") {
+        if item(ui, tr.add_effect_mixer, "F9", true, "") {
             self.win(Cmd::Show(Tab::Mixer));
         }
         ui.menu_button(
-            RichText::new("Plugin instrument").font(t::sans(13.0)),
+            RichText::new(tr.add_plugin_instrument).font(t::sans(13.0)),
             |ui| self.plugin_instrument_menu(ui),
         );
         ui.separator();
-        if item(ui, "Pattern", "Ctrl+Shift+Ins", true, "") {
+        if item(ui, tr.add_pattern, "Ctrl+Shift+Ins", true, "") {
             self.new_pattern();
         }
     }
 
     fn menu_patterns(&mut self, ui: &mut Ui) {
         kit::menu_style(ui);
-        if item(ui, "Find next empty", "F4", true, "") {
+        let tr = self.tr();
+        if item(ui, tr.pat_find_next_empty, "F4", true, "") {
             self.next_empty_pattern();
         }
         ui.separator();
@@ -440,20 +443,21 @@ impl App {
 
     pub(super) fn selected_pattern_menu(&mut self, ui: &mut Ui) {
         kit::menu_style(ui);
-        if item(ui, "Rename…", "F2", true, "") {
+        let tr = self.tr();
+        if item(ui, tr.pat_rename, "F2", true, "") {
             self.start_rename();
         }
-        ui.menu_button(RichText::new("Colour").font(t::sans(13.0)), |ui| {
+        ui.menu_button(RichText::new(tr.pat_colour).font(t::sans(13.0)), |ui| {
             kit::menu_style(ui);
             let cur = self.pattern().color;
             if ui
-                .selectable_label(cur.is_none(), "By id (default)")
+                .selectable_label(cur.is_none(), tr.pat_colour_by_id)
                 .clicked()
             {
                 self.checkpoint();
                 self.pattern_mut().color = None;
                 self.publish();
-                self.say(Tone::Quiet, "Pattern colour reset to by-id. Ctrl+Z undoes.");
+                self.say(Tone::Quiet, tr.pat_colour_reset_status);
                 ui.close_menu();
             }
             ui.separator();
@@ -466,21 +470,21 @@ impl App {
                     self.publish();
                     self.say(
                         Tone::Quiet,
-                        format!("Pattern colour #{hex}. Ctrl+Z undoes."),
+                        crate::i18n::fill(tr.pat_colour_set_status, &[("hex", &hex)]),
                     );
                     ui.close_menu();
                 }
             }
         });
-        if item(ui, "Clone", "", true, "") {
+        if item(ui, tr.pat_clone, "", true, "") {
             self.clone_pattern();
         }
         if item(
             ui,
-            "Delete",
+            tr.pat_delete,
             "",
             self.song.patterns.len() > 1,
-            "The last pattern stays",
+            tr.pat_last_stays,
         ) {
             self.delete_pattern();
         }
@@ -488,13 +492,14 @@ impl App {
 
     fn menu_view(&mut self, ui: &mut Ui) {
         kit::menu_style(ui);
+        let tr = self.tr();
         let roll = Tab::Roll {
             instrument: self.instrument,
         };
         for (label, key, tab) in [
-            ("Playlist", "F5", Tab::Playlist),
-            ("Channel rack", "F6", Tab::Rack),
-            ("Piano roll", "F7", roll),
+            (tr.win_playlist, "F5", Tab::Playlist),
+            (tr.win_rack, "F6", Tab::Rack),
+            (tr.win_roll, "F7", roll),
         ] {
             let open = self
                 .ws
@@ -510,16 +515,15 @@ impl App {
             .dock()
             .iter_all_tabs()
             .any(|(_, t)| *t == Tab::Mixer);
-        if check(ui, "Mixer", "F9", open) {
+        if check(ui, tr.win_mixer, "F9", open) {
             self.win(Cmd::Toggle(Tab::Mixer));
         }
-        if check(ui, "Browser", "Alt+F8", self.ws.browser) {
+        if check(ui, tr.win_browser, "Alt+F8", self.ws.browser) {
             self.ws.browser = !self.ws.browser;
         }
-        if check(ui, "Follow playhead", "", self.follow) {
+        if check(ui, tr.view_follow_playhead, "", self.follow) {
             self.follow = !self.follow;
         }
-        let tr = crate::i18n::strings(self.settings.general.language);
         ui.menu_button(RichText::new(tr.view_demo_mode).font(t::sans(13.0)), |ui| {
             kit::menu_style(ui);
             if item(ui, tr.show_arrange, "", true, "") {
@@ -529,65 +533,78 @@ impl App {
                 self.enter_show(super::show::ShowView::Notes, Some(ui.ctx()));
             }
         });
-        ui.menu_button(RichText::new("Deck monitor").font(t::sans(13.0)), |ui| {
+        ui.menu_button(
+            RichText::new(tr.view_deck_monitor).font(t::sans(13.0)),
+            |ui| {
+                kit::menu_style(ui);
+                for mode in crate::settings::DeckMonitor::ALL {
+                    if check(
+                        ui,
+                        tr.deck_monitor_label(mode),
+                        "",
+                        self.settings.general.deck_monitor == mode,
+                    ) {
+                        self.set_deck_monitor(mode);
+                    }
+                }
+            },
+        );
+        ui.separator();
+        ui.menu_button(RichText::new(tr.view_workspace).font(t::sans(13.0)), |ui| {
             kit::menu_style(ui);
-            for mode in crate::settings::DeckMonitor::ALL {
+            for i in 0..PRESETS.len() {
                 if check(
                     ui,
-                    mode.label(),
-                    "",
-                    self.settings.general.deck_monitor == mode,
+                    tr.workspace_preset(i),
+                    &format!("Alt+{}", i + 1),
+                    self.ws.active == i,
                 ) {
-                    self.set_deck_monitor(mode);
-                }
-            }
-        });
-        ui.separator();
-        ui.menu_button(RichText::new("Workspace").font(t::sans(13.0)), |ui| {
-            kit::menu_style(ui);
-            for (i, name) in PRESETS.iter().enumerate() {
-                if check(ui, name, &format!("Alt+{}", i + 1), self.ws.active == i) {
                     self.win(Cmd::Preset(i));
                 }
             }
             ui.separator();
-            if item(ui, "Reset this workspace", "", true, "") {
+            if item(ui, tr.view_reset_workspace, "", true, "") {
                 self.win(Cmd::Reset);
             }
         });
-        if item(ui, "Close all windows", "F12", true, "") {
+        if item(ui, tr.view_close_all, "F12", true, "") {
             self.close_all_windows();
         }
         ui.separator();
-        ui.menu_button(RichText::new("Theme").font(t::sans(13.0)), |ui| {
+        ui.menu_button(RichText::new(tr.view_theme).font(t::sans(13.0)), |ui| {
             kit::menu_style(ui);
             use crate::settings::ThemeMode;
             for mode in ThemeMode::ALL {
-                if check(ui, mode.label(), "", self.settings.general.theme == mode) {
+                if check(
+                    ui,
+                    tr.theme_mode_label(mode),
+                    "",
+                    self.settings.general.theme == mode,
+                ) {
                     self.settings.general.theme = mode;
                     self.save_settings();
                 }
             }
         });
-        ui.menu_button(RichText::new("Interface size").font(t::sans(13.0)), |ui| {
+        ui.menu_button(RichText::new(tr.view_ui_scale).font(t::sans(13.0)), |ui| {
             kit::menu_style(ui);
             use crate::settings::{UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALES, step_ui_scale};
             let z = ui.ctx().zoom_factor();
             if item(
                 ui,
-                "Larger",
+                tr.view_larger,
                 "Ctrl+=",
                 z < UI_SCALE_MAX - 0.001,
-                "Largest size",
+                tr.view_largest,
             ) {
                 ui.ctx().set_zoom_factor(step_ui_scale(z, true));
             }
             if item(
                 ui,
-                "Smaller",
+                tr.view_smaller,
                 "Ctrl+-",
                 z > UI_SCALE_MIN + 0.001,
-                "Smallest size",
+                tr.view_smallest,
             ) {
                 ui.ctx().set_zoom_factor(step_ui_scale(z, false));
             }
@@ -615,109 +632,102 @@ impl App {
 
     fn menu_options(&mut self, ui: &mut Ui) {
         kit::menu_style(ui);
-        if item(ui, "Audio settings…", "", true, "") {
+        let tr = self.tr();
+        if item(ui, tr.opt_audio, "", true, "") {
             self.open_settings(super::settings_ui::Page::Audio);
         }
-        if item(ui, "MIDI settings…", "F10", true, "") {
+        if item(ui, tr.opt_midi, "F10", true, "") {
             self.open_settings(super::settings_ui::Page::Midi);
         }
-        if item(ui, "Plugins…", "", true, "") {
+        if item(ui, tr.opt_plugins, "", true, "") {
             self.open_settings(super::settings_ui::Page::Plugins);
         }
-        if item(ui, "General settings…", "", true, "") {
+        if item(ui, tr.opt_general, "", true, "") {
             self.open_settings(super::settings_ui::Page::General);
         }
         ui.separator();
-        if check(ui, "Metronome", "Ctrl+M", self.settings.general.metronome) {
+        if check(
+            ui,
+            tr.opt_metronome,
+            "Ctrl+M",
+            self.settings.general.metronome,
+        ) {
             self.toggle_metronome();
         }
         if check(
             ui,
-            "Typing keyboard to piano",
+            tr.opt_typing_piano,
             "Ctrl+T",
             self.settings.general.typing_keyboard,
         ) {
             self.toggle_typing_piano();
         }
-        if check(ui, "Record automation", "", self.rec.automation) {
+        if check(ui, tr.opt_record_auto, "", self.rec.automation) {
             self.toggle_record_automation();
         }
-        if check(ui, "Record audio input (mic / line)", "", self.rec.input) {
+        if check(ui, tr.opt_record_input, "", self.rec.input) {
             self.toggle_input();
         }
         ui.separator();
-        if check(ui, "Song mode (play the playlist)", "L", self.song_mode) {
+        if check(ui, tr.opt_song_mode, "L", self.song_mode) {
             self.set_song_mode(!self.song_mode);
         }
     }
 
     fn menu_tools(&mut self, ui: &mut Ui) {
         kit::menu_style(ui);
+        let tr = self.tr();
         let last = self.last_tweaked_target();
         let last_name = last.map(|t| self.auto_label(t));
         ui.add_enabled_ui(last.is_some(), |ui| {
-            ui.menu_button(RichText::new("Last tweaked").font(t::sans(13.0)), |ui| {
-                kit::menu_style(ui);
-                if let Some(name) = &last_name {
-                    ui.label(RichText::new(name).font(t::sans(11.5)).color(t::muted()));
+            ui.menu_button(
+                RichText::new(tr.tools_last_tweaked).font(t::sans(13.0)),
+                |ui| {
+                    kit::menu_style(ui);
+                    if let Some(name) = &last_name {
+                        ui.label(RichText::new(name).font(t::sans(11.5)).color(t::muted()));
+                        ui.separator();
+                    }
+                    let Some(target) = last else {
+                        return;
+                    };
+                    if item(ui, tr.tools_create_auto, "", true, tr.tools_create_auto_tip) {
+                        self.create_automation(target);
+                    }
+                    if item(ui, tr.tools_link_ctrl, "", true, tr.tools_link_ctrl_tip) {
+                        self.start_midi_learn(target);
+                    }
                     ui.separator();
-                }
-                let Some(target) = last else {
-                    return;
-                };
-                if item(
-                    ui,
-                    "Create automation clip",
-                    "",
-                    true,
-                    "Add a playlist automation clip for this control",
-                ) {
-                    self.create_automation(target);
-                }
-                if item(
-                    ui,
-                    "Link to controller…",
-                    "",
-                    true,
-                    "Move a knob on your MIDI controller to link this control",
-                ) {
-                    self.start_midi_learn(target);
-                }
-                ui.separator();
-                if item(ui, "Copy value", "", true, "") {
-                    self.copy_last_tweaked(ui.ctx());
-                }
-                if item(
-                    ui,
-                    "Paste value",
-                    "",
-                    self.auto_clipboard.is_some(),
-                    "Copy a control value first",
-                ) {
-                    self.paste_last_tweaked();
-                }
-                if item(ui, "Reset to default", "", true, "") {
-                    self.reset_last_tweaked();
-                }
-            });
+                    if item(ui, tr.tools_copy_value, "", true, "") {
+                        self.copy_last_tweaked(ui.ctx());
+                    }
+                    if item(
+                        ui,
+                        tr.tools_paste_value,
+                        "",
+                        self.auto_clipboard.is_some(),
+                        tr.tools_paste_value_disabled,
+                    ) {
+                        self.paste_last_tweaked();
+                    }
+                    if item(ui, tr.tools_reset_default, "", true, "") {
+                        self.reset_last_tweaked();
+                    }
+                },
+            );
         })
         .response
-        .on_disabled_hover_text("Tweak any automatable knob, fader, or plugin parameter first");
-        if check(
-            ui,
-            "Multilink to controllers",
-            "Ctrl+J",
-            self.multilink.is_some(),
-        ) {
+        .on_disabled_hover_text(tr.tools_last_tweaked_disabled);
+        if check(ui, tr.tools_multilink, "Ctrl+J", self.multilink.is_some()) {
             self.toggle_multilink();
         }
         ui.separator();
         if item(
             ui,
-            "Riff Machine…",
+            tr.tools_riff_machine,
             "Alt+E",
             true,
-            "Generate a riff for the active channel",
+            tr.tools_riff_machine_tip,
         ) {
             let inst = self
                 .song
@@ -726,30 +736,30 @@ impl App {
             self.open_roll(inst);
             self.open_riff(inst);
         }
-        if item(ui, "Tap tempo", "", true, "") {
+        if item(ui, tr.tools_tap_tempo, "", true, "") {
             self.tap();
         }
-        if item(ui, "Panic: stop all sound", "Ctrl+H", true, "") {
+        if item(ui, tr.tools_panic, "Ctrl+H", true, "") {
             self.stop();
             self.panic();
-            self.say(Tone::Quiet, "All sound stopped.");
+            self.say(Tone::Quiet, tr.status_all_sound_stopped);
         }
     }
 
     fn menu_help(&mut self, ui: &mut Ui) {
         kit::menu_style(ui);
-        let tr = crate::i18n::strings(self.settings.general.language);
+        let tr = self.tr();
         if item(ui, tr.help_welcome, "", true, "") {
             self.welcome_open = true;
         }
-        if item(ui, "Demo song", "", true, "") {
+        if item(ui, tr.help_demo_song, "", true, "") {
             self.open_demo_song();
         }
         ui.separator();
-        if item(ui, "Keyboard shortcuts", "F1", true, "") {
+        if item(ui, tr.help_shortcuts, "F1", true, "") {
             self.show_shortcuts = true;
         }
-        if item(ui, "Manual", "", true, "") {
+        if item(ui, tr.help_manual, "", true, "") {
             self.show_manual = true;
         }
         if item(ui, tr.help_check_updates, "", true, "") {
@@ -764,19 +774,20 @@ impl App {
 
     /// The showcase song as a new, unsaved project (its voice joins the voicebanks).
     pub(crate) fn open_demo_song(&mut self) {
+        let tr = self.tr();
         let voice = keyframexl::demo::voice_dir();
         let voice = match keyframexl::demo::write_voice(&voice) {
             Ok(()) => Some(voice),
             Err(e) => {
                 self.say(
                     Tone::Bad,
-                    format!("Demo voice not written ({e}): the vocal stays muted"),
+                    crate::i18n::fill(tr.status_demo_voice_err, &[("err", &e.to_string())]),
                 );
                 None
             }
         };
         let song = keyframexl::demo::build(voice.as_deref());
-        self.load_welcome_song(song, "Demo song: 32 bars, press Space", false, None);
+        self.load_welcome_song(song, tr.status_demo_loaded, false, None);
         self.set_song_mode(true);
     }
 
@@ -796,12 +807,15 @@ impl App {
     /// Floating list of every shortcut (HELP → Keyboard shortcuts, F1).
     pub(super) fn shortcuts_window(&mut self, ctx: &egui::Context) {
         let mut open = self.show_shortcuts;
+        let tr = self.tr();
+        let lang = self.settings.general.language;
         let max_h = (ctx.screen_rect().height() - 140.0).max(200.0);
-        egui::Window::new("Keyboard shortcuts")
+        egui::Window::new(tr.help_shortcuts)
+            .id(egui::Id::new("kfxl-shortcuts-window"))
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
-            .default_width(460.0)
+            .default_width(480.0)
             .max_height(max_h)
             .anchor(egui::Align2::CENTER_TOP, vec2(0.0, 70.0))
             .show(ctx, |ui| {
@@ -809,18 +823,18 @@ impl App {
                 let mut filter: String = ui.data(|d| d.get_temp(filter_id)).unwrap_or_default();
                 ui.add(
                     egui::TextEdit::singleline(&mut filter)
-                        .hint_text("Filter: key or action")
+                        .hint_text(tr.shortcuts_filter_hint)
                         .desired_width(f32::INFINITY),
                 );
                 ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
                 let want = filter.to_lowercase();
-                if ui.button("Full manual").clicked() {
+                if ui.button(tr.shortcuts_full_manual).clicked() {
                     self.show_manual = true;
                 }
                 egui::ScrollArea::vertical()
                     .max_height(max_h - 90.0)
                     .show(ui, |ui| {
-                        for g in super::shortcuts::GROUPS {
+                        for g in super::shortcuts::groups(lang) {
                             let rows: Vec<_> = g
                                 .rows
                                 .iter()
@@ -873,13 +887,21 @@ impl App {
         if !ctx.data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
             return;
         }
+        let tr = self.tr();
         let mut open = true;
         let mut close = false;
-        let audio = self.audio.as_ref().map(|a| match a.running.buffer {
-            Some(b) => format!("Audio: {} Hz · buffer {b}", a.running.rate),
-            None => format!("Audio: {} Hz · buffer default", a.running.rate),
+        let audio = self.audio.as_ref().map(|a| {
+            let rate = a.running.rate.to_string();
+            match a.running.buffer {
+                Some(b) => crate::i18n::fill(
+                    tr.about_audio_buf,
+                    &[("rate", &rate), ("buf", &b.to_string())],
+                ),
+                None => crate::i18n::fill(tr.about_audio_default, &[("rate", &rate)]),
+            }
         });
-        egui::Window::new("About KeyFrameXL")
+        egui::Window::new(tr.help_about)
+            .id(egui::Id::new("kfxl-about-window"))
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
@@ -906,9 +928,12 @@ impl App {
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 6.0;
                             ui.label(
-                                RichText::new(format!("Version {}", keyframexl::version::VERSION))
-                                    .font(t::mono(12.0))
-                                    .color(t::muted()),
+                                RichText::new(crate::i18n::fill(
+                                    tr.about_version,
+                                    &[("ver", keyframexl::version::VERSION)],
+                                ))
+                                .font(t::mono(12.0))
+                                .color(t::muted()),
                             );
                             if keyframexl::version::is_nightly() {
                                 super::settings_ui::nightly_badge(ui);
@@ -918,7 +943,7 @@ impl App {
                 });
                 ui.add_space(6.0);
                 ui.label(
-                    RichText::new("Pattern-based music sequencer for Linux.")
+                    RichText::new(tr.about_desc)
                         .font(t::sans(13.0))
                         .color(t::text()),
                 );
@@ -926,7 +951,7 @@ impl App {
                     ui.label(RichText::new(line).font(t::mono(12.0)).color(t::muted()));
                 }
                 ui.add_space(8.0);
-                if ui.button("Close").clicked() {
+                if ui.button(tr.common_close).clicked() {
                     close = true;
                 }
             });
@@ -941,9 +966,11 @@ impl App {
         let Some((id, mut text)) = self.renaming.take() else {
             return;
         };
+        let tr = self.tr();
         let mut done = false;
         let mut keep = true;
-        egui::Window::new("Rename pattern")
+        egui::Window::new(tr.rename_pattern_title)
+            .id(egui::Id::new("kfxl-rename-pattern-window"))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_TOP, vec2(0.0, 140.0))
@@ -961,25 +988,31 @@ impl App {
                     )
                 });
                 ui.horizontal(|ui| {
-                    if kit::button(ui, "Rename", kit::Kind::Primary, !text.trim().is_empty())
-                        .clicked()
+                    if kit::button(
+                        ui,
+                        tr.common_rename,
+                        kit::Kind::Primary,
+                        !text.trim().is_empty(),
+                    )
+                    .clicked()
                         || (enter && !text.trim().is_empty())
                     {
                         done = true;
                     }
-                    if kit::button(ui, "Cancel", kit::Kind::Normal, true).clicked() || esc {
+                    if kit::button(ui, tr.common_cancel, kit::Kind::Normal, true).clicked() || esc {
                         keep = false;
                     }
                 });
             });
         if done {
             self.checkpoint();
+            let trimmed = text.trim().to_string();
             if let Some(p) = self.song.pattern_mut(id) {
-                p.name = text.trim().to_string();
+                p.name = trimmed.clone();
             }
             self.say(
                 Tone::Quiet,
-                format!("Pattern renamed to {}. Ctrl+Z undoes.", text.trim()),
+                crate::i18n::fill(tr.status_pattern_renamed, &[("name", &trimmed)]),
             );
         } else if keep {
             self.renaming = Some((id, text));

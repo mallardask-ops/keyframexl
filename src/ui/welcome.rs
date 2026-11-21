@@ -7,6 +7,7 @@
 //! in a headless egui context for tests.
 
 use super::kit;
+use crate::i18n::Strings;
 use crate::theme as t;
 use eframe::egui::{
     self, Align, Align2, CornerRadius, Layout, Rect, RichText, Sense, Stroke, Ui, UiBuilder, pos2,
@@ -21,140 +22,7 @@ use keyframexl::{
 };
 use std::path::{Path, PathBuf};
 
-// ------------------------------------------------------------------ copy
-
-/// Every label on the screen, so the caller can hand in translated text.
-#[derive(Clone, Debug, PartialEq)]
-pub struct WelcomeCopy {
-    pub window_title: &'static str,
-    pub title: &'static str,
-    pub subtitle: &'static str,
-    pub close_hint: &'static str,
-    pub update_badge: &'static str,
-    pub update_hint: &'static str,
-    pub recent_heading: &'static str,
-    pub recent_empty: &'static str,
-    pub recent_missing: &'static str,
-    pub recent_missing_hint: &'static str,
-    pub btn_new: &'static str,
-    pub btn_open: &'static str,
-    pub btn_open_empty: &'static str,
-    pub btn_import_bundle: &'static str,
-    pub btn_import_flp: &'static str,
-    pub btn_settings: &'static str,
-    pub templates_heading: &'static str,
-    pub tab_templates: &'static str,
-    pub tab_tide: &'static str,
-    pub tab_forge: &'static str,
-    pub search_hint: &'static str,
-    pub no_match: &'static str,
-    pub show_on_startup: &'static str,
-    pub continue_btn: &'static str,
-    pub template_titles: [&'static str; 6],
-    pub template_descs: [&'static str; 6],
-}
-
-impl WelcomeCopy {
-    pub fn english() -> Self {
-        Self {
-            window_title: "Welcome to KeyFrameXL",
-            title: "KeyFrameXL",
-            subtitle: "Pattern-based studio for beats, synths, voices and game sounds",
-            close_hint: "Close (Esc)",
-            update_badge: "Update available",
-            update_hint: "A newer release is on GitHub. Click to see what changed.",
-            recent_heading: "Recent projects",
-            recent_empty: "No recent projects yet. Open a .kfxl file or start from a template.",
-            recent_missing: "Missing",
-            recent_missing_hint: "This file was moved or deleted",
-            btn_new: "New project",
-            btn_open: "Open .kfxl…",
-            btn_open_empty: "Open a project…",
-            btn_import_bundle: "Import bundle (.zip)…",
-            btn_import_flp: "Import FL Studio (.flp)…",
-            btn_settings: "Audio & MIDI settings (F10)",
-            templates_heading: "Start something new",
-            tab_templates: "Templates",
-            tab_tide: "Tide presets",
-            tab_forge: "Forge SFX",
-            search_hint: "Search by name",
-            no_match: "Nothing matches that search.",
-            show_on_startup: "Show welcome screen on startup",
-            continue_btn: "Continue to workspace",
-            template_titles: [
-                "Empty beat",
-                "Demo beat",
-                "Tide studio",
-                "Forge SFX bench",
-                "Vocal session",
-                "Blank sampler",
-            ],
-            template_descs: [
-                "Kick, snare, hat and a sampler bass on an empty pattern.",
-                "The same rack with a groove written in. Press Space.",
-                "Beat rack plus a Soft Pad and a Bass on their own inserts.",
-                "One game-sound channel with a master limiter, ready to design.",
-                "Beat rack plus a singing channel with EQ, compressor and reverb.",
-                "A single sampler channel and nothing else.",
-            ],
-        }
-    }
-
-    pub fn for_language(lang: crate::i18n::Language) -> Self {
-        let s = crate::i18n::strings(lang);
-        match lang {
-            crate::i18n::Language::English => Self::english(),
-            crate::i18n::Language::Ukrainian => Self {
-                window_title: s.welcome_window_title,
-                title: "KeyFrameXL",
-                subtitle: s.welcome_subtitle,
-                close_hint: "Закрити (Esc)",
-                update_badge: s.welcome_update_badge,
-                update_hint: "На GitHub є новіший реліз. Натисніть, щоб переглянути зміни.",
-                recent_heading: s.welcome_recent_heading,
-                recent_empty: s.welcome_recent_empty,
-                recent_missing: s.welcome_recent_missing,
-                recent_missing_hint: "Цей файл переміщено або видалено",
-                btn_new: s.welcome_new_project,
-                btn_open: s.welcome_open_project,
-                btn_open_empty: s.welcome_open_project,
-                btn_import_bundle: s.welcome_import_bundle,
-                btn_import_flp: s.welcome_import_flp,
-                btn_settings: s.welcome_settings,
-                templates_heading: s.welcome_templates_heading,
-                tab_templates: s.welcome_tab_templates,
-                tab_tide: s.welcome_tab_tide,
-                tab_forge: s.welcome_tab_forge,
-                search_hint: s.welcome_search_presets,
-                no_match: "Нічого не знайдено за цим запитом.",
-                show_on_startup: s.welcome_show_on_startup,
-                continue_btn: s.welcome_continue,
-                template_titles: [
-                    s.tpl_beat_title,
-                    s.tpl_demo_title,
-                    s.tpl_tide_title,
-                    s.tpl_forge_title,
-                    s.tpl_vocal_title,
-                    s.tpl_blank_title,
-                ],
-                template_descs: [
-                    s.tpl_beat_desc,
-                    s.tpl_demo_desc,
-                    s.tpl_tide_desc,
-                    s.tpl_forge_desc,
-                    s.tpl_vocal_desc,
-                    s.tpl_blank_desc,
-                ],
-            },
-        }
-    }
-}
-
-impl Default for WelcomeCopy {
-    fn default() -> Self {
-        Self::english()
-    }
-}
+const BRAND_TITLE: &str = "KeyFrameXL"; // i18n: ignore
 
 // ------------------------------------------------------------- templates
 
@@ -178,20 +46,20 @@ impl TemplateKind {
         TemplateKind::BlankMinimal,
     ];
 
-    pub fn index(self) -> usize {
-        Self::ALL.iter().position(|k| *k == self).unwrap_or(0)
+    pub fn channel_count(self) -> usize {
+        match self {
+            TemplateKind::EmptyBeat => 4,
+            TemplateKind::DemoBeat => 4,
+            TemplateKind::TideStudio => 6,
+            TemplateKind::ForgeSfx => 1,
+            TemplateKind::VocalSession => 5,
+            TemplateKind::BlankMinimal => 1,
+        }
     }
 
     /// Channel count and tempo, as the card prints them.
-    pub fn tag(self) -> &'static str {
-        match self {
-            TemplateKind::EmptyBeat => "4 CH · 120 BPM",
-            TemplateKind::DemoBeat => "4 CH · 120 BPM",
-            TemplateKind::TideStudio => "6 CH · 120 BPM",
-            TemplateKind::ForgeSfx => "1 CH · 120 BPM",
-            TemplateKind::VocalSession => "5 CH · 120 BPM",
-            TemplateKind::BlankMinimal => "1 CH · 120 BPM",
-        }
+    pub fn tag(self, tr: &Strings) -> String {
+        format!("{} {} · 120 BPM", self.channel_count(), tr.tpl_tag_ch)
     }
 
     /// Address colour of the card's stripe.
@@ -393,7 +261,7 @@ const LIST_ROW_H: f32 = 34.0;
 pub fn show_welcome(
     ctx: &egui::Context,
     state: &mut WelcomeState,
-    copy: &WelcomeCopy,
+    tr: &Strings,
     recent: &[PathBuf],
     show_on_startup: &mut bool,
     update_version: Option<&str>,
@@ -415,9 +283,9 @@ pub fn show_welcome(
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
             let (modal, r) = ui.allocate_exact_size(size, Sense::hover());
             r.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Other, true, copy.window_title)
+                egui::WidgetInfo::labeled(egui::WidgetType::Other, true, tr.welcome_window_title)
             });
-            header(ui, modal, copy, update_version, &mut action);
+            header(ui, modal, tr, update_version, &mut action);
             let body_top = modal.top() + HEADER_H;
             let body_bottom = modal.bottom() - FOOTER_H;
             let left = Rect::from_min_max(
@@ -428,9 +296,9 @@ pub fn show_welcome(
                 pos2(left.right(), body_top),
                 pos2(modal.right(), body_bottom),
             );
-            left_column(ui, left, copy, recent, &mut action);
-            right_column(ui, right, state, copy, &mut action);
-            footer(ui, modal, copy, show_on_startup, &mut action);
+            left_column(ui, left, tr, recent, &mut action);
+            right_column(ui, right, state, tr, &mut action);
+            footer(ui, modal, tr, show_on_startup, &mut action);
         });
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         action.get_or_insert(WelcomeAction::Close);
@@ -450,7 +318,7 @@ fn top_corners(r: u8) -> CornerRadius {
 fn header(
     ui: &mut Ui,
     modal: Rect,
-    copy: &WelcomeCopy,
+    tr: &Strings,
     update_version: Option<&str>,
     action: &mut Option<WelcomeAction>,
 ) {
@@ -469,11 +337,11 @@ fn header(
         Rect::from_center_size(pos2(h.left() + PAD + 20.0, h.center().y), vec2(40.0, 40.0)),
     );
     let x = h.left() + PAD + 40.0 + 14.0;
-    let title_w = kit::text_width(&p, copy.title, t::semibold(20.0));
+    let title_w = kit::text_width(&p, BRAND_TITLE, t::semibold(20.0));
     p.text(
         pos2(x, h.top() + 11.0),
         Align2::LEFT_TOP,
-        copy.title,
+        BRAND_TITLE,
         t::semibold(20.0),
         t::text(),
     );
@@ -513,7 +381,7 @@ fn header(
     p.text(
         pos2(x, h.top() + 40.0),
         Align2::LEFT_TOP,
-        copy.subtitle,
+        tr.welcome_subtitle,
         t::sans(12.0),
         t::muted(),
     );
@@ -527,7 +395,7 @@ fn header(
         &r,
         kit::Kind::Ghost,
         true,
-        "Close",
+        tr.common_close,
         |p, face, ink| {
             p.text(
                 face.center() - vec2(0.0, 1.0),
@@ -538,12 +406,12 @@ fn header(
             );
         },
     );
-    if kit::tip(r.clone(), copy.close_hint).clicked() {
+    if kit::tip(r.clone(), tr.welcome_close_hint).clicked() {
         action.get_or_insert(WelcomeAction::Close);
     }
 
     if let Some(v) = update_version {
-        let label = format!("{} · v{v}", copy.update_badge);
+        let label = format!("{} · v{v}", tr.welcome_update_badge);
         let font = t::mono(12.0);
         let w = kit::text_width(&p, &label, font.clone()) + 20.0;
         let pill = Rect::from_center_size(
@@ -563,7 +431,7 @@ fn header(
         if kit::show_focus(ui, &r) {
             kit::focus_ring(&p, pill, 6.0);
         }
-        if kit::tip(r.clone(), copy.update_hint).clicked() {
+        if kit::tip(r.clone(), tr.welcome_update_hint).clicked() {
             action.get_or_insert(WelcomeAction::OpenUpdater);
         }
     }
@@ -572,7 +440,7 @@ fn header(
 fn footer(
     ui: &mut Ui,
     modal: Rect,
-    copy: &WelcomeCopy,
+    tr: &Strings,
     show_on_startup: &mut bool,
     action: &mut Option<WelcomeAction>,
 ) {
@@ -598,7 +466,7 @@ fn footer(
 
     // Checkbox: sunken box, a check when on.
     let bx = Rect::from_center_size(pos2(f.left() + PAD + 9.0, f.center().y), vec2(18.0, 18.0));
-    let label_w = kit::text_width(&p, copy.show_on_startup, t::sans(13.0));
+    let label_w = kit::text_width(&p, tr.welcome_show_on_startup, t::sans(13.0));
     let hit = Rect::from_min_max(
         pos2(bx.left() - 2.0, f.top() + 6.0),
         pos2(bx.right() + 10.0 + label_w + 4.0, f.bottom() - 6.0),
@@ -609,7 +477,7 @@ fn footer(
             egui::WidgetType::Checkbox,
             true,
             *show_on_startup,
-            copy.show_on_startup,
+            tr.welcome_show_on_startup,
         )
     });
     kit::sunken(&p, bx, 4.0);
@@ -622,7 +490,7 @@ fn footer(
     p.text(
         pos2(bx.right() + 10.0, f.center().y),
         Align2::LEFT_CENTER,
-        copy.show_on_startup,
+        tr.welcome_show_on_startup,
         t::sans(13.0),
         if r.hovered() { t::text() } else { t::muted() },
     );
@@ -635,13 +503,13 @@ fn footer(
 
     // Continue: a plain button, the one red action lives on the left.
     let font = t::sans(14.0);
-    let w = kit::text_width(&p, copy.continue_btn, font.clone()) + 32.0;
+    let w = kit::text_width(&p, tr.welcome_continue, font.clone()) + 32.0;
     let rect = Rect::from_center_size(
         pos2(f.right() - PAD - w / 2.0, f.center().y),
         vec2(w, kit::CONTROL_H),
     );
     let mut child = ui.new_child(UiBuilder::new().max_rect(rect));
-    if kit::button(&mut child, copy.continue_btn, kit::Kind::Normal, true).clicked() {
+    if kit::button(&mut child, tr.welcome_continue, kit::Kind::Normal, true).clicked() {
         action.get_or_insert(WelcomeAction::Close);
     }
 }
@@ -651,7 +519,7 @@ fn footer(
 fn left_column(
     ui: &mut Ui,
     col: Rect,
-    copy: &WelcomeCopy,
+    tr: &Strings,
     recent: &[PathBuf],
     action: &mut Option<WelcomeAction>,
 ) {
@@ -678,7 +546,7 @@ fn left_column(
         &p,
         pos2(inner.left(), inner.top() + 9.0),
         Align2::LEFT_CENTER,
-        copy.recent_heading,
+        tr.welcome_recent_heading,
         12.0,
         t::muted(),
     );
@@ -687,15 +555,15 @@ fn left_column(
     let actions = Rect::from_min_max(pos2(inner.left(), inner.bottom() - ACTIONS_H), inner.max);
     let mut aui = ui.new_child(UiBuilder::new().max_rect(actions));
     aui.spacing_mut().item_spacing = vec2(0.0, ACTION_GAP);
-    if brand_button(&mut aui, copy.btn_new, inner.width()).clicked() {
+    if brand_button(&mut aui, tr.welcome_new_project, inner.width()).clicked() {
         action.get_or_insert(WelcomeAction::NewProject);
     }
     aui.add_space(GAP - ACTION_GAP);
     let rows = [
-        (copy.btn_open, WelcomeAction::OpenProject),
-        (copy.btn_import_bundle, WelcomeAction::ImportBundle),
-        (copy.btn_import_flp, WelcomeAction::ImportFlp),
-        (copy.btn_settings, WelcomeAction::OpenSettings),
+        (tr.welcome_open_project, WelcomeAction::OpenProject),
+        (tr.welcome_import_bundle, WelcomeAction::ImportBundle),
+        (tr.welcome_import_flp, WelcomeAction::ImportFlp),
+        (tr.welcome_settings, WelcomeAction::OpenSettings),
     ];
     for (label, act) in rows {
         let r = kit::button_sized(
@@ -731,11 +599,11 @@ fn left_column(
     if recent.is_empty() {
         lui.spacing_mut().item_spacing = vec2(0.0, 10.0);
         lui.label(
-            RichText::new(copy.recent_empty)
+            RichText::new(tr.welcome_recent_empty)
                 .font(t::sans(13.0))
                 .color(t::muted()),
         );
-        if kit::button(&mut lui, copy.btn_open_empty, kit::Kind::Normal, true).clicked() {
+        if kit::button(&mut lui, tr.welcome_open_empty, kit::Kind::Normal, true).clicked() {
             action.get_or_insert(WelcomeAction::OpenProject);
         }
         return;
@@ -746,7 +614,7 @@ fn left_column(
         .show(&mut lui, |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, 2.0);
             for (i, path) in recent.iter().enumerate() {
-                if recent_row(ui, i, path, copy) {
+                if recent_row(ui, i, path, tr) {
                     action.get_or_insert(WelcomeAction::OpenRecent(path.clone()));
                 }
             }
@@ -798,7 +666,7 @@ fn short_dir(path: &Path) -> String {
     dir.display().to_string()
 }
 
-fn recent_row(ui: &mut Ui, i: usize, path: &Path, copy: &WelcomeCopy) -> bool {
+fn recent_row(ui: &mut Ui, i: usize, path: &Path, tr: &Strings) -> bool {
     let (rect, r) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::click());
     let missing = !path.exists();
     let stem = path
@@ -812,7 +680,7 @@ fn recent_row(ui: &mut Ui, i: usize, path: &Path, copy: &WelcomeCopy) -> bool {
         p.rect_filled(rect, 6.0, t::selection());
     }
     let badge_w = if missing {
-        kit::text_width(p, &copy.recent_missing.to_uppercase(), t::mono(12.0)) + 16.0
+        kit::text_width(p, &tr.welcome_recent_missing.to_uppercase(), t::mono(12.0)) + 16.0
     } else {
         0.0
     };
@@ -838,7 +706,7 @@ fn recent_row(ui: &mut Ui, i: usize, path: &Path, copy: &WelcomeCopy) -> bool {
             p,
             pos2(rect.right() - 10.0, rect.top() + 14.0),
             Align2::RIGHT_CENTER,
-            copy.recent_missing,
+            tr.welcome_recent_missing,
             12.0,
             t::bad(),
         );
@@ -847,7 +715,7 @@ fn recent_row(ui: &mut Ui, i: usize, path: &Path, copy: &WelcomeCopy) -> bool {
         kit::focus_ring(ui.painter(), rect, 6.0);
     }
     if missing {
-        kit::tip(r.clone(), copy.recent_missing_hint);
+        kit::tip(r.clone(), tr.welcome_recent_missing_hint);
     } else {
         kit::tip(r.clone(), path.display().to_string());
     }
@@ -860,7 +728,7 @@ fn right_column(
     ui: &mut Ui,
     col: Rect,
     state: &mut WelcomeState,
-    copy: &WelcomeCopy,
+    tr: &Strings,
     action: &mut Option<WelcomeAction>,
 ) {
     let p = ui.painter().clone();
@@ -869,7 +737,7 @@ fn right_column(
         &p,
         pos2(inner.left(), inner.top() + 9.0),
         Align2::LEFT_CENTER,
-        copy.templates_heading,
+        tr.welcome_templates_heading,
         12.0,
         t::muted(),
     );
@@ -883,12 +751,12 @@ fn right_column(
     );
     rui.spacing_mut().item_spacing = vec2(GAP, GAP);
 
-    let tide_label = format!("{} ({})", copy.tab_tide, SynthPatch::PRESETS.len());
+    let tide_label = format!("{} ({})", tr.welcome_tab_tide, SynthPatch::PRESETS.len());
     let tabs = [
-        copy.tab_templates,
-        "Genres",
+        tr.welcome_tab_templates,
+        tr.welcome_tab_genres,
         tide_label.as_str(),
-        copy.tab_forge,
+        tr.welcome_tab_forge,
     ];
     let selected = match state.tab {
         WelcomeTab::Templates => 0,
@@ -922,7 +790,7 @@ fn right_column(
                     for pair in TemplateKind::ALL.chunks(2) {
                         ui.horizontal(|ui| {
                             for kind in pair {
-                                if template_card(ui, *kind, copy, w) {
+                                if template_card(ui, *kind, tr, w) {
                                     action.get_or_insert(WelcomeAction::LoadTemplate(*kind));
                                 }
                             }
@@ -948,7 +816,14 @@ fn right_column(
                                 .iter()
                                 .position(|x| x == g)
                                 .unwrap_or(0)];
-                            if card(ui, g.title(), g.blurb(), &song_tag, accent, w) {
+                            if card(
+                                ui,
+                                tr.genre_title(*g),
+                                tr.genre_blurb(*g),
+                                &song_tag,
+                                accent,
+                                w,
+                            ) {
                                 action.get_or_insert(WelcomeAction::LoadGenre(*g));
                             }
                         }
@@ -958,7 +833,7 @@ fn right_column(
         return;
     }
 
-    search_field(&mut rui, &mut state.query, copy);
+    search_field(&mut rui, &mut state.query, tr);
     let q = state.query.trim().to_lowercase();
     let names: Vec<&'static str> = if state.tab == WelcomeTab::Tide {
         SynthPatch::PRESETS.to_vec()
@@ -984,7 +859,7 @@ fn right_column(
         .show(&mut rui, |ui| {
             if items.is_empty() {
                 ui.label(
-                    RichText::new(copy.no_match)
+                    RichText::new(tr.welcome_no_match)
                         .font(t::sans(13.0))
                         .color(t::muted()),
                 );
@@ -1014,7 +889,7 @@ fn right_column(
     }
 }
 
-fn search_field(ui: &mut Ui, query: &mut String, copy: &WelcomeCopy) {
+fn search_field(ui: &mut Ui, query: &mut String, tr: &Strings) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
     let p = ui.painter().clone();
     kit::sunken(&p, rect, kit::RADIUS);
@@ -1025,7 +900,7 @@ fn search_field(ui: &mut Ui, query: &mut String, copy: &WelcomeCopy) {
             .frame(false)
             .font(t::sans(13.0))
             .hint_text(
-                RichText::new(copy.search_hint)
+                RichText::new(tr.welcome_search_presets)
                     .font(t::sans(13.0))
                     .color(t::faint()),
             )
@@ -1034,13 +909,13 @@ fn search_field(ui: &mut Ui, query: &mut String, copy: &WelcomeCopy) {
     );
 }
 
-fn template_card(ui: &mut Ui, kind: TemplateKind, copy: &WelcomeCopy, w: f32) -> bool {
-    let i = kind.index();
+fn template_card(ui: &mut Ui, kind: TemplateKind, tr: &Strings, w: f32) -> bool {
+    let tag = kind.tag(tr);
     card(
         ui,
-        copy.template_titles[i],
-        copy.template_descs[i],
-        kind.tag(),
+        tr.template_title(kind),
+        tr.template_desc(kind),
+        &tag,
         kind.accent(),
         w,
     )
@@ -1186,13 +1061,16 @@ mod tests {
 
     #[test]
     fn copy_covers_every_template_and_tags_match_the_songs() {
-        let copy = WelcomeCopy::english();
-        for (i, kind) in TemplateKind::ALL.iter().enumerate() {
-            assert_eq!(kind.index(), i);
-            assert!(!copy.template_titles[i].is_empty());
-            assert!(!copy.template_descs[i].is_empty());
-            let n = build_template(*kind).instruments.len();
-            assert!(kind.tag().starts_with(&format!("{n} CH")), "{kind:?}");
+        for tr in [&crate::i18n::EN, &crate::i18n::UK] {
+            for kind in TemplateKind::ALL {
+                assert!(!tr.template_title(kind).is_empty());
+                assert!(!tr.template_desc(kind).is_empty());
+                let n = build_template(kind).instruments.len();
+                assert!(
+                    kind.tag(tr).starts_with(&format!("{n} {}", tr.tpl_tag_ch)),
+                    "{kind:?}"
+                );
+            }
         }
     }
 
@@ -1239,11 +1117,10 @@ mod tests {
         events: Vec<Event>,
         update: Option<&str>,
     ) -> Option<WelcomeAction> {
-        let copy = WelcomeCopy::english();
         let mut startup = true;
         let mut out = None;
         let _ = ctx.run(input(events), |ctx| {
-            out = show_welcome(ctx, state, &copy, recent, &mut startup, update);
+            out = show_welcome(ctx, state, &crate::i18n::EN, recent, &mut startup, update);
         });
         out
     }
@@ -1258,7 +1135,12 @@ mod tests {
             PathBuf::from("/nonexistent/folder/lost song.kfxl"),
             dirs::home_dir().unwrap_or_default().join("beat.kfxl"),
         ];
-        for tab in [WelcomeTab::Templates, WelcomeTab::Tide, WelcomeTab::Forge] {
+        for tab in [
+            WelcomeTab::Templates,
+            WelcomeTab::Genres,
+            WelcomeTab::Tide,
+            WelcomeTab::Forge,
+        ] {
             for recent in [&[][..], &populated[..]] {
                 for update in [None, Some("9.9.9")] {
                     let mut state = WelcomeState {
@@ -1282,7 +1164,6 @@ mod tests {
     fn small_windows_do_not_panic() {
         let ctx = egui::Context::default();
         t::setup(&ctx);
-        let copy = WelcomeCopy::english();
         let mut state = WelcomeState::default();
         let mut startup = false;
         let raw = egui::RawInput {
@@ -1290,7 +1171,7 @@ mod tests {
             ..Default::default()
         };
         let _ = ctx.run(raw, |ctx| {
-            show_welcome(ctx, &mut state, &copy, &[], &mut startup, None);
+            show_welcome(ctx, &mut state, &crate::i18n::UK, &[], &mut startup, None);
         });
     }
 

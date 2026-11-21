@@ -1021,18 +1021,19 @@ pub fn take_tweaked(ctx: &egui::Context) -> Vec<keyframexl::automation::Target> 
 /// "Create automation clip" plus "Link to controller…" for any control's own
 /// context menu.
 pub fn auto_menu_item(ui: &mut Ui, target: keyframexl::automation::Target) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     menu_style(ui);
     if ui
-        .button("Create automation clip")
-        .on_hover_text("An envelope in the playlist that moves this control in Song mode")
+        .button(tr.kit_create_auto)
+        .on_hover_text(tr.kit_create_auto_tip)
         .clicked()
     {
         ui.data_mut(|d| d.insert_temp(egui::Id::new(AUTO_REQUEST), target));
         ui.close_menu();
     }
     if ui
-        .button("Link to controller…")
-        .on_hover_text("Move a knob on your controller to drive this control")
+        .button(tr.kit_link_ctrl)
+        .on_hover_text(tr.kit_link_ctrl_tip)
         .clicked()
     {
         ui.data_mut(|d| d.insert_temp(egui::Id::new(LEARN_REQUEST), target));
@@ -1114,29 +1115,34 @@ fn knob_behaviour(
         set = Some(k.default);
     }
     let shown_now = (k.fmt)(*value);
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     r.context_menu(|ui| {
         menu_style(ui);
+        let default_shown = (k.fmt)(k.default);
         if ui
-            .button("Reset")
-            .on_hover_text(format!("Back to {}", (k.fmt)(k.default)))
+            .button(tr.kit_reset)
+            .on_hover_text(crate::i18n::fill(
+                tr.kit_reset_back_to,
+                &[("value", &default_shown)],
+            ))
             .clicked()
         {
             set = Some(k.default);
             ui.close_menu();
         }
-        if ui.button("Type in value…").clicked() {
+        if ui.button(tr.kit_type_value).clicked() {
             mem.typing = Some(shown_now.clone());
             mem.bad = false;
             ui.close_menu();
         }
         ui.separator();
-        if ui.button("Copy value").clicked() {
+        if ui.button(tr.kit_copy_value).clicked() {
             ui.ctx().data_mut(|d| d.insert_temp(clip_id(), *value));
             ui.ctx().copy_text(shown_now.clone());
             ui.close_menu();
         }
         let copied: Option<f64> = ui.ctx().data(|d| d.get_temp(clip_id()));
-        let paste = ui.add_enabled(copied.is_some(), egui::Button::new("Paste value"));
+        let paste = ui.add_enabled(copied.is_some(), egui::Button::new(tr.kit_paste_value));
         if let Some(v) = copied
             && paste.clicked()
         {
@@ -1147,10 +1153,10 @@ fn knob_behaviour(
         match auto {
             Some(target) => auto_menu_item(ui, target),
             None => {
-                ui.add_enabled(false, egui::Button::new("Create automation clip"))
-                    .on_disabled_hover_text("This control cannot be automated yet");
-                ui.add_enabled(false, egui::Button::new("Link to controller…"))
-                    .on_disabled_hover_text("This control cannot be linked yet");
+                ui.add_enabled(false, egui::Button::new(tr.kit_create_auto))
+                    .on_disabled_hover_text(tr.kit_auto_unavailable);
+                ui.add_enabled(false, egui::Button::new(tr.kit_link_ctrl))
+                    .on_disabled_hover_text(tr.kit_link_unavailable);
             }
         }
     });
@@ -1312,12 +1318,13 @@ pub fn knob(ui: &mut Ui, k: &Knob, value: &mut f64) -> (Response, bool, bool) {
     let (started, changed, typing) =
         knob_behaviour(ui, &mut r, k, value, TypeAt::InPlace(value_rect));
     let shown = (k.fmt)(*value);
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     r.widget_info(|| egui::WidgetInfo::slider(true, *value, format!("{} {}", k.label, shown)));
     let r = tip(
         r,
         format!(
-            "{} {}\n{}\nDrag or wheel · Shift fine · Double-click resets · Right-click for more",
-            k.label, shown, k.hint
+            "{} {}\n{}\n{}",
+            k.label, shown, k.hint, tr.kit_knob_tip_footer
         ),
     );
     paint_encoder(

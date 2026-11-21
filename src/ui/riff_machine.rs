@@ -1,8 +1,9 @@
 use super::{App, Cmd, Tab, Tone, kit};
+use crate::i18n::fill;
 use crate::theme as t;
 use eframe::egui::{self, Ui};
 use keyframexl::{
-    riff::{DIRECTIONS, PROGRESSIONS, RATES, Recipe, STAGES},
+    riff::Recipe,
     scale::{Kind, ROOTS},
     sequence::{BAR, MAX_BARS, Note, STEP, Tick},
 };
@@ -78,98 +79,110 @@ fn slider(ui: &mut Ui, label: &str, v: &mut u8, range: std::ops::RangeInclusive<
     ui.add(egui::Slider::new(v, range).text(label));
 }
 fn controls(ui: &mut Ui, r: &mut Recipe, tab: usize) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     match tab {
         0 => {
-            choice(ui, "Progression", &mut r.progression, &PROGRESSIONS);
-            slider(ui, "Changes per bar", &mut r.changes, 1..=4);
+            choice(
+                ui,
+                tr.riff_progression,
+                &mut r.progression,
+                &tr.riff_progressions(),
+            );
+            slider(ui, tr.riff_changes, &mut r.changes, 1..=4);
         }
         1 => {
-            slider(ui, "Chord voices", &mut r.voices, 2..=5);
+            slider(ui, tr.riff_chord_voices, &mut r.voices, 2..=5);
             r.inversion = r.inversion.min(r.voices - 1);
-            slider(ui, "Inversion", &mut r.inversion, 0..=r.voices - 1);
+            slider(ui, tr.riff_inversion, &mut r.inversion, 0..=r.voices - 1);
         }
         2 => {
-            choice(ui, "Rhythm", &mut r.rhythm, &keyframexl::riff::RHYTHMS);
-            choice(ui, "Direction", &mut r.direction, &DIRECTIONS);
-            choice(ui, "Division", &mut r.rate, &RATES.map(|r| r.0));
-            slider(ui, "Octaves", &mut r.octaves, 1..=3);
-            ui.checkbox(&mut r.continuous, "Continue across chords");
+            choice(ui, tr.riff_rhythm, &mut r.rhythm, &tr.riff_rhythms());
+            choice(
+                ui,
+                tr.riff_direction,
+                &mut r.direction,
+                &tr.riff_directions(),
+            );
+            choice(ui, tr.riff_division, &mut r.rate, &tr.riff_rates());
+            slider(ui, tr.riff_octaves, &mut r.octaves, 1..=3);
+            ui.checkbox(&mut r.continuous, tr.riff_continue);
         }
         3 => {
-            ui.checkbox(&mut r.reverse, "Reverse time");
-            ui.checkbox(&mut r.invert, "Invert pitches");
+            ui.checkbox(&mut r.reverse, tr.riff_reverse);
+            ui.checkbox(&mut r.invert, tr.riff_invert);
         }
         4 => {
             for (name, val, max) in [
-                ("Velocity", &mut r.velocity, 64),
-                ("Pan spread", &mut r.pan, 100),
-                ("Release", &mut r.release, 100),
-                ("Fine pitch · cents", &mut r.fine, 100),
-                ("Mod X", &mut r.mod_x, 100),
-                ("Mod Y", &mut r.mod_y, 100),
+                (tr.riff_velocity, &mut r.velocity, 64),
+                (tr.riff_pan_spread, &mut r.pan, 100),
+                (tr.riff_release, &mut r.release, 100),
+                (tr.riff_fine, &mut r.fine, 100),
+                (tr.riff_mod_x, &mut r.mod_x, 100),
+                (tr.riff_mod_y, &mut r.mod_y, 100),
             ] {
                 slider(ui, name, val, 0..=max);
             }
         }
         5 => {
-            slider(ui, "Length · %", &mut r.gate, 10..=180);
-            slider(ui, "Variation · %", &mut r.variation, 0..=60);
+            slider(ui, tr.riff_length_pct, &mut r.gate, 10..=180);
+            slider(ui, tr.riff_variation_pct, &mut r.variation, 0..=60);
         }
         6 => {
-            choice(ui, "Grid", &mut r.grid, &RATES.map(|it| it.0));
+            choice(ui, tr.riff_grid, &mut r.grid, &tr.riff_rates());
             choice(
                 ui,
-                "Timing",
+                tr.riff_timing,
                 &mut r.groove_end,
-                &["Keep length", "Keep end", "Snap end"],
+                &[tr.riff_keep_length, tr.riff_keep_end, tr.riff_snap_end],
             );
-            slider(ui, "Grid strength · %", &mut r.snap, 0..=100);
-            slider(ui, "Swing · %", &mut r.swing, 0..=75);
-            slider(ui, "Timing variation · ticks", &mut r.jitter, 0..=50);
+            slider(ui, tr.riff_grid_strength, &mut r.snap, 0..=100);
+            slider(ui, tr.riff_swing, &mut r.swing, 0..=75);
+            slider(ui, tr.riff_jitter, &mut r.jitter, 0..=50);
         }
         _ => {
             let mut root = r.scale.root as usize;
-            choice(ui, "Key", &mut root, &ROOTS);
+            choice(ui, tr.riff_key, &mut root, &ROOTS);
             r.scale.root = root as u8;
-            egui::ComboBox::from_label("Scale")
-                .selected_text(r.scale.kind.label())
+            egui::ComboBox::from_label(tr.riff_scale)
+                .selected_text(tr.scale_kind_label(r.scale.kind))
                 .show_ui(ui, |ui| {
                     kit::menu_style(ui);
                     for k in Kind::ALL {
-                        ui.selectable_value(&mut r.scale.kind, k, k.label());
+                        ui.selectable_value(&mut r.scale.kind, k, tr.scale_kind_label(k));
                     }
                 });
-            slider(ui, "Lowest MIDI note", &mut r.bottom, 0..=r.top - 11);
-            slider(ui, "Highest MIDI note", &mut r.top, r.bottom + 11..=127);
+            slider(ui, tr.riff_lowest, &mut r.bottom, 0..=r.top - 11);
+            slider(ui, tr.riff_highest, &mut r.top, r.bottom + 11..=127);
         }
     }
 }
 
 fn recipes(ui: &mut Ui, s: &mut Session) {
-    ui.menu_button("Recipes", |ui| {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
+    ui.menu_button(tr.riff_recipes, |ui| {
         kit::menu_style(ui);
-        if ui.button("Reset all stages").clicked() {
+        if ui.button(tr.riff_reset_all).clicked() {
             s.recipe = Recipe::default();
             ui.close_menu();
         }
-        if ui.button("Save recipe…").clicked() {
+        if ui.button(tr.riff_save_recipe).clicked() {
             ui.close_menu();
             if let Some(path) = rfd::FileDialog::new()
                 .set_file_name("riff.json")
-                .add_filter("Riff recipe", &["json"])
+                .add_filter(tr.riff_recipe_filter, &["json"])
                 .save_file()
             {
                 s.message =
                     match std::fs::write(path, serde_json::to_vec_pretty(&s.recipe).unwrap()) {
-                        Ok(()) => "Recipe saved".into(),
-                        Err(e) => format!("Could not save recipe: {e}"),
+                        Ok(()) => tr.riff_recipe_saved.into(),
+                        Err(e) => fill(tr.riff_save_err, &[("err", &e.to_string())]),
                     };
             }
         }
-        if ui.button("Load recipe…").clicked() {
+        if ui.button(tr.riff_load_recipe).clicked() {
             ui.close_menu();
             if let Some(path) = rfd::FileDialog::new()
-                .add_filter("Riff recipe", &["json"])
+                .add_filter(tr.riff_recipe_filter, &["json"])
                 .pick_file()
             {
                 let read = std::fs::File::open(path)
@@ -180,10 +193,10 @@ fn recipes(ui: &mut Ui, s: &mut Session) {
                 s.message = match read {
                     Ok(r) if r.valid() => {
                         s.recipe = r;
-                        "Recipe loaded".into()
+                        tr.riff_recipe_loaded.into()
                     }
-                    Ok(_) => "Recipe parameters are out of range".into(),
-                    Err(e) => format!("Could not load recipe: {e}"),
+                    Ok(_) => tr.riff_recipe_range.into(),
+                    Err(e) => fill(tr.riff_load_err, &[("err", &e.to_string())]),
                 };
             }
         }
@@ -194,6 +207,7 @@ const MINT: egui::Color32 = egui::Color32::from_rgb(146, 225, 176);
 const PAPER: egui::Color32 = egui::Color32::from_rgb(22, 31, 28);
 
 fn score(ui: &mut Ui, notes: &[Note], span: Tick, height: f32, cursor: Option<Tick>) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     use egui::{Align2, Color32, Rect, Stroke, pos2, vec2};
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), egui::Sense::hover());
     let p = ui.painter_at(r);
@@ -275,7 +289,7 @@ fn score(ui: &mut Ui, notes: &[Note], span: Tick, height: f32, cursor: Option<Ti
     p.text(
         pos2(grid.left() - 6., r.bottom() - 12.),
         Align2::RIGHT_CENTER,
-        "VEL",
+        tr.riff_vel_caps,
         t::mono(9.),
         t::muted(),
     );
@@ -289,7 +303,8 @@ fn score(ui: &mut Ui, notes: &[Note], span: Tick, height: f32, cursor: Option<Ti
 }
 
 fn stage_list(ui: &mut Ui, s: &mut Session) {
-    for (i, label) in STAGES.iter().enumerate() {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
+    for (i, label) in tr.riff_stages().iter().enumerate() {
         let selected = s.tab == i;
         let (rect, response) =
             ui.allocate_exact_size(egui::vec2(ui.available_width(), 32.), egui::Sense::click());
@@ -330,15 +345,13 @@ fn stage_list(ui: &mut Ui, s: &mut Session) {
 }
 impl App {
     pub(super) fn open_riff(&mut self, inst: u64) {
+        let tr = self.tr();
         if self.riff.is_some() {
             self.win(Cmd::Show(Tab::Riff));
             return;
         }
         if self.pattern().automation.is_some() || self.song.instrument(inst).is_none() {
-            self.say(
-                Tone::Wait,
-                "Select a note pattern and channel for Riff Machine.",
-            );
+            self.say(Tone::Wait, tr.riff_select_first);
             return;
         }
         let ids: HashSet<_> = self.roll_sel.iter().copied().collect();
@@ -438,6 +451,7 @@ impl App {
         }
     }
     fn apply_riff(&mut self, s: &Session) {
+        let tr = self.tr();
         let notes = s.render(7);
         if notes.is_empty() {
             return;
@@ -485,13 +499,7 @@ impl App {
         self.roll_inst = s.instrument;
         self.roll_sel = ids;
         self.publish();
-        self.say(
-            Tone::Done,
-            format!(
-                "Riff Machine added {} notes. Ctrl+Z undoes.",
-                self.roll_sel.len()
-            ),
-        );
+        self.say(Tone::Done, tr.riff_added.fmt(tr.lang, self.roll_sel.len()));
     }
     pub(super) fn close_riff(&mut self) {
         if let Some(mut session) = self.riff.take() {
@@ -519,6 +527,7 @@ impl App {
         }
     }
     pub(super) fn riff_tab(&mut self, ui: &mut Ui) {
+        let tr = self.tr();
         let Some(mut s) = self.riff.take() else {
             return;
         };
@@ -559,7 +568,7 @@ impl App {
                 s.source = current;
                 s.origin = origin;
                 s.cached = None;
-                s.message = "Source notes updated from Piano Roll.".into();
+                s.message = tr.riff_source_updated.into();
             }
             s.edits = self.edits;
         }
@@ -585,7 +594,7 @@ impl App {
                             .color(t::muted()),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if kit::button(ui, "Throw dice", kit::Kind::Normal, true).clicked() {
+                        if kit::button(ui, tr.riff_throw_dice, kit::Kind::Normal, true).clicked() {
                             s.recipe.roll_dice();
                         }
                         recipes(ui, &mut s);
@@ -602,24 +611,21 @@ impl App {
                     play = kit::button(
                         ui,
                         if s.preview.is_some() {
-                            "Stop preview"
+                            tr.riff_stop_preview
                         } else {
-                            "Play preview"
+                            tr.riff_play_preview
                         },
                         kit::Kind::Normal,
                         available,
                     )
-                    .on_disabled_hover_text("Preview needs audio output and an idle recorder")
+                    .on_disabled_hover_text(tr.riff_preview_needs)
                     .clicked();
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        apply = kit::button(
-                            ui,
-                            "Apply full riff",
-                            kit::Kind::Primary,
-                            !s.notes.is_empty(),
-                        )
-                        .clicked();
-                        cancel |= kit::button(ui, "Cancel", kit::Kind::Ghost, true).clicked();
+                        apply =
+                            kit::button(ui, tr.riff_apply, kit::Kind::Primary, !s.notes.is_empty())
+                                .clicked();
+                        cancel |=
+                            kit::button(ui, tr.common_cancel, kit::Kind::Ghost, true).clicked();
                     });
                 });
             });
@@ -629,28 +635,28 @@ impl App {
             .frame(egui::Frame::new().fill(t::panel_bottom()).inner_margin(10))
             .show_inside(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.label(egui::RichText::new("Stages").font(t::medium(16.)));
+                    ui.label(egui::RichText::new(tr.riff_stages_title).font(t::medium(16.)));
                     ui.add_space(5.);
                     stage_list(ui, &mut s);
                     ui.add_space(10.);
                     ui.separator();
                     ui.add_space(6.);
                     ui.horizontal(|ui| {
-                        ui.label("Length");
+                        ui.label(tr.riff_length);
                         kit::drag_value(
                             ui,
                             egui::DragValue::new(&mut s.recipe.bars)
                                 .range(1..=16)
-                                .suffix(" bars"),
+                                .suffix(tr.riff_bars_suffix),
                         );
                     });
                     ui.horizontal(|ui| {
-                        ui.label("Seed");
+                        ui.label(tr.riff_seed);
                         kit::drag_value(ui, egui::DragValue::new(&mut s.recipe.seed));
                     });
                     ui.add_enabled(
                         !s.source.is_empty(),
-                        egui::Checkbox::new(&mut s.existing, "Use existing score"),
+                        egui::Checkbox::new(&mut s.existing, tr.riff_use_existing),
                     );
                 });
             });
@@ -665,16 +671,20 @@ impl App {
                         // wider than the view and the bar covers their edge.
                         ui.set_max_width((ui.available_width() - 14.0).max(320.0));
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("Phrase").font(t::medium(20.)));
+                            ui.label(egui::RichText::new(tr.riff_phrase).font(t::medium(20.)));
                             ui.label(
-                                egui::RichText::new(s.recipe.scale.name())
-                                    .font(t::mono(13.))
-                                    .color(MINT),
+                                egui::RichText::new(format!(
+                                    "{} {}",
+                                    ROOTS[(s.recipe.scale.root % 12) as usize],
+                                    tr.scale_kind_label(s.recipe.scale.kind)
+                                ))
+                                .font(t::mono(13.))
+                                .color(MINT),
                             );
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    ui.checkbox(&mut s.partial, "Through this stage");
+                                    ui.checkbox(&mut s.partial, tr.riff_through_stage);
                                 },
                             );
                         });
@@ -701,10 +711,12 @@ impl App {
                         ui.add_space(4.);
                         let replaced = s.source.iter().filter(|n| n.start < s.span()).count();
                         ui.label(
-                            egui::RichText::new(format!(
-                                "{} preview notes   ·   {} source notes to replace",
-                                s.notes.len(),
-                                replaced
+                            egui::RichText::new(fill(
+                                tr.riff_counts,
+                                &[
+                                    ("preview", &s.notes.len().to_string()),
+                                    ("source", &replaced.to_string()),
+                                ],
                             ))
                             .font(t::sans(12.))
                             .color(t::muted()),
@@ -718,16 +730,17 @@ impl App {
                                 ui.set_min_width(ui.available_width());
                                 ui.horizontal(|ui| {
                                     ui.label(
-                                        egui::RichText::new(STAGES[s.tab]).font(t::medium(18.)),
+                                        egui::RichText::new(tr.riff_stages()[s.tab])
+                                            .font(t::medium(18.)),
                                     );
-                                    ui.checkbox(&mut s.recipe.enabled[s.tab], "Enabled");
+                                    ui.checkbox(&mut s.recipe.enabled[s.tab], tr.riff_enabled);
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
-                                            if ui.small_button("Reset").clicked() {
+                                            if ui.small_button(tr.riff_reset).clicked() {
                                                 s.recipe.reset_stage(s.tab);
                                             }
-                                            if ui.small_button("Vary").clicked() {
+                                            if ui.small_button(tr.riff_vary).clicked() {
                                                 s.recipe.vary_stage(s.tab);
                                             }
                                         },

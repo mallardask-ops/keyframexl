@@ -29,15 +29,12 @@ const CELL_MIN: f32 = 4.0;
 const CELL_MAX: f32 = 160.0;
 const EDGE_GRAB: f32 = 7.0;
 
-/// Note colour groups (FL: note colour). The colour is data on the note.
-pub(crate) const NOTE_COLOR_NAMES: [&str; 16] = [
-    "Red", "Blue", "Green", "Yellow", "Orange", "White", "Pink", "Purple", "Cyan", "Lime", "Gold",
-    "Brown", "Rose", "Teal", "Indigo", "Grey",
-];
+/// Number of note colour groups (FL: note colour). The colour is data on the note.
+const NOTE_COLOR_COUNT: usize = 16;
 
 /// Top, fill and edge of a note in colour group `c`.
 pub(crate) fn note_colors(c: u8) -> (egui::Color32, egui::Color32, egui::Color32) {
-    let base = match c as usize % NOTE_COLOR_NAMES.len() {
+    let base = match c as usize % NOTE_COLOR_COUNT {
         0 => return (t::brand_top(), t::brand_fill(), t::brand_edge()),
         1 => t::enc_blue(),
         2 => t::enc_green(),
@@ -78,15 +75,6 @@ pub fn bar_pos(t: Tick) -> String {
         base
     } else {
         format!("{base} +{rest}")
-    }
-}
-
-/// A length in steps, or steps plus ticks.
-pub fn length_text(t: Tick) -> String {
-    match (t / STEP, t % STEP) {
-        (s, 0) => format!("{s} step(s)"),
-        (0, r) => format!("{r} ticks"),
-        (s, r) => format!("{s} step(s) +{r} ticks"),
     }
 }
 
@@ -131,28 +119,6 @@ impl LaneTarget {
         Self::ModY,
         Self::Pitch,
     ];
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Velocity => "Velocity",
-            Self::Pan => "Pan",
-            Self::Release => "Release",
-            Self::Fine => "Fine pitch",
-            Self::ModX => "Mod X",
-            Self::ModY => "Mod Y",
-            Self::Pitch => "Pitch curve",
-        }
-    }
-    fn short(self) -> &'static str {
-        match self {
-            Self::Velocity => "vel",
-            Self::Pan => "pan",
-            Self::Release => "rel",
-            Self::Fine => "fine",
-            Self::ModX => "mod x",
-            Self::ModY => "mod y",
-            Self::Pitch => "pitch",
-        }
-    }
     /// Centred targets draw stems from the middle.
     fn centred(self) -> bool {
         matches!(self, Self::Pan | Self::Fine)
@@ -493,7 +459,7 @@ impl App {
             .iter()
             .find(|(id, _)| *id == self.roll_inst)
             .map(|(_, n)| n.clone())
-            .unwrap_or_else(|| "Channel".into());
+            .unwrap_or_else(|| self.tr().roll_channel_fallback.into());
         let idx = self.pattern_index(self.selected) + 1;
         let sub = format!("{idx:02}  {}  ·  {iname}", self.pattern().name);
         self.roll_header(ui, &sub, &channels, &iname);
@@ -669,7 +635,7 @@ impl App {
         if rr.double_clicked() {
             if self.pattern_mut().loop_range.take().is_some() {
                 self.publish();
-                self.say(Tone::Quiet, "Loop cleared: the whole pattern plays again.");
+                self.say(Tone::Quiet, self.tr().roll_loop_cleared);
             }
         } else if rr.clicked()
             && let Some(q) = rr.interact_pointer_pos()
@@ -699,14 +665,11 @@ impl App {
             self.set_song_mode(false);
             self.publish();
             self.seek_tick(a);
-            self.say(
-                Tone::Quiet,
-                format!(
-                    "Looping {} – {}. Double-click the ruler to play the whole pattern.",
-                    bar_pos(a),
-                    bar_pos(b)
-                ),
+            let msg = crate::i18n::fill(
+                self.tr().roll_looping_span,
+                &[("a", &bar_pos(a)), ("b", &bar_pos(b))],
             );
+            self.say(Tone::Quiet, msg);
         }
         if rr.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -834,7 +797,7 @@ impl App {
                 body.bottom() - 2.0,
                 lane_h,
                 lane_key,
-                self.lane_target.label(),
+                self.tr().lane_target_label(self.lane_target),
             );
         }
         if g.lane.height() > 0.0 {
@@ -853,6 +816,7 @@ impl App {
         key: egui::Id,
         target: &str,
     ) {
+        let tr = crate::i18n::ctx_tr(ui.ctx());
         let r = ui
             .interact(split, key.with("split"), Sense::click_and_drag())
             .on_hover_cursor(CursorIcon::ResizeVertical);
@@ -873,9 +837,9 @@ impl App {
             );
         }
         let r = r.on_hover_text(if lane_h > 0.0 {
-            "Drag to size the event lane · double-click folds it"
+            tr.roll_lane_fold_tip
         } else {
-            "Drag up or double-click to open the event lane"
+            tr.roll_lane_open_tip
         });
         if r.double_clicked() {
             let open = if lane_h > 0.0 { 0.0 } else { LANE_H };
@@ -896,87 +860,171 @@ impl App {
     }
 
     fn roll_header(&mut self, ui: &mut Ui, sub: &str, channels: &[(u64, String)], iname: &str) {
+        #[derive(Clone, Copy, PartialEq, Eq)]
+        enum BatchNoteDialog {
+            Strum,
+            Arpeggiate,
+            Randomize,
+            Flip,
+            Limit,
+        }
+        impl BatchNoteDialog {
+            fn from_capture(name: &str) -> Option<Self> {
+                match name {
+                    "Strum" => Some(Self::Strum),
+                    "Arpeggiate" => Some(Self::Arpeggiate),
+                    "Randomize" => Some(Self::Randomize),
+                    "Flip" => Some(Self::Flip),
+                    "Limit" => Some(Self::Limit),
+                    _ => None,
+                }
+            }
+            fn title(self, tr: &crate::i18n::Strings) -> &'static str {
+                match self {
+                    Self::Strum => tr.roll_tool_strum,
+                    Self::Arpeggiate => tr.roll_tool_arpeggiate,
+                    Self::Randomize => tr.roll_tool_randomize,
+                    Self::Flip => tr.roll_tool_flip,
+                    Self::Limit => tr.roll_tool_limit,
+                }
+            }
+        }
+        #[derive(Clone, Copy)]
+        enum RollAction {
+            SelectAll,
+            Deselect,
+            Copy,
+            Cut,
+            Paste,
+            Duplicate,
+            Delete,
+            QuickQuantize,
+            Quantize,
+            QuickLegato,
+            Chop,
+            Glue,
+            Batch(BatchNoteDialog),
+            RiffMachine,
+            MuteUnmute,
+            PortaToggle,
+            OctaveUp,
+            OctaveDown,
+            Lyrics,
+        }
+
+        let tr = self.tr();
         let tab = Tab::Roll {
             instrument: self.roll_inst,
         };
         let has_sel = !self.roll_sel.is_empty();
-        let mut action: Option<&str> = None;
+        let mut action: Option<RollAction> = None;
         App::panel_header(ui, sub, |ui, slot| {
             if slot == Slot::Menu {
-                ui.menu_button("Edit", |ui| {
+                ui.menu_button(tr.menu_edit, |ui| {
                     kit::menu_style(ui);
-                    for (label, key, needs) in [
-                        ("Select all", "Ctrl+A", false),
-                        ("Deselect", "Ctrl+D", true),
-                        ("Copy", "Ctrl+C", true),
-                        ("Cut", "Ctrl+X", true),
-                        ("Paste", "Ctrl+V", false),
-                        ("Duplicate", "Ctrl+B", true),
-                        ("Delete", "Del", true),
+                    for (act, label, key, needs) in [
+                        (
+                            RollAction::SelectAll,
+                            tr.roll_edit_select_all,
+                            "Ctrl+A",
+                            false,
+                        ),
+                        (RollAction::Deselect, tr.roll_edit_deselect, "Ctrl+D", true),
+                        (RollAction::Copy, tr.roll_edit_copy, "Ctrl+C", true),
+                        (RollAction::Cut, tr.roll_edit_cut, "Ctrl+X", true),
+                        (RollAction::Paste, tr.roll_edit_paste, "Ctrl+V", false),
+                        (
+                            RollAction::Duplicate,
+                            tr.roll_edit_duplicate,
+                            "Ctrl+B",
+                            true,
+                        ),
+                        (RollAction::Delete, tr.pl_delete, "Del", true),
                     ] {
                         let enabled = !needs || has_sel;
                         if ui
                             .add_enabled(enabled, egui::Button::new(label).shortcut_text(key))
                             .clicked()
                         {
-                            action = Some(label);
+                            action = Some(act);
                             ui.close_menu();
                         }
                     }
                 });
-                ui.menu_button("Tools", |ui| {
+                ui.menu_button(tr.menu_tools, |ui| {
                     kit::menu_style(ui);
-                    for (label, key) in [
-                        ("Quick quantize", "Ctrl+Q"),
-                        ("Quantize…", "Alt+Q"),
-                        ("Quick legato", "Ctrl+L"),
-                        ("Chop", "Ctrl+U"),
-                        ("Glue", "Ctrl+G"),
-                        ("Strum…", ""),
-                        ("Arpeggiate…", ""),
-                        ("Riff Machine…", "Alt+E"),
-                        ("Randomize…", ""),
-                        ("Flip…", ""),
-                        ("Limit…", ""),
-                        ("Mute / unmute", ""),
-                        ("Porta on / off", ""),
-                        ("Transpose octave up", "Ctrl+↑"),
-                        ("Transpose octave down", "Ctrl+↓"),
+                    for (act, label, key) in [
+                        (
+                            RollAction::QuickQuantize,
+                            tr.roll_tool_quick_quantize,
+                            "Ctrl+Q",
+                        ),
+                        (RollAction::Quantize, tr.roll_tool_quantize, "Alt+Q"),
+                        (RollAction::QuickLegato, tr.roll_tool_quick_legato, "Ctrl+L"),
+                        (RollAction::Chop, tr.roll_tool_chop, "Ctrl+U"),
+                        (RollAction::Glue, tr.roll_tool_glue, "Ctrl+G"),
+                        (
+                            RollAction::Batch(BatchNoteDialog::Strum),
+                            tr.roll_tool_strum,
+                            "",
+                        ),
+                        (
+                            RollAction::Batch(BatchNoteDialog::Arpeggiate),
+                            tr.roll_tool_arpeggiate,
+                            "",
+                        ),
+                        (RollAction::RiffMachine, tr.tools_riff_machine, "Alt+E"),
+                        (
+                            RollAction::Batch(BatchNoteDialog::Randomize),
+                            tr.roll_tool_randomize,
+                            "",
+                        ),
+                        (
+                            RollAction::Batch(BatchNoteDialog::Flip),
+                            tr.roll_tool_flip,
+                            "",
+                        ),
+                        (
+                            RollAction::Batch(BatchNoteDialog::Limit),
+                            tr.roll_tool_limit,
+                            "",
+                        ),
+                        (RollAction::MuteUnmute, tr.roll_tool_mute_unmute, ""),
+                        (RollAction::PortaToggle, tr.roll_tool_porta_toggle, ""),
+                        (RollAction::OctaveUp, tr.roll_tool_octave_up, "Ctrl+↑"),
+                        (RollAction::OctaveDown, tr.roll_tool_octave_down, "Ctrl+↓"),
                     ] {
                         if ui
                             .add(egui::Button::new(label).shortcut_text(key))
                             .clicked()
                         {
-                            action = Some(label);
+                            action = Some(act);
                             ui.close_menu();
                         }
                     }
                     if self.is_vocal(self.roll_inst) {
                         ui.separator();
                         if ui
-                            .add(egui::Button::new("Lyrics…").shortcut_text(""))
-                            .on_hover_text("Paste words over the notes, one syllable per note")
+                            .add(egui::Button::new(tr.roll_tool_lyrics).shortcut_text(""))
+                            .on_hover_text(tr.roll_tool_lyrics_tip)
                             .clicked()
                         {
-                            action = Some("Lyrics…");
+                            action = Some(RollAction::Lyrics);
                             ui.close_menu();
                         }
                     }
                     ui.separator();
-                    let r =
-                        ui.add(egui::Button::new("Porta for new notes").selected(self.porta_new));
-                    if r.on_hover_text("New notes glide in from the previous note (FL: porta)")
-                        .clicked()
-                    {
+                    let r = ui.add(egui::Button::new(tr.roll_porta_new).selected(self.porta_new));
+                    if r.on_hover_text(tr.roll_porta_new_tip).clicked() {
                         self.porta_new = !self.porta_new;
                         ui.close_menu();
                     }
                 });
-                ui.menu_button("Scale", |ui| {
+                ui.menu_button(tr.roll_menu_scale, |ui| {
                     kit::menu_style(ui);
                     use keyframexl::scale::{Kind, ROOTS, Scale};
                     if ui
-                        .selectable_label(self.roll_scale.is_none(), "Off")
+                        .selectable_label(self.roll_scale.is_none(), tr.roll_scale_off)
                         .clicked()
                     {
                         self.roll_scale = None;
@@ -989,7 +1037,7 @@ impl App {
                     });
                     kit::menu_header(
                         ui,
-                        egui::RichText::new("Root")
+                        egui::RichText::new(tr.roll_scale_root)
                             .font(t::sans(11.0))
                             .color(t::faint()),
                     );
@@ -1015,7 +1063,7 @@ impl App {
                         if ui
                             .selectable_label(
                                 self.roll_scale.is_some_and(|s| s.kind == k),
-                                k.label(),
+                                tr.scale_kind_label(k),
                             )
                             .clicked()
                         {
@@ -1026,43 +1074,45 @@ impl App {
                     ui.separator();
                     let r = ui.add_enabled(
                         self.roll_scale.is_some(),
-                        egui::Button::new("Snap notes to scale").selected(self.scale_snap),
+                        egui::Button::new(tr.roll_scale_snap).selected(self.scale_snap),
                     );
-                    if r.on_hover_text("New and moved notes land on the nearest note of the scale")
-                        .clicked()
-                    {
+                    if r.on_hover_text(tr.roll_scale_snap_tip).clicked() {
                         self.scale_snap = !self.scale_snap;
                         ui.close_menu();
                     }
                 });
-                ui.menu_button("Snap", |ui| {
+                ui.menu_button(tr.roll_menu_snap, |ui| {
                     kit::menu_style(ui);
                     for s in Snap::ALL {
-                        if ui.selectable_label(self.snap == s, s.label()).clicked() {
+                        if ui
+                            .selectable_label(self.snap == s, tr.snap_label(s))
+                            .clicked()
+                        {
                             self.snap = s;
                             ui.close_menu();
                         }
                     }
                 });
-                ui.menu_button("Tool", |ui| {
+                ui.menu_button(tr.roll_menu_tool, |ui| {
                     kit::menu_style(ui);
                     for tl in Tool::ALL {
                         let r = ui.add(
-                            egui::Button::new(tl.label())
+                            egui::Button::new(tr.tool_label(tl))
                                 .selected(self.tool == tl)
                                 .shortcut_text(format!("{:?}", tl.key())),
                         );
-                        if r.on_hover_text(tl.hint()).clicked() {
+                        if r.on_hover_text(tr.tool_hint(tl)).clicked() {
                             self.tool = tl;
                             ui.close_menu();
                         }
                     }
                 });
-                ui.menu_button("Note color", |ui| {
+                ui.menu_button(tr.roll_menu_note_color, |ui| {
                     kit::menu_style(ui);
-                    for (c, name) in NOTE_COLOR_NAMES.iter().enumerate() {
+                    for c in 0u8..(NOTE_COLOR_COUNT as u8) {
+                        let name = tr.note_color_name(c);
                         let (r, resp) = ui.allocate_exact_size(vec2(160.0, 22.0), Sense::click());
-                        let (top, _, _) = note_colors(c as u8);
+                        let (top, _, _) = note_colors(c);
                         ui.painter().rect_filled(
                             Rect::from_center_size(
                                 pos2(r.left() + 12.0, r.center().y),
@@ -1071,7 +1121,7 @@ impl App {
                             3.0,
                             top,
                         );
-                        let ink = if self.note_color == c as u8 {
+                        let ink = if self.note_color == c {
                             t::text()
                         } else {
                             t::muted()
@@ -1079,7 +1129,7 @@ impl App {
                         ui.painter().text(
                             pos2(r.left() + kit::MENU_PAD.x, r.center().y),
                             Align2::LEFT_CENTER,
-                            *name,
+                            name,
                             t::sans(13.0),
                             ink,
                         );
@@ -1087,12 +1137,12 @@ impl App {
                             ui.painter().rect_filled(r, 3.0, t::hi());
                         }
                         if resp.clicked() {
-                            self.set_note_color(c as u8);
+                            self.set_note_color(c);
                             ui.close_menu();
                         }
                     }
                 });
-                ui.menu_button("Target channel", |ui| {
+                ui.menu_button(tr.roll_menu_target_ch, |ui| {
                     kit::menu_style(ui);
                     for (id, name) in channels {
                         if ui.selectable_label(self.roll_inst == *id, name).clicked() {
@@ -1101,11 +1151,11 @@ impl App {
                         }
                     }
                 });
-                ui.menu_button("Target control", |ui| {
+                ui.menu_button(tr.roll_menu_target_ctrl, |ui| {
                     kit::menu_style(ui);
                     for lt in LaneTarget::ALL {
                         if ui
-                            .selectable_label(self.lane_target == lt, lt.label())
+                            .selectable_label(self.lane_target == lt, tr.lane_target_label(lt))
                             .clicked()
                         {
                             self.lane_target = lt;
@@ -1113,14 +1163,14 @@ impl App {
                         }
                     }
                 });
-                if kit::menu_check(ui, self.ghosts, "Ghost notes", "Alt+V")
-                    .on_hover_text("Show other channels' notes as outlines")
+                if kit::menu_check(ui, self.ghosts, tr.roll_ghost_notes, "Alt+V")
+                    .on_hover_text(tr.roll_ghost_notes_tip)
                     .clicked()
                 {
                     self.ghosts = !self.ghosts;
                     ui.close_menu();
                 }
-                if ui.button("Fit pattern in view").clicked() {
+                if ui.button(tr.roll_fit_pattern).clicked() {
                     if let Some(v) = self.roll_view.get_mut(&self.roll_inst) {
                         v.cell = 0.0;
                         v.x0 = 0.0;
@@ -1134,14 +1184,14 @@ impl App {
             let (_, _, changed) = kit::knob(
                 ui,
                 &kit::Knob {
-                    label: "Velocity",
+                    label: tr.roll_vel_label,
                     color: t::enc_white(),
                     min: 1.0,
                     max: 127.0,
                     default: 100.0,
                     log: false,
                     fmt: &|v| format!("{v:.0}"),
-                    hint: "Velocity for new notes. Edit existing ones in the lane below the grid.",
+                    hint: tr.roll_vel_hint,
                 },
                 &mut vel,
             );
@@ -1159,12 +1209,13 @@ impl App {
                 } else {
                     kit::Kind::Ghost
                 };
+                let tl_label = tr.tool_label(tl);
                 let r = kit::button_sized(
                     ui,
                     vec2(28.0, kit::TOOL_H),
                     kind,
                     true,
-                    tl.label(),
+                    tl_label,
                     |p, face, ink| {
                         tool_icon(p, face.center(), tl, if on { t::text() } else { ink });
                         if on {
@@ -1178,7 +1229,12 @@ impl App {
                         }
                     },
                 );
-                if kit::tip(r, format!("{}  {:?}\n{}", tl.label(), tl.key(), tl.hint())).clicked() {
+                if kit::tip(
+                    r,
+                    format!("{tl_label}  {:?}\n{}", tl.key(), tr.tool_hint(tl)),
+                )
+                .clicked()
+                {
                     self.tool = tl;
                 }
             }
@@ -1193,54 +1249,53 @@ impl App {
                         }
                     }
                 })
-                .on_hover_text("Channel this piano roll edits");
+                .on_hover_text(tr.roll_channel_tip);
                 if let Some(id) = pick {
                     self.roll_inst = id;
                 }
             }
         });
         match action {
-            Some("Select all") => self.select_all_notes(),
-            Some("Deselect") => self.roll_sel.clear(),
-            Some("Copy") => self.copy_notes(false),
-            Some("Cut") => self.copy_notes(true),
-            Some("Paste") => self.paste_notes(),
-            Some("Duplicate") => self.duplicate_notes(),
-            Some("Lyrics…") => self.lyrics_dialog = Some(String::new()),
-            Some("Delete") => self.delete_selected_notes(),
-            Some("Quick quantize") => self.quantize_notes(),
-            Some("Quantize…") => self.open_quantize(ui.ctx()),
-            Some("Riff Machine…") => self.open_riff(self.roll_inst),
-            Some("Quick legato") => self.legato_notes(),
-            Some("Chop") => self.chop_notes(),
-            Some("Glue") => self.glue_notes(),
-            Some(label @ ("Strum…" | "Arpeggiate…" | "Randomize…" | "Flip…" | "Limit…")) =>
-            {
-                ui.ctx().data_mut(|d| {
-                    d.insert_temp(egui::Id::new("batch-note-dialog"), label.to_owned())
-                });
+            Some(RollAction::SelectAll) => self.select_all_notes(),
+            Some(RollAction::Deselect) => self.roll_sel.clear(),
+            Some(RollAction::Copy) => self.copy_notes(false),
+            Some(RollAction::Cut) => self.copy_notes(true),
+            Some(RollAction::Paste) => self.paste_notes(),
+            Some(RollAction::Duplicate) => self.duplicate_notes(),
+            Some(RollAction::Lyrics) => self.lyrics_dialog = Some(String::new()),
+            Some(RollAction::Delete) => self.delete_selected_notes(),
+            Some(RollAction::QuickQuantize) => self.quantize_notes(),
+            Some(RollAction::Quantize) => self.open_quantize(ui.ctx()),
+            Some(RollAction::RiffMachine) => self.open_riff(self.roll_inst),
+            Some(RollAction::QuickLegato) => self.legato_notes(),
+            Some(RollAction::Chop) => self.chop_notes(),
+            Some(RollAction::Glue) => self.glue_notes(),
+            Some(RollAction::Batch(dlg)) => {
+                ui.ctx()
+                    .data_mut(|d| d.insert_temp(egui::Id::new("batch-note-dialog"), dlg));
             }
-            Some("Mute / unmute") => self.mute_notes(),
-            Some("Porta on / off") => self.porta_notes(),
-            Some("Transpose octave up") => self.nudge_notes(0, 12, 0),
-            Some("Transpose octave down") => self.nudge_notes(0, -12, 0),
-            _ => {}
+            Some(RollAction::MuteUnmute) => self.mute_notes(),
+            Some(RollAction::PortaToggle) => self.porta_notes(),
+            Some(RollAction::OctaveUp) => self.nudge_notes(0, 12, 0),
+            Some(RollAction::OctaveDown) => self.nudge_notes(0, -12, 0),
+            None => {}
         }
         let dialog_id = egui::Id::new("batch-note-dialog");
         // Captures: KFXL_CAPTURE_NOTE_DIALOG=Strum (etc.) opens that dialog once.
         static CAPTURE_DIALOG: std::sync::Once = std::sync::Once::new();
-        if let Ok(name) = std::env::var("KFXL_CAPTURE_NOTE_DIALOG") {
+        if let Ok(name) = std::env::var("KFXL_CAPTURE_NOTE_DIALOG")
+            && let Some(dlg) = BatchNoteDialog::from_capture(&name)
+        {
             CAPTURE_DIALOG.call_once(|| {
-                ui.ctx()
-                    .data_mut(|d| d.insert_temp(dialog_id, format!("{name}…")))
+                ui.ctx().data_mut(|d| d.insert_temp(dialog_id, dlg));
             });
         }
-        let dialog: String = ui.ctx().data(|d| d.get_temp(dialog_id)).unwrap_or_default();
-        if !dialog.is_empty() {
+        let dialog: Option<BatchNoteDialog> = ui.ctx().data(|d| d.get_temp(dialog_id));
+        if let Some(dialog) = dialog {
             let params_id = egui::Id::new("batch-note-params");
             let mut params: (i64, i64, i64, i64, i32, u64) =
                 ui.ctx().data(|d| d.get_temp(params_id)).unwrap_or_else(|| {
-                    if dialog == "Limit…" {
+                    if dialog == BatchNoteDialog::Limit {
                         (1, 127, 0, 127, 0, 1)
                     } else {
                         (30, 10, 1, 127, 0, 1)
@@ -1249,89 +1304,170 @@ impl App {
             let mut apply = false;
             let mut open = true;
             let mut cancel = false;
-            egui::Window::new(&dialog).collapsible(false).resizable(false).open(&mut open).anchor(Align2::CENTER_TOP, vec2(0.0, 140.0)).show(ui.ctx(), |ui| {
-                ui.spacing_mut().item_spacing = vec2(10.0, 8.0);
-                let note = match dialog.as_str() {
-                    "Strum…" => "Spreads each chord in time, one note after another.",
-                    "Arpeggiate…" => "Turns each chord into a run of single notes over its length.",
-                    "Randomize…" => "Nudges start and velocity by random amounts. The same seed gives the same result.",
-                    "Flip…" => "Vertical mirrors pitches around the middle; horizontal reverses time.",
-                    "Limit…" => "Clamps velocity and pitch into a range.",
-                    _ => "",
-                };
-                ui.label(egui::RichText::new(note).font(t::sans(12.0)).color(t::faint()));
-                // 480 ticks = one beat (PPQ 480), 120 = one step.
-                let ticks = |ui: &mut Ui, v: &mut i64, max: i64| {
-                    kit::drag_value(ui, egui::DragValue::new(v).range(0..=max).speed(5.0).custom_formatter(|x, _| format!("{:.2} steps", x / STEP as f64)).custom_parser(|s| s.trim().trim_end_matches("steps").trim().parse::<f64>().ok().map(|x| x * STEP as f64)));
-                };
-                egui::Grid::new("batch-note-grid").num_columns(2).spacing(vec2(14.0, 8.0)).show(ui, |ui| {
-                    let label = |ui: &mut Ui, s: &str| {
-                        ui.label(egui::RichText::new(s).font(t::sans(13.0)).color(t::text()));
+            let steps_unit = tr.roll_steps_unit;
+            egui::Window::new(dialog.title(tr))
+                .id(egui::Id::new("batch-note-window"))
+                .collapsible(false)
+                .resizable(false)
+                .open(&mut open)
+                .anchor(Align2::CENTER_TOP, vec2(0.0, 140.0))
+                .show(ui.ctx(), |ui| {
+                    ui.spacing_mut().item_spacing = vec2(10.0, 8.0);
+                    let note = match dialog {
+                        BatchNoteDialog::Strum => tr.roll_batch_strum_desc,
+                        BatchNoteDialog::Arpeggiate => tr.roll_batch_arp_desc,
+                        BatchNoteDialog::Randomize => tr.roll_batch_rand_desc,
+                        BatchNoteDialog::Flip => tr.roll_batch_flip_desc,
+                        BatchNoteDialog::Limit => tr.roll_batch_limit_desc,
                     };
-                    match dialog.as_str() {
-                        "Strum…" | "Arpeggiate…" => {
-                            label(ui, if dialog == "Strum…" { "Delay per note" } else { "Note length" });
-                            ticks(ui, &mut params.0, 3840);
-                            ui.end_row();
-                            label(ui, "Direction");
-                            ui.horizontal(|ui| {
-                                ui.selectable_value(&mut params.4, 0, "Up");
-                                ui.selectable_value(&mut params.4, 1, "Down");
-                                if dialog == "Arpeggiate…" {
-                                    ui.selectable_value(&mut params.4, 2, "Up-Down");
+                    ui.label(
+                        egui::RichText::new(note)
+                            .font(t::sans(12.0))
+                            .color(t::faint()),
+                    );
+                    // 480 ticks = one beat (PPQ 480), 120 = one step.
+                    let ticks = |ui: &mut Ui, v: &mut i64, max: i64| {
+                        kit::drag_value(
+                            ui,
+                            egui::DragValue::new(v)
+                                .range(0..=max)
+                                .speed(5.0)
+                                .custom_formatter(|x, _| {
+                                    format!("{:.2} {steps_unit}", x / STEP as f64)
+                                })
+                                .custom_parser(|s| {
+                                    s.trim()
+                                        .trim_end_matches(steps_unit)
+                                        .trim_end_matches("steps")
+                                        .trim()
+                                        .parse::<f64>()
+                                        .ok()
+                                        .map(|x| x * STEP as f64)
+                                }),
+                        );
+                    };
+                    egui::Grid::new("batch-note-grid")
+                        .num_columns(2)
+                        .spacing(vec2(14.0, 8.0))
+                        .show(ui, |ui| {
+                            let label = |ui: &mut Ui, s: &str| {
+                                ui.label(
+                                    egui::RichText::new(s).font(t::sans(13.0)).color(t::text()),
+                                );
+                            };
+                            match dialog {
+                                BatchNoteDialog::Strum | BatchNoteDialog::Arpeggiate => {
+                                    label(
+                                        ui,
+                                        if dialog == BatchNoteDialog::Strum {
+                                            tr.roll_delay_per_note
+                                        } else {
+                                            tr.roll_note_length
+                                        },
+                                    );
+                                    ticks(ui, &mut params.0, 3840);
+                                    ui.end_row();
+                                    label(ui, tr.roll_direction);
+                                    ui.horizontal(|ui| {
+                                        ui.selectable_value(&mut params.4, 0, tr.roll_dir_up);
+                                        ui.selectable_value(&mut params.4, 1, tr.roll_dir_down);
+                                        if dialog == BatchNoteDialog::Arpeggiate {
+                                            ui.selectable_value(
+                                                &mut params.4,
+                                                2,
+                                                tr.roll_dir_up_down,
+                                            );
+                                        }
+                                    });
+                                    ui.end_row();
                                 }
-                            });
-                            ui.end_row();
+                                BatchNoteDialog::Randomize => {
+                                    label(ui, tr.roll_start_pm);
+                                    ticks(ui, &mut params.0, 3840);
+                                    ui.end_row();
+                                    label(ui, tr.roll_vel_pm);
+                                    kit::drag_value(
+                                        ui,
+                                        egui::DragValue::new(&mut params.1).range(0..=127),
+                                    );
+                                    ui.end_row();
+                                    label(ui, tr.rack_humanize_seed);
+                                    kit::drag_value(ui, egui::DragValue::new(&mut params.5));
+                                    ui.end_row();
+                                }
+                                BatchNoteDialog::Flip => {
+                                    label(ui, tr.roll_flip_axis);
+                                    ui.horizontal(|ui| {
+                                        ui.selectable_value(
+                                            &mut params.4,
+                                            0,
+                                            tr.roll_flip_vertical,
+                                        );
+                                        ui.selectable_value(
+                                            &mut params.4,
+                                            1,
+                                            tr.roll_flip_horizontal,
+                                        );
+                                    });
+                                    ui.end_row();
+                                }
+                                BatchNoteDialog::Limit => {
+                                    label(ui, tr.roll_vel_label);
+                                    ui.horizontal(|ui| {
+                                        kit::drag_value(
+                                            ui,
+                                            egui::DragValue::new(&mut params.0).range(1..=127),
+                                        );
+                                        ui.label(tr.roll_range_to);
+                                        kit::drag_value(
+                                            ui,
+                                            egui::DragValue::new(&mut params.1).range(1..=127),
+                                        );
+                                    });
+                                    ui.end_row();
+                                    label(ui, tr.roll_pitch);
+                                    ui.horizontal(|ui| {
+                                        kit::drag_value(
+                                            ui,
+                                            egui::DragValue::new(&mut params.2)
+                                                .range(0..=127)
+                                                .custom_formatter(|x, _| note_name(x as u8)),
+                                        );
+                                        ui.label(tr.roll_range_to);
+                                        kit::drag_value(
+                                            ui,
+                                            egui::DragValue::new(&mut params.3)
+                                                .range(0..=127)
+                                                .custom_formatter(|x, _| note_name(x as u8)),
+                                        );
+                                    });
+                                    ui.end_row();
+                                }
+                            }
+                        });
+                    let applies = if self.roll_sel.is_empty() {
+                        tr.roll_batch_applies_all
+                    } else {
+                        tr.roll_batch_applies_sel
+                    };
+                    ui.label(
+                        egui::RichText::new(applies)
+                            .font(t::sans(12.0))
+                            .color(t::faint()),
+                    );
+                    ui.horizontal(|ui| {
+                        if kit::button(ui, tr.common_apply, kit::Kind::Primary, true).clicked()
+                            || ui.input(|i| i.key_pressed(egui::Key::Enter))
+                        {
+                            apply = true;
                         }
-                        "Randomize…" => {
-                            label(ui, "Start ±");
-                            ticks(ui, &mut params.0, 3840);
-                            ui.end_row();
-                            label(ui, "Velocity ±");
-                            kit::drag_value(ui, egui::DragValue::new(&mut params.1).range(0..=127));
-                            ui.end_row();
-                            label(ui, "Seed");
-                            kit::drag_value(ui, egui::DragValue::new(&mut params.5));
-                            ui.end_row();
+                        if kit::button(ui, tr.common_cancel, kit::Kind::Normal, true).clicked()
+                            || ui.input(|i| i.key_pressed(egui::Key::Escape))
+                        {
+                            cancel = true;
                         }
-                        "Flip…" => {
-                            label(ui, "Flip");
-                            ui.horizontal(|ui| {
-                                ui.selectable_value(&mut params.4, 0, "Vertical");
-                                ui.selectable_value(&mut params.4, 1, "Horizontal");
-                            });
-                            ui.end_row();
-                        }
-                        "Limit…" => {
-                            label(ui, "Velocity");
-                            ui.horizontal(|ui| {
-                                kit::drag_value(ui, egui::DragValue::new(&mut params.0).range(1..=127));
-                                ui.label("to");
-                                kit::drag_value(ui, egui::DragValue::new(&mut params.1).range(1..=127));
-                            });
-                            ui.end_row();
-                            label(ui, "Pitch");
-                            ui.horizontal(|ui| {
-                                kit::drag_value(ui, egui::DragValue::new(&mut params.2).range(0..=127).custom_formatter(|x, _| note_name(x as u8)));
-                                ui.label("to");
-                                kit::drag_value(ui, egui::DragValue::new(&mut params.3).range(0..=127).custom_formatter(|x, _| note_name(x as u8)));
-                            });
-                            ui.end_row();
-                        }
-                        _ => {}
-                    }
+                    });
                 });
-                let scope = if self.roll_sel.is_empty() { "all notes of this channel" } else { "the selected notes" };
-                ui.label(egui::RichText::new(format!("Applies to {scope}. Ctrl+Z undoes.")).font(t::sans(12.0)).color(t::faint()));
-                ui.horizontal(|ui| {
-                    if kit::button(ui, "Apply", kit::Kind::Primary, true).clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        apply = true;
-                    }
-                    if kit::button(ui, "Cancel", kit::Kind::Normal, true).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                        cancel = true;
-                    }
-                });
-            });
             if cancel {
                 open = false;
             }
@@ -1341,18 +1477,20 @@ impl App {
                 let mut notes = self.target_notes();
                 if !notes.is_empty() {
                     self.checkpoint();
-                    match dialog.as_str() {
-                        "Strum…" => note_ops::strum(&mut notes, params.0, params.4 == 1),
-                        "Randomize…" => {
+                    match dialog {
+                        BatchNoteDialog::Strum => {
+                            note_ops::strum(&mut notes, params.0, params.4 == 1)
+                        }
+                        BatchNoteDialog::Randomize => {
                             note_ops::randomize(&mut notes, params.1 as u8, params.0, params.5)
                         }
-                        "Flip…" => note_ops::flip(&mut notes, params.4 == 0),
-                        "Limit…" => note_ops::limit(
+                        BatchNoteDialog::Flip => note_ops::flip(&mut notes, params.4 == 0),
+                        BatchNoteDialog::Limit => note_ops::limit(
                             &mut notes,
                             (params.0 as u8, params.1 as u8),
                             (params.2 as u8, params.3 as u8),
                         ),
-                        "Arpeggiate…" => {
+                        BatchNoteDialog::Arpeggiate => {
                             let direction = match params.4 {
                                 1 => ArpDirection::Down,
                                 2 => ArpDirection::UpDown,
@@ -1372,23 +1510,23 @@ impl App {
                             }
                             notes.clear();
                         }
-                        _ => {}
                     }
                     self.put_notes(&notes);
                     self.fit_pattern();
                     self.publish();
-                    self.say(
-                        Tone::Quiet,
-                        format!("{} applied. Ctrl+Z undoes.", dialog.trim_end_matches('…')),
+                    let msg = crate::i18n::fill(
+                        tr.roll_batch_applied,
+                        &[("name", dialog.title(tr).trim_end_matches('…'))],
                     );
+                    self.say(Tone::Quiet, msg);
                 } else {
-                    self.say(Tone::Quiet, "No notes here to change.");
+                    self.say(Tone::Quiet, tr.roll_batch_no_notes);
                 }
                 open = false;
             }
             if !open {
                 ui.ctx().data_mut(|d| {
-                    d.remove::<String>(dialog_id);
+                    d.remove::<BatchNoteDialog>(dialog_id);
                     d.remove::<(i64, i64, i64, i64, i32, u64)>(params_id);
                 });
             }
@@ -1557,7 +1695,7 @@ impl App {
             p,
             pos2(inner.left() + 8.0, ruler.center().y),
             Align2::LEFT_CENTER,
-            "bar",
+            self.tr().roll_bar_caps,
             11.0,
             t::faint(),
         );
@@ -1833,7 +1971,7 @@ impl App {
                 p.text(
                     pos2(r.left() + 8.0, r.center().y),
                     Align2::LEFT_CENTER,
-                    format!("to {}", note_name(s.target)),
+                    crate::i18n::fill(self.tr().roll_slide_to, &[("note", &note_name(s.target))]),
                     t::sans(12.0),
                     t::text(),
                 );
@@ -1964,6 +2102,7 @@ impl App {
         let key = egui::Id::new("lyric-edit-focus");
         let first = ui.ctx().data(|d| d.get_temp::<u64>(key)) != Some(id);
         let (mut done, mut cancel, mut next) = (false, false, false);
+        let lyric_hint = self.tr().roll_lyric_hint;
         egui::Area::new(egui::Id::new(("lyric-edit", id)))
             .order(egui::Order::Foreground)
             .fixed_pos(r.left_top())
@@ -1971,7 +2110,7 @@ impl App {
                 let mut out = egui::TextEdit::singleline(&mut text)
                     .desired_width(r.width().max(96.0))
                     .font(t::semibold(13.0))
-                    .hint_text("lyric")
+                    .hint_text(lyric_hint)
                     .show(ui);
                 let resp = out.response.clone();
                 if first {
@@ -2519,26 +2658,36 @@ impl App {
                     .find(|n| n.id == anchor)
                     .copied()
                     .unwrap_or(orig[0]);
+                let tr = self.tr();
                 let many = if now.len() > 1 {
-                    format!("{} notes", now.len())
+                    tr.roll_notes_count.fmt(tr.lang, now.len())
                 } else {
                     note_name(a.pitch)
                 };
                 let text = if created && !moved {
-                    format!(
-                        "{} placed at {}, {} long. Ctrl+Z undoes.",
-                        note_name(a.pitch),
-                        bar_pos(a.start),
-                        length_text(a.length)
+                    crate::i18n::fill(
+                        tr.roll_note_placed,
+                        &[
+                            ("note", &note_name(a.pitch)),
+                            ("pos", &bar_pos(a.start)),
+                            ("len", &tr.length_text(a.length)),
+                        ],
                     )
                 } else if duplicate {
-                    format!("Copied {many} to {}. Ctrl+Z undoes.", bar_pos(a.start))
+                    crate::i18n::fill(
+                        tr.roll_notes_copied_to,
+                        &[("what", &many), ("pos", &bar_pos(a.start))],
+                    )
                 } else {
                     match mode {
-                        MoveMode::Move => {
-                            format!("Moved {many} to {}. Ctrl+Z undoes.", bar_pos(a.start))
-                        }
-                        _ => format!("{many}: {} long. Ctrl+Z undoes.", length_text(a.length)),
+                        MoveMode::Move => crate::i18n::fill(
+                            tr.roll_notes_moved_to,
+                            &[("what", &many), ("pos", &bar_pos(a.start))],
+                        ),
+                        _ => crate::i18n::fill(
+                            tr.roll_notes_resized,
+                            &[("what", &many), ("len", &tr.length_text(a.length))],
+                        ),
                     }
                 };
                 self.say(Tone::Quiet, text);
@@ -2572,31 +2721,28 @@ impl App {
                         self.roll_sel.push(id);
                     }
                 }
-                self.say(
-                    Tone::Quiet,
-                    format!(
-                        "{} note(s) selected. Del deletes, Ctrl+C copies, arrows move.",
-                        self.roll_sel.len()
-                    ),
-                );
+                let tr = self.tr();
+                let msg = tr.roll_notes_selected.fmt(tr.lang, self.roll_sel.len());
+                self.say(Tone::Quiet, msg);
             }
             Gesture::Erase => {
                 if self.erasing {
                     self.erasing = false;
                     self.publish();
-                    self.say(Tone::Quiet, "Erased. Ctrl+Z undoes.");
+                    self.say(Tone::Quiet, self.tr().roll_erased);
                 }
             }
             Gesture::Mute { to } => {
                 if self.erasing {
                     self.erasing = false;
                     self.publish();
+                    let tr = self.tr();
                     self.say(
                         Tone::Quiet,
                         if to {
-                            "Notes muted. Ctrl+Z undoes."
+                            tr.roll_notes_muted_status
                         } else {
-                            "Notes unmuted. Ctrl+Z undoes."
+                            tr.roll_notes_unmuted_status
                         },
                     );
                 }
@@ -2605,39 +2751,35 @@ impl App {
                 let now = self.pattern().slides.get(index).copied();
                 if now == Some(orig) {
                     self.history.pop();
-                    self.say(
-                        Tone::Quiet,
-                        format!(
-                            "Slide to {}: drag to move it, drag its edges to change its length.",
-                            note_name(orig.target)
-                        ),
+                    let msg = crate::i18n::fill(
+                        self.tr().roll_slide_help,
+                        &[("note", &note_name(orig.target))],
                     );
+                    self.say(Tone::Quiet, msg);
                 } else if let Some(s) = now {
                     self.fit_pattern();
                     self.publish();
-                    self.say(
-                        Tone::Quiet,
-                        format!(
-                            "Slide to {} at {}, {} long. Ctrl+Z undoes.",
-                            note_name(s.target),
-                            bar_pos(s.start),
-                            length_text(s.length)
-                        ),
+                    let tr = self.tr();
+                    let msg = crate::i18n::fill(
+                        tr.roll_slide_edited,
+                        &[
+                            ("note", &note_name(s.target)),
+                            ("pos", &bar_pos(s.start)),
+                            ("len", &tr.length_text(s.length)),
+                        ],
                     );
+                    self.say(Tone::Quiet, msg);
                 }
             }
             Gesture::Paint { len, next } => {
                 self.fit_pattern();
                 self.publish();
                 self.last_len = Some(len);
-                self.say(
-                    Tone::Quiet,
-                    format!(
-                        "Painted {} up to {}. Ctrl+Z undoes.",
-                        note_name(pitch),
-                        bar_pos(next)
-                    ),
+                let msg = crate::i18n::fill(
+                    self.tr().roll_painted,
+                    &[("note", &note_name(pitch)), ("pos", &bar_pos(next))],
                 );
+                self.say(Tone::Quiet, msg);
             }
             Gesture::Slice { from } => {
                 let cut = snap_round(at, grid, alt);
@@ -2646,16 +2788,14 @@ impl App {
                 let n = self.slice_notes_at(cut, p0.min(pitch)..=p0.max(pitch));
                 if n == 0 {
                     self.history.pop();
-                    self.say(
-                        Tone::Quiet,
-                        "No note crosses that line. Drag across notes to cut them.",
-                    );
+                    self.say(Tone::Quiet, self.tr().roll_slice_none);
                 } else {
                     self.publish();
-                    self.say(
-                        Tone::Quiet,
-                        format!("Cut {n} note(s) at {}. Ctrl+Z undoes.", bar_pos(cut)),
-                    );
+                    let tr = self.tr();
+                    let msg = tr
+                        .roll_notes_cut_at
+                        .fmt_with(tr.lang, n, &[("pos", &bar_pos(cut))]);
+                    self.say(Tone::Quiet, msg);
                 }
             }
             Gesture::Zoom { from } => self.zoom_roll(g, from.x, q.x, 2.0),
@@ -2679,14 +2819,11 @@ impl App {
                 });
                 self.fit_pattern();
                 self.publish();
-                self.say(
-                    Tone::Quiet,
-                    format!(
-                        "Slide to {} at {}. Ctrl+Z undoes.",
-                        note_name(sp),
-                        bar_pos(a)
-                    ),
+                let msg = crate::i18n::fill(
+                    self.tr().roll_slide_added,
+                    &[("note", &note_name(sp)), ("pos", &bar_pos(a))],
                 );
+                self.say(Tone::Quiet, msg);
             }
         }
     }
@@ -2723,10 +2860,7 @@ impl App {
     /// Toggle porta on the selection (all on unless all already are).
     pub(crate) fn porta_notes(&mut self) {
         if self.roll_sel.is_empty() {
-            self.say(
-                Tone::Quiet,
-                "Select notes first (Ctrl+drag a box), then Porta on / off.",
-            );
+            self.say(Tone::Quiet, self.tr().roll_porta_select_first);
             return;
         }
         self.checkpoint();
@@ -2746,27 +2880,23 @@ impl App {
             n.porta = on;
         }
         self.publish();
-        self.say(
-            Tone::Quiet,
-            format!(
-                "Porta {} on {} note(s). Ctrl+Z undoes.",
-                if on { "on" } else { "off" },
-                sel.len()
-            ),
-        );
+        let tr = self.tr();
+        let msg = if on {
+            tr.roll_porta_on_notes.fmt(tr.lang, sel.len())
+        } else {
+            tr.roll_porta_off_notes.fmt(tr.lang, sel.len())
+        };
+        self.say(Tone::Quiet, msg);
     }
 
     /// Colour for new notes; recolours the selection too (one undo step).
     pub(crate) fn set_note_color(&mut self, c: u8) {
         self.note_color = c;
+        let tr = self.tr();
+        let color = tr.note_color_name(c).to_lowercase();
         if self.roll_sel.is_empty() {
-            self.say(
-                Tone::Quiet,
-                format!(
-                    "New notes are {}.",
-                    NOTE_COLOR_NAMES[c as usize].to_lowercase()
-                ),
-            );
+            let msg = crate::i18n::fill(tr.roll_new_notes_color, &[("color", &color)]);
+            self.say(Tone::Quiet, msg);
             return;
         }
         self.checkpoint();
@@ -2780,14 +2910,10 @@ impl App {
             n.color = c;
         }
         self.publish();
-        self.say(
-            Tone::Quiet,
-            format!(
-                "{} note(s) coloured {}. Ctrl+Z undoes.",
-                sel.len(),
-                NOTE_COLOR_NAMES[c as usize].to_lowercase()
-            ),
-        );
+        let msg = tr
+            .roll_notes_coloured
+            .fmt_with(tr.lang, sel.len(), &[("color", &color)]);
+        self.say(Tone::Quiet, msg);
     }
 
     /// Cut this channel's notes that cross `at` in two (Slice tool). Returns the count.
@@ -2842,10 +2968,9 @@ impl App {
         let sel = std::mem::take(&mut self.roll_sel);
         self.pattern_mut().notes.retain(|n| !sel.contains(&n.id));
         self.publish();
-        self.say(
-            Tone::Quiet,
-            format!("{} note(s) deleted. Ctrl+Z undoes.", sel.len()),
-        );
+        let tr = self.tr();
+        let msg = tr.roll_notes_deleted.fmt(tr.lang, sel.len());
+        self.say(Tone::Quiet, msg);
     }
 
     pub(crate) fn copy_notes(&mut self, cut: bool) {
@@ -2857,7 +2982,9 @@ impl App {
         if cut {
             self.delete_selected_notes();
         } else {
-            self.say(Tone::Quiet, format!("{} note(s) copied.", notes.len()));
+            let tr = self.tr();
+            let msg = tr.roll_notes_copied.fmt(tr.lang, notes.len());
+            self.say(Tone::Quiet, msg);
         }
     }
 
@@ -2865,10 +2992,7 @@ impl App {
     /// pasted notes become the selection.
     pub(crate) fn paste_notes(&mut self) {
         if self.note_clip.is_empty() {
-            self.say(
-                Tone::Quiet,
-                "Nothing to paste. Select notes and Ctrl+C first.",
-            );
+            self.say(Tone::Quiet, self.tr().roll_nothing_to_paste);
             return;
         }
         self.checkpoint();
@@ -2887,13 +3011,9 @@ impl App {
         self.fit_pattern();
         self.roll_sel = ids;
         self.publish();
-        self.say(
-            Tone::Quiet,
-            format!(
-                "{} note(s) pasted. Arrows move them. Ctrl+Z undoes.",
-                self.roll_sel.len()
-            ),
-        );
+        let tr = self.tr();
+        let msg = tr.roll_notes_pasted.fmt(tr.lang, self.roll_sel.len());
+        self.say(Tone::Quiet, msg);
     }
 
     /// FL Ctrl+B: copy the selection right after itself.
@@ -2922,14 +3042,13 @@ impl App {
         self.fit_pattern();
         self.roll_sel = ids;
         self.publish();
-        self.say(
-            Tone::Quiet,
-            format!(
-                "Duplicated {} note(s) to {}. Ctrl+Z undoes.",
-                self.roll_sel.len(),
-                bar_pos(a + span)
-            ),
+        let tr = self.tr();
+        let msg = tr.roll_notes_duplicated.fmt_with(
+            tr.lang,
+            self.roll_sel.len(),
+            &[("pos", &bar_pos(a + span))],
         );
+        self.say(Tone::Quiet, msg);
     }
 
     /// Move the selection by ticks and semitones; `dlen` changes lengths.
@@ -2962,7 +3081,7 @@ impl App {
     pub(crate) fn quantize_notes(&mut self) {
         let grid = self.snap.grid();
         if grid <= 1 {
-            self.say(Tone::Quiet, "Snap is off: pick a grid to quantize to.");
+            self.say(Tone::Quiet, self.tr().roll_snap_off_quantize);
             return;
         }
         let me = self.roll_inst;
@@ -2983,18 +3102,16 @@ impl App {
         }
         if moved == 0 {
             self.history.pop();
-            self.say(Tone::Quiet, "Every note is already on the grid.");
+            self.say(Tone::Quiet, self.tr().roll_already_on_grid);
             return;
         }
         self.fit_pattern();
         self.publish();
-        self.say(
-            Tone::Quiet,
-            format!(
-                "Quantized {moved} note(s) to {}. Ctrl+Z undoes.",
-                self.snap.label()
-            ),
-        );
+        let tr = self.tr();
+        let msg =
+            tr.roll_notes_quantized
+                .fmt_with(tr.lang, moved, &[("snap", tr.snap_label(self.snap))]);
+        self.say(Tone::Quiet, msg);
     }
 
     pub(crate) fn mute_notes(&mut self) {
@@ -3013,14 +3130,13 @@ impl App {
             n.muted = !all_muted;
         }
         self.publish();
-        self.say(
-            Tone::Quiet,
-            format!(
-                "{} note(s) {}. Ctrl+Z undoes.",
-                sel.len(),
-                if all_muted { "unmuted" } else { "muted" }
-            ),
-        );
+        let tr = self.tr();
+        let msg = if all_muted {
+            tr.roll_notes_unmuted_n.fmt(tr.lang, sel.len())
+        } else {
+            tr.roll_notes_muted_n.fmt(tr.lang, sel.len())
+        };
+        self.say(Tone::Quiet, msg);
     }
 
     /// Keys while this piano roll has focus.
@@ -3085,12 +3201,13 @@ impl App {
         }
         if m.alt && !m.command && pressed(egui::Key::V) {
             self.ghosts = !self.ghosts;
+            let tr = self.tr();
             self.say(
                 Tone::Quiet,
                 if self.ghosts {
-                    "Ghost notes on"
+                    tr.roll_ghosts_on
                 } else {
-                    "Ghost notes off"
+                    tr.roll_ghosts_off
                 },
             );
         }
@@ -3132,17 +3249,19 @@ impl App {
         if cr.hovered() {
             p.rect_filled(cap, 4.0, t::raised());
         }
+        let tr = self.tr();
+        let target_label = tr.lane_target_label(target);
         kit::caps(
             p,
             cap.left_center() + vec2(4.0, 0.0),
             Align2::LEFT_CENTER,
-            target.short(),
+            tr.lane_target_short(target),
             11.0,
             if cr.hovered() { t::text() } else { t::muted() },
         );
-        let cr = cr.on_hover_text(format!(
-            "{}: click for the next control, right-click for the list",
-            target.label()
+        let cr = cr.on_hover_text(crate::i18n::fill(
+            tr.roll_lane_target_tip,
+            &[("label", target_label)],
         ));
         if cr.clicked() {
             let i = LaneTarget::ALL
@@ -3155,7 +3274,7 @@ impl App {
             kit::menu_style(ui);
             for lt in LaneTarget::ALL {
                 if ui
-                    .selectable_label(self.lane_target == lt, lt.label())
+                    .selectable_label(self.lane_target == lt, tr.lane_target_label(lt))
                     .clicked()
                 {
                     self.lane_target = lt;
@@ -3215,7 +3334,7 @@ impl App {
                 resp.on_hover_text(format!(
                     "{} {}: {}",
                     note_name(n.pitch),
-                    target.label(),
+                    target_label,
                     target.text(&n)
                 ));
             }
@@ -3259,15 +3378,16 @@ impl App {
                 .find(|x| x.id == n.id)
                 .map(|x| target.text(x))
                 .unwrap_or_default();
-            self.say(
-                Tone::Quiet,
-                format!(
-                    "{} at {}: {} {shown}. Ctrl+Z undoes.",
-                    note_name(n.pitch),
-                    bar_pos(n.start),
-                    target.label()
-                ),
+            let msg = crate::i18n::fill(
+                tr.roll_lane_set_status,
+                &[
+                    ("note", &note_name(n.pitch)),
+                    ("pos", &bar_pos(n.start)),
+                    ("label", target_label),
+                    ("val", &shown),
+                ],
             );
+            self.say(Tone::Quiet, msg);
         }
     }
 
@@ -3277,6 +3397,7 @@ impl App {
     /// removes it, right-click sets its shape or the note's vibrato.
     fn pitch_lane(&mut self, ui: &Ui, lp: &egui::Painter, g: &Geom, area: Rect) {
         use keyframexl::sequence::{CurveShape, NotePitch, NoteVibrato, PitchPoint};
+        let tr = self.tr();
         let me = self.roll_inst;
         // ±6 semitones, ±1 octave once a visible point goes further.
         let wide = self
@@ -3319,7 +3440,7 @@ impl App {
             lp.text(
                 area.center(),
                 Align2::CENTER_CENTER,
-                "Pitch curves are for vocal channels",
+                tr.roll_pitch_vocal_only,
                 t::sans(12.0),
                 t::faint(),
             );
@@ -3398,15 +3519,22 @@ impl App {
         };
         if let Some(pos) = resp.hover_pos() {
             resp.clone().on_hover_text(match note_at(pos) {
-                Some(n) => format!(
-                    "{}: {:+.0} ct here · click adds a point, drag moves it, double-click removes, right-click: shape and vibrato",
-                    note_name(n.pitch),
-                    self.pattern()
-                        .pitch
-                        .get(&n.id)
-                        .map_or(0.0, |c| c.cents_at((g.tick_f(pos.x) - n.start) as f64, n.length))
+                Some(n) => {
+                    let cents = format!(
+                        "{:+.0}",
+                        self.pattern().pitch.get(&n.id).map_or(0.0, |c| {
+                            c.cents_at((g.tick_f(pos.x) - n.start) as f64, n.length)
+                        })
+                    );
+                    crate::i18n::fill(
+                        tr.roll_pitch_note_tip,
+                        &[("note", &note_name(n.pitch)), ("cents", &cents)],
+                    )
+                }
+                None => crate::i18n::fill(
+                    tr.roll_pitch_range_tip,
+                    &[("st", &format!("{}", range / 100.0))],
                 ),
-                None => format!("Pitch curves of the vocal notes, ±{} semitones", range / 100.0),
             });
         }
         let mut changed = false;
@@ -3508,11 +3636,14 @@ impl App {
             if let Some(i) = point.filter(|i| *i < current.points.len()) {
                 kit::menu_header(
                     ui,
-                    egui::RichText::new("Curve to the next point").color(t::muted()),
+                    egui::RichText::new(tr.roll_pitch_curve_header).color(t::muted()),
                 );
                 for shape in CurveShape::ALL {
                     if ui
-                        .selectable_label(current.points[i].shape == shape, shape.label())
+                        .selectable_label(
+                            current.points[i].shape == shape,
+                            tr.curve_shape_label(shape),
+                        )
                         .clicked()
                     {
                         self.checkpoint();
@@ -3523,7 +3654,7 @@ impl App {
                         ui.close_menu();
                     }
                 }
-                if ui.button("Remove point").clicked() {
+                if ui.button(tr.roll_pitch_remove_pt).clicked() {
                     self.checkpoint();
                     let pat = self.pattern_mut();
                     if let Some(c) = pat.pitch.get_mut(&id) {
@@ -3539,14 +3670,14 @@ impl App {
             }
             kit::menu_header(
                 ui,
-                egui::RichText::new("Vibrato of this note").color(t::muted()),
+                egui::RichText::new(tr.roll_pitch_vib_header).color(t::muted()),
             );
             let vib = current.vibrato;
             for (label, value) in [
-                ("The channel's", None),
-                ("Own (last 60 %, 40 ct)", Some(NoteVibrato::default())),
+                (tr.roll_pitch_vib_channel, None),
+                (tr.roll_pitch_vib_own, Some(NoteVibrato::default())),
                 (
-                    "Wide (last 70 %, 80 ct)",
+                    tr.roll_pitch_vib_wide,
                     Some(NoteVibrato {
                         len: 0.7,
                         depth: 80.0,
@@ -3554,7 +3685,7 @@ impl App {
                     }),
                 ),
                 (
-                    "None",
+                    tr.roll_pitch_vib_none,
                     Some(NoteVibrato {
                         depth: 0.0,
                         ..NoteVibrato::default()
@@ -3573,7 +3704,7 @@ impl App {
                     ui.close_menu();
                 }
             }
-            if !current.points.is_empty() && ui.button("Clear the curve").clicked() {
+            if !current.points.is_empty() && ui.button(tr.roll_pitch_clear_curve).clicked() {
                 self.checkpoint();
                 let pat = self.pattern_mut();
                 if let Some(c) = pat.pitch.get_mut(&id) {
@@ -3705,31 +3836,32 @@ impl App {
         let n = keyframexl::note_ops::legato(&mut v);
         if n == 0 {
             self.history.pop();
-            self.say(Tone::Quiet, "Legato: nothing to lengthen.");
+            self.say(Tone::Quiet, self.tr().roll_legato_none);
             return;
         }
         self.put_notes(&v);
         self.fit_pattern();
         self.publish();
-        self.say(
-            Tone::Quiet,
-            format!("Legato on {n} note(s). Ctrl+Z undoes."),
-        );
+        let tr = self.tr();
+        let msg = tr.roll_legato_n.fmt(tr.lang, n);
+        self.say(Tone::Quiet, msg);
     }
 
     /// Ctrl+U (FL: chop): notes cut into pieces of the snap grid.
     pub(crate) fn chop_notes(&mut self) {
         let grid = self.snap.grid();
         if grid <= 1 {
-            self.say(Tone::Quiet, "Snap is off: pick a grid to chop to.");
+            self.say(Tone::Quiet, self.tr().roll_snap_off_chop);
             return;
         }
         let v = self.target_notes();
         if !v.iter().any(|n| n.length > grid) {
-            self.say(
-                Tone::Quiet,
-                format!("No note is longer than {}.", self.snap.label()),
+            let tr = self.tr();
+            let msg = crate::i18n::fill(
+                tr.roll_chop_none_longer,
+                &[("snap", tr.snap_label(self.snap))],
             );
+            self.say(Tone::Quiet, msg);
             return;
         }
         self.checkpoint();
@@ -3752,13 +3884,11 @@ impl App {
             self.roll_sel = sel;
         }
         self.publish();
-        self.say(
-            Tone::Quiet,
-            format!(
-                "Chopped into {pieces} note(s) of {}. Ctrl+Z undoes.",
-                self.snap.label()
-            ),
-        );
+        let tr = self.tr();
+        let msg =
+            tr.roll_chopped_n
+                .fmt_with(tr.lang, pieces, &[("snap", tr.snap_label(self.snap))]);
+        self.say(Tone::Quiet, msg);
     }
 
     /// Ctrl+G (FL: glue): touching notes of one pitch become one.
@@ -3766,7 +3896,7 @@ impl App {
         let v = self.target_notes();
         let (keep, gone) = keyframexl::note_ops::glue(&v);
         if gone.is_empty() {
-            self.say(Tone::Quiet, "Glue: no touching notes of the same pitch.");
+            self.say(Tone::Quiet, self.tr().roll_glue_none);
             return;
         }
         self.checkpoint();
@@ -3774,13 +3904,9 @@ impl App {
         self.pattern_mut().notes.retain(|n| !gone.contains(&n.id));
         self.roll_sel.retain(|id| !gone.contains(id));
         self.publish();
-        self.say(
-            Tone::Quiet,
-            format!(
-                "Glued {} note(s) into their neighbours. Ctrl+Z undoes.",
-                gone.len()
-            ),
-        );
+        let tr = self.tr();
+        let msg = tr.roll_glued_n.fmt(tr.lang, gone.len());
+        self.say(Tone::Quiet, msg);
     }
 
     pub(crate) fn open_quantize(&mut self, ctx: &egui::Context) {
@@ -3799,12 +3925,18 @@ impl App {
             .unwrap_or((1.0, true, false));
         let mut open = true;
         let mut apply = false;
+        let tr = self.tr();
         let what = if self.roll_sel.is_empty() {
-            "every note of the channel".to_string()
+            tr.roll_quantize_all_notes.to_string()
         } else {
-            format!("{} selected note(s)", self.roll_sel.len())
+            tr.roll_quantize_sel_n.fmt(tr.lang, self.roll_sel.len())
         };
-        egui::Window::new("Quantize")
+        let sub = crate::i18n::fill(
+            tr.roll_quantize_sub,
+            &[("snap", tr.snap_label(self.snap)), ("what", &what)],
+        );
+        egui::Window::new(tr.roll_quantize_title)
+            .id(egui::Id::new("roll-quantize-window"))
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
@@ -3812,7 +3944,7 @@ impl App {
             .anchor(Align2::CENTER_TOP, vec2(0.0, 140.0))
             .show(ctx, |ui| {
                 ui.label(
-                    egui::RichText::new(format!("To {} · {what}", self.snap.label()))
+                    egui::RichText::new(&sub)
                         .font(t::sans(13.0))
                         .color(t::muted()),
                 );
@@ -3821,19 +3953,20 @@ impl App {
                 ui.add(
                     egui::Slider::new(&mut pct, 0.0..=100.0)
                         .suffix(" %")
-                        .text("Strength"),
+                        .text(tr.roll_quantize_strength),
                 );
                 strength = pct / 100.0;
-                ui.checkbox(&mut starts, "Start times");
-                ui.checkbox(&mut ends, "End times (lengths)");
+                ui.checkbox(&mut starts, tr.roll_quantize_starts);
+                ui.checkbox(&mut ends, tr.roll_quantize_ends);
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    if kit::button(ui, "Apply", kit::Kind::Primary, starts || ends).clicked()
+                    if kit::button(ui, tr.common_apply, kit::Kind::Primary, starts || ends)
+                        .clicked()
                         || ui.input(|i| i.key_pressed(egui::Key::Enter))
                     {
                         apply = true;
                     }
-                    if kit::button(ui, "Close", kit::Kind::Normal, true).clicked()
+                    if kit::button(ui, tr.common_close, kit::Kind::Normal, true).clicked()
                         || ui.input(|i| i.key_pressed(egui::Key::Escape))
                     {
                         ctx.data_mut(|d| d.insert_temp(key, false));
@@ -3847,7 +3980,7 @@ impl App {
         if apply {
             let grid = self.snap.grid();
             if grid <= 1 {
-                self.say(Tone::Quiet, "Snap is off: pick a grid to quantize to.");
+                self.say(Tone::Quiet, tr.roll_snap_off_quantize);
                 return;
             }
             let mut v = self.target_notes();
@@ -3855,19 +3988,17 @@ impl App {
             let n = keyframexl::note_ops::quantize(&mut v, grid, strength, starts, ends);
             if n == 0 {
                 self.history.pop();
-                self.say(Tone::Quiet, "Every note is already on the grid.");
+                self.say(Tone::Quiet, tr.roll_already_on_grid);
                 return;
             }
             self.put_notes(&v);
             self.fit_pattern();
             self.publish();
-            self.say(
-                Tone::Quiet,
-                format!(
-                    "Quantized {n} note(s) at {:.0}%. Ctrl+Z undoes.",
-                    strength * 100.0
-                ),
-            );
+            let pct = format!("{:.0}", strength * 100.0);
+            let msg = tr
+                .roll_quantize_pct_n
+                .fmt_with(tr.lang, n, &[("pct", &pct)]);
+            self.say(Tone::Quiet, msg);
         }
     }
 }

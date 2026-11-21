@@ -2,6 +2,7 @@
 //! per-frame MIDI input work: lit keys, the activity light, note recording.
 
 use super::{App, Cmd, Tab, Tone, kit};
+use crate::i18n::fill;
 use crate::midi_in::Event;
 use crate::settings::{BUFFERS, RATES, Settings, VelocityCurve};
 use crate::theme as t;
@@ -20,21 +21,21 @@ pub enum Page {
 
 impl Page {
     const ALL: [Page; 4] = [Page::Audio, Page::Midi, Page::Plugins, Page::General];
-    fn label(self) -> &'static str {
+    fn label(self, tr: &crate::i18n::Strings) -> &'static str {
         match self {
-            Page::Audio => "Audio",
-            Page::Midi => "MIDI",
-            Page::Plugins => "Plugins",
-            Page::General => "General",
+            Page::Audio => tr.set_pg_audio,
+            Page::Midi => tr.set_pg_midi,
+            Page::Plugins => tr.set_pg_plugins,
+            Page::General => tr.set_pg_general,
         }
     }
     /// One line under the page title.
-    fn blurb(self) -> &'static str {
+    fn blurb(self, tr: &crate::i18n::Strings) -> &'static str {
         match self {
-            Page::Audio => "Output and input devices, sample rate, buffer.",
-            Page::Midi => "Keyboards and controllers, how notes come in.",
-            Page::Plugins => "Found plugins, their state, where to look for more.",
-            Page::General => "Interface size, saving, window system.",
+            Page::Audio => tr.set_pg_audio_blurb,
+            Page::Midi => tr.set_pg_midi_blurb,
+            Page::Plugins => tr.set_pg_plugins_blurb,
+            Page::General => tr.set_pg_general_blurb,
         }
     }
 }
@@ -68,7 +69,10 @@ impl App {
             return;
         }
         if let Err(e) = self.settings.save() {
-            self.say(Tone::Bad, format!("Settings not saved: {e}"));
+            self.say(
+                Tone::Bad,
+                fill(self.tr().set_not_saved, &[("err", &e.to_string())]),
+            );
         }
     }
 
@@ -99,11 +103,15 @@ impl App {
     }
 
     pub(crate) fn restart_audio(&mut self) {
+        let tr = self.tr();
         match self.reopen_audio() {
-            Ok(r) => self.say(Tone::Done, format!("Audio: {}", audio_summary(&r))),
+            Ok(r) => self.say(
+                Tone::Done,
+                fill(tr.set_audio_ok, &[("summary", &audio_summary(&r, tr))]),
+            ),
             Err(e) => self.say(
                 Tone::Bad,
-                format!("Audio output failed: {e}. Pick another device in Settings (F10)."),
+                fill(tr.set_audio_failed, &[("err", &e.to_string())]),
             ),
         }
     }
@@ -114,6 +122,7 @@ impl App {
     /// pause; the transport carries on from where it was. While the output
     /// named in Settings is missing, a returning device switches back to it.
     pub(crate) fn audio_watch(&mut self, ctx: &egui::Context) {
+        let tr = self.tr();
         use crate::audio::{AudioRecovery, Reconnect, StreamHealth};
         let id = egui::Id::new("audio-recovery");
         let mut rec = ctx
@@ -156,15 +165,11 @@ impl App {
                         a.playing.store(playing, Ordering::Relaxed);
                     }
                     let how = match why {
-                        Reconnect::PreferredBack => {
-                            "Reconnected to the preferred output".to_string()
-                        }
-                        Reconnect::Error => "Audio recovered after an error".to_string(),
-                        Reconnect::Stalled => {
-                            "Audio recovered after the stream stalled".to_string()
-                        }
+                        Reconnect::PreferredBack => tr.set_au_preferred_back.to_string(),
+                        Reconnect::Error => tr.set_au_after_error.to_string(),
+                        Reconnect::Stalled => tr.set_au_after_stall.to_string(),
                         Reconnect::DeviceBack | Reconnect::Retry => {
-                            "Audio recovered after a disconnect".to_string()
+                            tr.set_au_after_disconnect.to_string()
                         }
                     };
                     let tone = if why == Reconnect::PreferredBack {
@@ -172,7 +177,13 @@ impl App {
                     } else {
                         Tone::Bad
                     };
-                    self.say(tone, format!("{how}: {}", audio_summary(&r)));
+                    self.say(
+                        tone,
+                        fill(
+                            tr.set_au_recovered,
+                            &[("how", &how), ("summary", &audio_summary(&r, tr))],
+                        ),
+                    );
                 }
                 Err(e) => {
                     rec.reconnected(now, false, Some(e.clone()));
@@ -180,7 +191,10 @@ impl App {
                     let cause = had_error.unwrap_or(e);
                     self.say(
                         Tone::Bad,
-                        format!("Audio output lost: {cause}. Retrying in {wait:.1} s."),
+                        fill(
+                            tr.set_audio_lost,
+                            &[("cause", &cause), ("wait", &format!("{wait:.1}"))],
+                        ),
                     );
                 }
             }
@@ -347,24 +361,24 @@ impl App {
     }
 
     pub(crate) fn start_midi_learn(&mut self, target: keyframexl::automation::Target) {
+        let tr = self.tr();
         self.multilink = None;
         self.midi_learn = Some(target);
         self.say(
             Tone::Wait,
-            format!(
-                "Move a knob on your controller to link {}. Esc cancels.",
-                self.auto_label(target)
-            ),
+            fill(tr.set_learn, &[("label", &self.auto_label(target))]),
         );
     }
 
     /// Esc while armed: forget the pending link.
     pub(crate) fn cancel_midi_learn(&mut self) {
+        let tr = self.tr();
         self.midi_learn = None;
-        self.say(Tone::Quiet, "Controller link cancelled.");
+        self.say(Tone::Quiet, tr.set_link_cancelled);
     }
 
     fn finish_midi_learn(&mut self, channel: u8, cc: u8) {
+        let tr = self.tr();
         let Some(target) = self.midi_learn.take() else {
             return;
         };
@@ -373,9 +387,13 @@ impl App {
         self.midi_cc_last = None;
         self.say(
             Tone::Done,
-            format!(
-                "Linked CH {channel} CC {cc} to {}.",
-                self.auto_label(target)
+            fill(
+                tr.set_learned,
+                &[
+                    ("channel", &channel.to_string()),
+                    ("cc", &cc.to_string()),
+                    ("label", &self.auto_label(target)),
+                ],
             ),
         );
     }
@@ -517,17 +535,19 @@ impl App {
     }
 
     pub(crate) fn toggle_typing_piano(&mut self) {
+        let tr = self.tr();
         self.settings.general.typing_keyboard = !self.settings.general.typing_keyboard;
         self.save_settings();
         let text = if self.settings.general.typing_keyboard {
-            "Typing keyboard plays notes: Z-row from C3, Q-row from C4. Ctrl+T turns it off."
+            tr.set_typing_on
         } else {
-            "Typing keyboard off: letter keys are shortcuts again."
+            tr.set_typing_off
         };
         self.say(Tone::Quiet, text);
     }
 
     pub(crate) fn toggle_metronome(&mut self) {
+        let tr = self.tr();
         self.settings.general.metronome = !self.settings.general.metronome;
         self.save_settings();
         if let Some(a) = &self.audio {
@@ -537,9 +557,9 @@ impl App {
         self.say(
             Tone::Quiet,
             if self.settings.general.metronome {
-                "Metronome on."
+                tr.set_metronome_on
             } else {
-                "Metronome off."
+                tr.set_metronome_off
             },
         );
     }
@@ -551,6 +571,7 @@ impl App {
     }
 
     fn record_note(&mut self, inst: u64, pitch: u8, velocity: u8, start: Tick, end: Tick) {
+        let tr = self.tr();
         let mut start = start.max(0);
         let mut length = (end - start).max(STEP / 4);
         if self.settings.midi.quantize_record {
@@ -560,10 +581,7 @@ impl App {
         }
         length = length.max(STEP / 4);
         if start >= MAX_BARS * BAR {
-            self.say(
-                Tone::Bad,
-                "Pattern is at its longest; extra notes were dropped.",
-            );
+            self.say(Tone::Bad, tr.set_pattern_full);
             return;
         }
         if !self.midi_take {
@@ -588,6 +606,7 @@ impl App {
     }
 
     pub(crate) fn settings_tab(&mut self, ui: &mut egui::Ui) {
+        let tr = self.tr();
         let Some(ui_state) = &self.settings_ui else {
             return;
         };
@@ -617,12 +636,12 @@ impl App {
                     })
                     .show(ui, |ui| {
                         ui.label(
-                            RichText::new(page.label())
+                            RichText::new(page.label(tr))
                                 .font(t::medium(20.0))
                                 .color(t::text()),
                         );
                         ui.label(
-                            RichText::new(page.blurb())
+                            RichText::new(page.blurb(tr))
                                 .font(t::sans(13.0))
                                 .color(t::muted()),
                         );
@@ -674,11 +693,11 @@ impl App {
                         .max_rect(bar.shrink2(vec2(22.0, 10.0)))
                         .layout(egui::Layout::right_to_left(egui::Align::Center)),
                 );
-                if kit::button(&mut foot, "Close", kit::Kind::Normal, true).clicked() {
+                if kit::button(&mut foot, tr.common_close, kit::Kind::Normal, true).clicked() {
                     close = true;
                 }
                 foot.label(
-                    RichText::new("Changes apply and save at once.")
+                    RichText::new(tr.set_apply_note)
                         .font(t::sans(12.0))
                         .color(t::faint()),
                 );
@@ -764,6 +783,7 @@ impl App {
 
     /// Stop every sounding live note (FL: MIDI panic).
     pub(crate) fn panic(&mut self) {
+        let tr = self.tr();
         if let Some(m) = &self.midi_in {
             m.shared.panic();
         }
@@ -772,7 +792,7 @@ impl App {
         }
         self.midi_keys = [false; 128];
         self.release_note();
-        self.say(Tone::Quiet, "All notes off.");
+        self.say(Tone::Quiet, tr.set_all_notes_off);
     }
 
     fn audio_page(
@@ -782,17 +802,18 @@ impl App {
         outputs: &[String],
         inputs: &[String],
     ) -> bool {
+        let tr = self.tr();
         let mut restart = false;
-        card(ui, "output", |ui| {
-            row(ui, "Device", None, |ui| {
+        card(ui, tr.set_card_output, |ui| {
+            row(ui, tr.set_device, None, |ui| {
                 let shown = s
                     .audio
                     .output
                     .clone()
-                    .unwrap_or_else(|| "System default".into());
+                    .unwrap_or_else(|| tr.set_system_default.into());
                 kit::dropdown(ui, "audio-out", &shown, 380.0, |ui| {
                     if ui
-                        .selectable_label(s.audio.output.is_none(), "System default")
+                        .selectable_label(s.audio.output.is_none(), tr.set_system_default)
                         .clicked()
                     {
                         s.audio.output = None;
@@ -807,7 +828,7 @@ impl App {
                     }
                 });
             });
-            row(ui, "Sample rate", None, |ui| {
+            row(ui, tr.set_sample_rate, None, |ui| {
                 let names: Vec<String> = RATES
                     .iter()
                     .map(|r| format!("{:.1} kHz", *r as f64 / 1000.0))
@@ -824,66 +845,67 @@ impl App {
                     s.audio.rate = RATES[i];
                 }
             });
-            row(
-                ui,
-                "Buffer",
-                Some(
-                    "Auto asks for 256 frames (≈5 ms) so MIDI keys answer fast; raise it if you hear clicks.",
-                ),
-                |ui| {
-                    let mut names: Vec<String> = vec!["Auto".into()];
-                    names.extend(BUFFERS.iter().map(|b| b.to_string()));
-                    let names: Vec<&str> = names.iter().map(String::as_str).collect();
-                    let sel = s
-                        .audio
-                        .buffer
-                        .and_then(|b| BUFFERS.iter().position(|x| *x == b))
-                        .map(|i| i + 1)
-                        .unwrap_or(0);
-                    let (pick, _) = kit::chips(ui, "audio-buffer", &names, sel, None);
-                    if let Some(i) = pick {
-                        s.audio.buffer = if i == 0 { None } else { Some(BUFFERS[i - 1]) };
-                    }
-                },
-            );
-            row(ui, "Running", None, |ui| {
+            row(ui, tr.set_buffer, Some(tr.set_buffer_hint), |ui| {
+                let mut names: Vec<String> = vec![tr.set_auto.into()];
+                names.extend(BUFFERS.iter().map(|b| b.to_string()));
+                let names: Vec<&str> = names.iter().map(String::as_str).collect();
+                let sel = s
+                    .audio
+                    .buffer
+                    .and_then(|b| BUFFERS.iter().position(|x| *x == b))
+                    .map(|i| i + 1)
+                    .unwrap_or(0);
+                let (pick, _) = kit::chips(ui, "audio-buffer", &names, sel, None);
+                if let Some(i) = pick {
+                    s.audio.buffer = if i == 0 { None } else { Some(BUFFERS[i - 1]) };
+                }
+            });
+            row(ui, tr.set_running, None, |ui| {
                 ui.vertical(|ui| {
-                    let rec = ui
-                        .ctx()
-                        .data(|d| d.get_temp::<crate::audio::AudioRecovery>(egui::Id::new("audio-recovery")));
+                    let rec = ui.ctx().data(|d| {
+                        d.get_temp::<crate::audio::AudioRecovery>(egui::Id::new("audio-recovery"))
+                    });
                     match &self.audio {
                         Some(a) => {
                             let r = &a.running;
                             let buf = r
                                 .buffer
-                                .map(|b| format!("{b} frames"))
-                                .unwrap_or_else(|| "device buffer".into());
+                                .map(|b| fill(tr.set_frames, &[("n", &b.to_string())]))
+                                .unwrap_or_else(|| tr.set_device_buffer.into());
                             let load = a.load.load(Ordering::Relaxed) as f64 / 10.0;
                             let overruns = a.overruns.load(Ordering::Relaxed);
                             ui.horizontal(|ui| {
                                 badge(ui, r.backend.label(), t::text());
                                 ui.label(
-                                    RichText::new(format!(
-                                        "{} · {} Hz · {buf}",
-                                        r.device, r.rate
-                                    ))
-                                    .font(t::sans(13.0))
-                                    .color(t::text()),
+                                    RichText::new(format!("{} · {} Hz · {buf}", r.device, r.rate))
+                                        .font(t::sans(13.0))
+                                        .color(t::text()),
                                 );
                             });
                             ui.label(
-                                RichText::new(format!(
-                                    "Latency ≈{:.1} ms · CPU {load:.0}% · Overruns {overruns}",
-                                    r.latency_ms()
+                                RichText::new(fill(
+                                    tr.set_latency_line,
+                                    &[
+                                        ("ms", &format!("{:.1}", r.latency_ms())),
+                                        ("load", &format!("{load:.0}")),
+                                        ("overruns", &overruns.to_string()),
+                                    ],
                                 ))
                                 .font(t::mono(13.0))
-                                .color(if overruns > 0 { t::wait() } else { t::muted() }),
+                                .color(if overruns > 0 {
+                                    t::wait()
+                                } else {
+                                    t::muted()
+                                }),
                             );
                             if r.rate != s.audio.rate {
                                 ui.label(
-                                    RichText::new(format!(
-                                        "The device does not offer {} Hz; running at {} Hz.",
-                                        s.audio.rate, r.rate
+                                    RichText::new(fill(
+                                        tr.set_rate_mismatch,
+                                        &[
+                                            ("want", &s.audio.rate.to_string()),
+                                            ("rate", &r.rate.to_string()),
+                                        ],
                                     ))
                                     .font(t::sans(12.0))
                                     .color(t::wait()),
@@ -891,10 +913,18 @@ impl App {
                             }
                             if r.fallback {
                                 ui.label(
-                                    RichText::new(format!(
-                                        "{} is not available; playing through {}. It reconnects when the device returns.",
-                                        s.audio.output.as_deref().unwrap_or("The chosen output"),
-                                        r.device
+                                    RichText::new(fill(
+                                        tr.set_fallback,
+                                        &[
+                                            (
+                                                tr.set_card_output,
+                                                s.audio
+                                                    .output
+                                                    .as_deref()
+                                                    .unwrap_or(tr.set_chosen_output),
+                                            ),
+                                            ("device", &r.device),
+                                        ],
                                     ))
                                     .font(t::sans(12.0))
                                     .color(t::wait()),
@@ -903,9 +933,9 @@ impl App {
                             if a.failed.load(Ordering::Relaxed) {
                                 let why = a.last_error.lock().ok().and_then(|e| e.clone());
                                 ui.label(
-                                    RichText::new(format!(
-                                        "Stream error: {}. Reconnecting.",
-                                        why.unwrap_or_else(|| "unknown".into())
+                                    RichText::new(fill(
+                                        tr.set_stream_error,
+                                        &[("err", &why.unwrap_or_else(|| tr.set_unknown.into()))],
                                     ))
                                     .font(t::sans(12.0))
                                     .color(t::bad()),
@@ -914,7 +944,7 @@ impl App {
                         }
                         None => {
                             ui.label(
-                                RichText::new("No audio output.")
+                                RichText::new(tr.set_no_output)
                                     .font(t::sans(13.0))
                                     .color(t::bad()),
                             );
@@ -922,16 +952,19 @@ impl App {
                                 let now = ui.input(|i| i.time);
                                 let next = rec.retry_at.map_or(0.0, |t| (t - now).max(0.0));
                                 ui.label(
-                                    RichText::new(format!(
-                                        "Reconnecting: attempt {}, next in {next:.1} s.",
-                                        rec.attempts + 1
+                                    RichText::new(fill(
+                                        tr.set_reconnecting,
+                                        &[
+                                            ("n", &(rec.attempts + 1).to_string()),
+                                            ("next", &format!("{next:.1}")),
+                                        ],
                                     ))
                                     .font(t::sans(12.0))
                                     .color(t::wait()),
                                 );
                                 if let Some(e) = &rec.last_error {
                                     ui.label(
-                                        RichText::new(format!("Last error: {e}"))
+                                        RichText::new(fill(tr.set_last_error, &[("err", e)]))
                                             .font(t::sans(12.0))
                                             .color(t::bad()),
                                     );
@@ -939,22 +972,23 @@ impl App {
                             }
                         }
                     }
-                    if kit::tool_button(ui, "Restart audio", kit::Kind::Ghost, true).clicked() {
+                    if kit::tool_button(ui, tr.set_restart_audio, kit::Kind::Ghost, true).clicked()
+                    {
                         restart = true;
                     }
                 });
             });
         });
-        card(ui, "input (recording)", |ui| {
-            row(ui, "Device", None, |ui| {
+        card(ui, tr.set_card_input, |ui| {
+            row(ui, tr.set_device, None, |ui| {
                 let shown = s
                     .audio
                     .input
                     .clone()
-                    .unwrap_or_else(|| "System default".into());
+                    .unwrap_or_else(|| tr.set_system_default.into());
                 kit::dropdown(ui, "audio-in", &shown, 380.0, |ui| {
                     if ui
-                        .selectable_label(s.audio.input.is_none(), "System default")
+                        .selectable_label(s.audio.input.is_none(), tr.set_system_default)
                         .clicked()
                     {
                         s.audio.input = None;
@@ -971,8 +1005,8 @@ impl App {
             });
             row(
                 ui,
-                "Record input",
-                Some("A take per pass while Record is on."),
+                tr.set_record_input,
+                Some(tr.set_record_input_hint),
                 |ui| {
                     let mut on = self.rec.input;
                     if kit_switch(ui, &mut on) {
@@ -986,8 +1020,9 @@ impl App {
     }
 
     fn midi_page(&mut self, ui: &mut egui::Ui, s: &mut Settings) -> (bool, bool) {
+        let tr = self.tr();
         let (mut panic, mut rescan) = (false, false);
-        card(ui, "input devices", |ui| {
+        card(ui, tr.set_card_midi_in, |ui| {
             let ports = self
                 .midi_in
                 .as_ref()
@@ -995,17 +1030,15 @@ impl App {
                 .unwrap_or_default();
             if self.midi_in.is_none() {
                 ui.label(
-                    RichText::new("MIDI input is off in this run.")
+                    RichText::new(tr.set_midi_in_off)
                         .font(t::sans(13.0))
                         .color(t::faint()),
                 );
             } else if ports.is_empty() {
                 ui.label(
-                    RichText::new(
-                        "No MIDI inputs found. Plug in a keyboard; it connects by itself.",
-                    )
-                    .font(t::sans(13.0))
-                    .color(t::faint()),
+                    RichText::new(tr.set_no_midi_in)
+                        .font(t::sans(13.0))
+                        .color(t::faint()),
                 );
             }
             for p in &ports {
@@ -1017,8 +1050,8 @@ impl App {
                     ui.label(RichText::new(&p.name).font(t::sans(13.0)).color(t::text()));
                     let (text, color) = match (&p.error, p.connected) {
                         (Some(e), _) => (e.clone(), t::bad()),
-                        (None, true) => ("connected".into(), t::ok()),
-                        (None, false) => ("off".into(), t::faint()),
+                        (None, true) => (tr.set_connected.into(), t::ok()),
+                        (None, false) => (tr.set_off_lc.into(), t::faint()),
                     };
                     ui.label(RichText::new(text).font(t::sans(12.0)).color(color));
                 });
@@ -1029,10 +1062,10 @@ impl App {
                 .and_then(|m| m.last_activity)
                 .is_some_and(|t| t.elapsed().as_secs_f64() < 0.3);
             ui.horizontal(|ui| {
-                if kit::tool_button(ui, "Rescan", kit::Kind::Ghost, true).clicked() {
+                if kit::tool_button(ui, tr.set_rescan, kit::Kind::Ghost, true).clicked() {
                     rescan = true;
                 }
-                if kit::tool_button(ui, "Panic (all notes off)", kit::Kind::Ghost, true).clicked() {
+                if kit::tool_button(ui, tr.set_panic, kit::Kind::Ghost, true).clicked() {
                     panic = true;
                 }
                 let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), egui::Sense::hover());
@@ -1041,13 +1074,17 @@ impl App {
                     .midi_in
                     .as_ref()
                     .and_then(|m| m.last_port.clone())
-                    .map(|p| format!("activity · last: {p}"))
-                    .unwrap_or_else(|| "activity".into());
+                    .map(|p| fill(tr.set_activity_last, &[("port", &p)]))
+                    .unwrap_or_else(|| tr.set_activity.into());
                 ui.label(RichText::new(from).font(t::sans(12.0)).color(t::faint()));
             });
-            ui.label(RichText::new("Keys play the selected channel: the focused piano roll, else the rack selection.").font(t::sans(12.0)).color(t::faint()));
+            ui.label(
+                RichText::new(tr.set_keys_play)
+                    .font(t::sans(12.0))
+                    .color(t::faint()),
+            );
         });
-        card(ui, "output devices & clock sync", |ui| {
+        card(ui, tr.set_card_midi_out, |ui| {
             let out_ports = self
                 .midi_out
                 .as_ref()
@@ -1055,13 +1092,13 @@ impl App {
                 .unwrap_or_default();
             if self.midi_out.is_none() {
                 ui.label(
-                    RichText::new("MIDI output is off in this run.")
+                    RichText::new(tr.set_midi_out_off)
                         .font(t::sans(13.0))
                         .color(t::faint()),
                 );
             } else if out_ports.is_empty() {
                 ui.label(
-                    RichText::new("No MIDI outputs found. Connect hardware gear or a virtual port, then Rescan.")
+                    RichText::new(tr.set_no_midi_out)
                         .font(t::sans(13.0))
                         .color(t::faint()),
                 );
@@ -1075,40 +1112,39 @@ impl App {
                     ui.label(RichText::new(&p.name).font(t::sans(13.0)).color(t::text()));
                     let (text, color) = match (&p.error, p.connected) {
                         (Some(e), _) => (e.clone(), t::bad()),
-                        (None, true) => ("connected".into(), t::ok()),
-                        (None, false) => ("off".into(), t::faint()),
+                        (None, true) => (tr.set_connected.into(), t::ok()),
+                        (None, false) => (tr.set_off_lc.into(), t::faint()),
                     };
                     ui.label(RichText::new(text).font(t::sans(12.0)).color(color));
                 });
             }
-            row(
-                ui,
-                "MIDI Clock",
-                Some(
-                    "Master sends 24 PPQN clock + Start/Stop to enabled outputs. Slave follows incoming clock.",
-                ),
-                |ui| {
-                    use crate::settings::MidiClockMode;
-                    let labels: Vec<&str> = MidiClockMode::ALL.iter().map(|m| m.label()).collect();
-                    let cur = MidiClockMode::ALL
-                        .iter()
-                        .position(|m| *m == s.midi.clock)
-                        .unwrap_or(0);
-                    let (pick, _) = kit::chips(ui, "midi-clock-mode", &labels, cur, None);
-                    if let Some(i) = pick {
-                        s.midi.clock = MidiClockMode::ALL[i];
-                    }
-                },
-            );
+            row(ui, tr.set_midi_clock, Some(tr.set_midi_clock_hint), |ui| {
+                use crate::settings::MidiClockMode;
+                let labels: Vec<&str> = MidiClockMode::ALL
+                    .iter()
+                    .map(|m| tr.midi_clock_mode(*m))
+                    .collect();
+                let cur = MidiClockMode::ALL
+                    .iter()
+                    .position(|m| *m == s.midi.clock)
+                    .unwrap_or(0);
+                let (pick, _) = kit::chips(ui, "midi-clock-mode", &labels, cur, None);
+                if let Some(i) = pick {
+                    s.midi.clock = MidiClockMode::ALL[i];
+                }
+            });
             if s.midi.clock == crate::settings::MidiClockMode::Master
                 && let Some(mo) = &self.midi_out
             {
                 let open = mo.connected_count();
                 let ticks = mo.ticks();
                 let info = if open == 0 {
-                    "Enable at least one output port above to send clock.".to_string()
+                    tr.set_clock_need_port.to_string()
                 } else {
-                    format!("Sending to {open} port(s) · {ticks} pulses sent")
+                    fill(
+                        tr.set_clock_sending,
+                        &[("open", &open.to_string()), ("ticks", &ticks.to_string())],
+                    )
                 };
                 ui.label(RichText::new(info).font(t::sans(12.0)).color(if open == 0 {
                     t::wait()
@@ -1117,8 +1153,8 @@ impl App {
                 }));
             }
         });
-        card(ui, "notes in", |ui| {
-            row(ui, "Channel", None, |ui| {
+        card(ui, tr.set_card_notes_in, |ui| {
+            row(ui, tr.set_channel, None, |ui| {
                 let mut names: Vec<String> = vec!["Omni".into()];
                 names.extend((1..=16).map(|c| c.to_string()));
                 let names: Vec<&str> = names.iter().map(String::as_str).collect();
@@ -1133,9 +1169,12 @@ impl App {
                     }
                 });
             });
-            row(ui, "Velocity", None, |ui| {
+            row(ui, tr.set_velocity, None, |ui| {
                 ui.vertical(|ui| {
-                    let curves: Vec<&str> = VelocityCurve::ALL.iter().map(|c| c.label()).collect();
+                    let curves: Vec<&str> = VelocityCurve::ALL
+                        .iter()
+                        .map(|c| tr.velocity_curve(*c))
+                        .collect();
                     let (pick, _) = kit::chips(
                         ui,
                         "midi-vel",
@@ -1151,51 +1190,51 @@ impl App {
                     }
                     if s.midi.velocity == VelocityCurve::Fixed {
                         let mut v = s.midi.fixed_velocity as i32;
-                        ui.add(egui::Slider::new(&mut v, 1..=127).text("level"));
+                        ui.add(egui::Slider::new(&mut v, 1..=127).text(tr.set_level));
                         s.midi.fixed_velocity = v as u8;
                     }
                 });
             });
-            row(ui, "Transpose", None, |ui| {
+            row(ui, tr.set_transpose, None, |ui| {
                 for (text, d) in [("−12", -12i8), ("−1", -1), ("+1", 1), ("+12", 12)] {
                     if kit::tool_button(ui, text, kit::Kind::Ghost, true).clicked() {
                         s.midi.transpose = (s.midi.transpose + d).clamp(-48, 48);
                     }
                 }
                 ui.label(
-                    RichText::new(format!("{:+} semitones", s.midi.transpose))
-                        .font(t::sans(13.0))
-                        .color(t::text()),
+                    RichText::new(fill(
+                        tr.set_semitones,
+                        &[("n", &format!("{:+}", s.midi.transpose))],
+                    ))
+                    .font(t::sans(13.0))
+                    .color(t::text()),
                 );
                 if s.midi.transpose != 0
-                    && kit::tool_button(ui, "Reset", kit::Kind::Ghost, true).clicked()
+                    && kit::tool_button(ui, tr.set_reset, kit::Kind::Ghost, true).clicked()
                 {
                     s.midi.transpose = 0;
                 }
             });
-            row(ui, "Sustain pedal", Some("CC 64 holds notes."), |ui| {
+            row(ui, tr.set_sustain, Some(tr.set_sustain_hint), |ui| {
                 kit_switch(ui, &mut s.midi.sustain);
             });
         });
-        card(ui, "recording", |ui| {
-            row(
-                ui,
-                "Quantize",
-                Some("Recorded notes snap to the grid."),
-                |ui| {
-                    kit_switch(ui, &mut s.midi.quantize_record);
-                },
+        card(ui, tr.set_card_recording, |ui| {
+            row(ui, tr.set_quantize, Some(tr.set_quantize_hint), |ui| {
+                kit_switch(ui, &mut s.midi.quantize_record);
+            });
+            ui.label(
+                RichText::new(tr.set_record_note)
+                    .font(t::sans(12.0))
+                    .color(t::faint()),
             );
-            ui.label(RichText::new("Record (R) + Play writes what you play into the selected pattern, one undo step per pass.").font(t::sans(12.0)).color(t::faint()));
         });
-        card(ui, "controller links", |ui| {
+        card(ui, tr.set_card_links, |ui| {
             if s.midi.bindings.is_empty() {
                 ui.label(
-                    RichText::new(
-                        "No links yet. Right-click a knob → Link to controller…, then move a knob.",
-                    )
-                    .font(t::sans(13.0))
-                    .color(t::faint()),
+                    RichText::new(tr.set_no_links)
+                        .font(t::sans(13.0))
+                        .color(t::faint()),
                 );
             } else {
                 let mut remove: Option<keyframexl::automation::Target> = None;
@@ -1208,7 +1247,7 @@ impl App {
                                 .color(t::muted()),
                         );
                         if kit::tool_button(ui, "×", kit::Kind::Ghost, true)
-                            .on_hover_text("Forget this link")
+                            .on_hover_text(tr.set_forget_link)
                             .clicked()
                         {
                             remove = Some(b.target);
@@ -1220,11 +1259,9 @@ impl App {
                 }
             }
             ui.label(
-                RichText::new(
-                    "A knob moves its control over the full range. One gesture is one undo step.",
-                )
-                .font(t::sans(12.0))
-                .color(t::faint()),
+                RichText::new(tr.set_links_note)
+                    .font(t::sans(12.0))
+                    .color(t::faint()),
             );
         });
         (panic, rescan)
@@ -1232,53 +1269,48 @@ impl App {
 }
 
 fn general_page(ui: &mut egui::Ui, s: &mut Settings, checking_updates: bool) -> bool {
+    let tr = crate::i18n::strings(s.general.language);
     let mut check_now = false;
-    card(ui, "interface", |ui| {
-        row(
-            ui,
-            "Size",
-            Some("Ctrl+= and Ctrl+− change it, Ctrl+0 resets."),
-            |ui| {
-                let shown = format!("{:.0}%", s.general.ui_scale * 100.0);
-                kit::dropdown(ui, "gen-ui-scale", &shown, 110.0, |ui| {
-                    for v in crate::settings::UI_SCALES {
-                        if ui
-                            .selectable_label(
-                                (v - s.general.ui_scale).abs() < 0.001,
-                                format!("{:.0}%", v * 100.0),
-                            )
-                            .clicked()
-                        {
-                            s.general.ui_scale = v;
-                        }
+    card(ui, tr.set_card_interface, |ui| {
+        row(ui, tr.set_size, Some(tr.set_size_hint), |ui| {
+            let shown = format!("{:.0}%", s.general.ui_scale * 100.0);
+            kit::dropdown(ui, "gen-ui-scale", &shown, 110.0, |ui| {
+                for v in crate::settings::UI_SCALES {
+                    if ui
+                        .selectable_label(
+                            (v - s.general.ui_scale).abs() < 0.001,
+                            format!("{:.0}%", v * 100.0),
+                        )
+                        .clicked()
+                    {
+                        s.general.ui_scale = v;
                     }
-                });
-                let native = ui.ctx().native_pixels_per_point().unwrap_or(1.0);
-                ui.label(
-                    RichText::new(format!("system scale {:.0}%", native * 100.0))
-                        .font(t::sans(12.0))
-                        .color(t::faint()),
-                );
-            },
-        );
+                }
+            });
+            let native = ui.ctx().native_pixels_per_point().unwrap_or(1.0);
+            ui.label(
+                RichText::new(fill(
+                    tr.set_system_scale,
+                    &[("pct", &format!("{:.0}", native * 100.0))],
+                ))
+                .font(t::sans(12.0))
+                .color(t::faint()),
+            );
+        });
         row(
             ui,
-            "Theme",
+            tr.set_theme,
             Some(match (s.general.theme, t::system_theme()) {
                 (crate::settings::ThemeMode::System, Some(t::Theme::Light)) => {
-                    "The desktop asks for light."
+                    tr.set_theme_sys_light
                 }
-                (crate::settings::ThemeMode::System, Some(t::Theme::Dark)) => {
-                    "The desktop asks for dark."
-                }
-                (crate::settings::ThemeMode::System, None) => {
-                    "The desktop gives no preference: dark."
-                }
-                _ => "Light or dark interface. Faceplates stay dark.",
+                (crate::settings::ThemeMode::System, Some(t::Theme::Dark)) => tr.set_theme_sys_dark,
+                (crate::settings::ThemeMode::System, None) => tr.set_theme_sys_none,
+                _ => tr.set_theme_hint,
             }),
             |ui| {
                 use crate::settings::ThemeMode;
-                let labels: Vec<&str> = ThemeMode::ALL.iter().map(|m| m.label()).collect();
+                let labels: Vec<&str> = ThemeMode::ALL.iter().map(|m| tr.theme_mode(*m)).collect();
                 let cur = ThemeMode::ALL
                     .iter()
                     .position(|m| *m == s.general.theme)
@@ -1291,11 +1323,14 @@ fn general_page(ui: &mut egui::Ui, s: &mut Settings, checking_updates: bool) -> 
         );
         row(
             ui,
-            "Deck monitor",
-            Some("Master bus oscilloscope or spectrum in the top transport bar."),
+            tr.set_deck_monitor,
+            Some(tr.set_deck_monitor_hint),
             |ui| {
                 use crate::settings::DeckMonitor;
-                let labels: Vec<&str> = DeckMonitor::ALL.iter().map(|m| m.label()).collect();
+                let labels: Vec<&str> = DeckMonitor::ALL
+                    .iter()
+                    .map(|m| tr.deck_monitor(*m))
+                    .collect();
                 let cur = DeckMonitor::ALL
                     .iter()
                     .position(|m| *m == s.general.deck_monitor)
@@ -1306,15 +1341,9 @@ fn general_page(ui: &mut egui::Ui, s: &mut Settings, checking_updates: bool) -> 
                 }
             },
         );
-        row(
-            ui,
-            "X11 window",
-            Some("Plugin editors open inside our windows, like FL. Restart to apply."),
-            |ui| {
-                kit_switch(ui, &mut s.general.x11);
-            },
-        );
-        let tr = crate::i18n::strings(s.general.language);
+        row(ui, tr.set_x11, Some(tr.set_x11_hint), |ui| {
+            kit_switch(ui, &mut s.general.x11);
+        });
         row(
             ui,
             tr.setting_language,
@@ -1334,17 +1363,11 @@ fn general_page(ui: &mut egui::Ui, s: &mut Settings, checking_updates: bool) -> 
                 }
             },
         );
-        row(
-            ui,
-            "System title bar",
-            Some("The desktop's title bar instead of the menu row with the window buttons."),
-            |ui| {
-                kit_switch(ui, &mut s.general.system_title_bar);
-            },
-        );
+        row(ui, tr.set_title_bar, Some(tr.set_title_bar_hint), |ui| {
+            kit_switch(ui, &mut s.general.system_title_bar);
+        });
     });
-    card(ui, "projects", |ui| {
-        let tr = crate::i18n::strings(s.general.language);
+    card(ui, tr.set_card_projects, |ui| {
         row(
             ui,
             tr.setting_show_welcome,
@@ -1353,9 +1376,9 @@ fn general_page(ui: &mut egui::Ui, s: &mut Settings, checking_updates: bool) -> 
                 kit_switch(ui, &mut s.general.show_welcome);
             },
         );
-        row(ui, "Autosave", None, |ui| {
+        row(ui, tr.set_autosave, None, |ui| {
             let mins = [0u32, 1, 2, 5, 10];
-            let names = ["Off", "1 min", "2 min", "5 min", "10 min"];
+            let names = [tr.set_off, "1 min", "2 min", "5 min", "10 min"];
             let (pick, _) = kit::chips(
                 ui,
                 "gen-autosave",
@@ -1369,39 +1392,21 @@ fn general_page(ui: &mut egui::Ui, s: &mut Settings, checking_updates: bool) -> 
                 s.general.autosave_minutes = mins[i];
             }
         });
-        row(
-            ui,
-            "Starter sounds",
-            Some("New projects load the packs and .dwp presets."),
-            |ui| {
-                kit_switch(ui, &mut s.general.default_kit);
-            },
-        );
-        row(
-            ui,
-            "Ask on close",
-            Some("Offer to save unsaved changes."),
-            |ui| {
-                kit_switch(ui, &mut s.general.confirm_close);
-            },
-        );
+        row(ui, tr.set_starter, Some(tr.set_starter_hint), |ui| {
+            kit_switch(ui, &mut s.general.default_kit);
+        });
+        row(ui, tr.set_ask_close, Some(tr.set_ask_close_hint), |ui| {
+            kit_switch(ui, &mut s.general.confirm_close);
+        });
     });
-    card(ui, "updates", |ui| {
-        row(
-            ui,
-            "Check automatically",
-            Some(
-                "Checks GitHub Releases at most once per day on startup. Set KFXL_NO_UPDATE_CHECK=1 to disable.",
-            ),
-            |ui| {
-                kit_switch(ui, &mut s.general.check_updates);
-            },
-        );
-        let tr = crate::i18n::strings(s.general.language);
+    card(ui, tr.set_card_updates, |ui| {
+        row(ui, tr.set_check_auto, Some(tr.set_check_auto_hint), |ui| {
+            kit_switch(ui, &mut s.general.check_updates);
+        });
         row(ui, tr.update_nightly, Some(tr.update_nightly_hint), |ui| {
             kit_switch(ui, &mut s.general.nightly_updates);
         });
-        row(ui, "Current version", None, |ui| {
+        row(ui, tr.set_current_version, None, |ui| {
             ui.label(
                 RichText::new(format!("v{}", keyframexl::version::VERSION))
                     .font(t::mono(12.5))
@@ -1413,9 +1418,9 @@ fn general_page(ui: &mut egui::Ui, s: &mut Settings, checking_updates: bool) -> 
             if kit::tool_button(
                 ui,
                 if checking_updates {
-                    "Checking…"
+                    tr.set_checking
                 } else {
-                    "Check now"
+                    tr.set_check_now
                 },
                 kit::Kind::Ghost,
                 !checking_updates,
@@ -1427,7 +1432,7 @@ fn general_page(ui: &mut egui::Ui, s: &mut Settings, checking_updates: bool) -> 
             if let Some(ver) = s.general.skipped_version.clone()
                 && kit::tool_button(
                     ui,
-                    &format!("Clear skipped (v{ver})"),
+                    &fill(tr.set_clear_skipped, &[("ver", &ver)]),
                     kit::Kind::Ghost,
                     true,
                 )
@@ -1488,7 +1493,7 @@ fn nav(ui: &mut egui::Ui, page: Page, height: f32) -> Option<Page> {
         p.text(
             r.left_center() + vec2(14.0, 0.0),
             Align2::LEFT_CENTER,
-            sec.label(),
+            sec.label(crate::i18n::ctx_tr(ui.ctx())),
             t::sans(14.0),
             if on { t::text() } else { t::muted() },
         );
@@ -1500,11 +1505,11 @@ fn nav(ui: &mut egui::Ui, page: Page, height: f32) -> Option<Page> {
 }
 
 /// `PipeWire · device · 48000 Hz · 256 frames · 5.3 ms`
-fn audio_summary(r: &crate::audio::Running) -> String {
+fn audio_summary(r: &crate::audio::Running, tr: &crate::i18n::Strings) -> String {
     let buf = r
         .buffer
-        .map(|b| format!("{b} frames"))
-        .unwrap_or_else(|| "default buffer".into());
+        .map(|b| fill(tr.set_frames, &[("n", &b.to_string())]))
+        .unwrap_or_else(|| tr.set_default_buffer.into());
     format!(
         "{} · {} · {} Hz · {buf} · {:.1} ms",
         r.backend.label(),

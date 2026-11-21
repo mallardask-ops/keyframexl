@@ -1,0 +1,183 @@
+# Literals in src/ui that are not UI text: ids, keys, units, brand and
+# product names, default data names (channel, pattern, preset names).
+# Format: "<file>: <literal>", \n for a newline. Kept in sync by
+# scan_tests::ui_has_no_new_english_literals.
+browser.rs: KeyFrame Tide ({})
+browser.rs: Libraries
+browser.rs: Packs
+browser.rs: Recorded
+browser.rs: Rendered
+deck.rs: REC {}:{:02}
+export.rs: 320 kbps
+export.rs: 32 float
+forge.rs: {:.1} kHz
+forge.rs: 2 KHZ
+forge.rs: 44.1 kHz
+forge.rs: 48 kHz
+forge.rs: Forge
+forge.rs: Forge bounce
+forge.rs: Noise
+forge.rs: Sample
+forge.rs: Synth
+forge.rs: Tone
+fx_response.rs: 100 Hz – 10 kHz     ·     2 s
+fx_response.rs: 1 kHz SINE     ·     3 ms
+fx_response.rs: 20 Hz – 20 kHz     ·     ±12 dB
+fx_response.rs: GAIN     ·     1 s
+fx_response.rs: GAIN     ·     20 ms
+fx_response.rs: GAIN     ·     500 ms
+fx_response.rs: INPUT     −1 … +1
+fx_views.rs: 10 kHz
+fx_views.rs: {bits:.0} bit
+instrument.rs: KeyFrame Tide
+library.rs: Bass
+library.rs: Bass/Acoustic Bass.dwp
+library.rs: Bass/Fingered Bass.dwp
+manual.rs: Untitled
+menu.rs: Alt+{}
+menu.rs: Alt+E
+menu.rs: Alt+F8
+menu.rs: Ctrl+-
+menu.rs: Ctrl+=
+menu.rs: Ctrl+0
+menu.rs: Ctrl+C
+menu.rs: Ctrl+H
+menu.rs: Ctrl+J
+menu.rs: Ctrl+M
+menu.rs: Ctrl+N
+menu.rs: Ctrl+O
+menu.rs: Ctrl+R
+menu.rs: Ctrl+S
+menu.rs: Ctrl+Shift+Ins
+menu.rs: Ctrl+Shift+M
+menu.rs: Ctrl+Shift+N
+menu.rs: Ctrl+Shift+S
+menu.rs: Ctrl+T
+menu.rs: Ctrl+V
+menu.rs: Ctrl+X
+menu.rs: Ctrl+Y
+menu.rs: Ctrl+Z
+menu.rs: KeyFrame
+menu.rs: {name}{dirty}  —  KeyFrameXL
+midi_io.rs: alto sax
+midi_io.rs: brass 1
+midi_io.rs: choir aahs
+midi_io.rs: clean guitar
+midi_io.rs: fingered bass
+midi_io.rs: Hat
+midi_io.rs: Kick
+midi_io.rs: organ 1
+midi_io.rs: piano 1
+midi_io.rs: saw wave
+midi_io.rs: Snare
+mixer.rs: Ctrl+L
+mod.rs: {} copy
+mod.rs: Deep House
+mod.rs: Demo Artist
+mod.rs: Drop
+mod.rs: Drums
+mod.rs: Fill
+mod.rs: FL Studio VSTi ({})
+mod.rs: Hat
+mod.rs: Image-Line
+mod.rs: Intro
+mod.rs: KeyFrame Tide
+mod.rs: KeyFrameXL v9.9.9
+mod.rs: Kick
+mod.rs: Kick from Kit 3, pad resampled from take 2.
+mod.rs: {name} (FL render)
+mod.rs: Night Sessions
+mod.rs: Pattern {id}
+mod.rs: Reverb
+mod.rs: SHA-256 checksum mismatch.
+mod.rs: Verse
+plugins_ui.rs: FL Studio
+plugins_ui.rs: FL Studio {v}
+plugins_ui.rs: Wine
+project.rs:  BPM
+project.rs: Ambient
+project.rs: Chiptune
+project.rs: Cinematic
+project.rs: Classical
+project.rs: Deep House
+project.rs: Drum & bass
+project.rs: Electronic
+project.rs: Hip-hop
+project.rs: House
+project.rs: Jazz
+project.rs: Lo-fi hip-hop
+project.rs: Pop
+project.rs: Rock
+project.rs: Soundtrack
+project.rs: Synthwave
+project.rs: Techno
+project.rs: Trap
+project.rs: {}{} — KeyFrameXL
+rack.rs: Alt+↑
+rack.rs: Alt+↓
+rack.rs: Alt+C
+rack.rs: Alt+Del
+rack.rs: Bass
+rack.rs:  · Ctrl+{}
+rack.rs: Ctrl+K
+rack.rs: Ctrl+L
+rack.rs: Hat
+rack.rs: Kick
+rack.rs: Sampler
+rack.rs: Snare
+record.rs: Input
+roll.rs: Alt+E
+roll.rs: Alt+Q
+roll.rs: Alt+V
+roll.rs: Ctrl+↑
+roll.rs: Ctrl+↓
+roll.rs: Ctrl+A
+roll.rs: Ctrl+B
+roll.rs: Ctrl+C
+roll.rs: Ctrl+D
+roll.rs: Ctrl+G
+roll.rs: Ctrl+L
+roll.rs: Ctrl+Q
+roll.rs: Ctrl+U
+roll.rs: Ctrl+V
+roll.rs: Ctrl+X
+roll.rs: Del
+sampler.rs: {} {} · {:02} {} · {} · {:.1} kHz · {}
+sampler.rs: {:.2} kHz
+sampler.rs: -inf dB
+sampler.rs: LFO {}
+sampler.rs: + LFO1→{}
+sampler.rs: + LFO2→{}
+script.rs: script line {}: {line}
+settings_ui.rs: 10 min
+settings_ui.rs: {:.1} kHz
+settings_ui.rs: 1 min
+settings_ui.rs: 2 min
+settings_ui.rs: 5 min
+settings_ui.rs: Omni
+show.rs: #!/bin/sh\nffmpeg -y -framerate {fps} -i frame-%06d.png -i audio.wav -c:v libx264 -pix_fmt yuv420p -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" -c:a aac -b:a 192k -shortest "{}"\n
+show.rs: {bpm_now:.0} BPM
+show.rs: {fps} fps
+synth.rs: {:.1} kHz
+synth.rs: {} edit
+synth.rs: LFO 1
+synth.rs: LFO 2
+synth.rs: OSC A
+synth.rs: OSC B
+synth.rs: OSC C
+tempo_lane.rs: {bpm:.1} BPM @ {}
+updater_ui.rs: git pull && cargo build --release
+updater_ui.rs: KeyFrameXL
+vocal.rs: Vocal
+welcome.rs: {:.0} BPM
+welcome.rs: {} {} · 120 BPM
+welcome.rs: Bass
+welcome.rs: KeyFrameXL
+welcome.rs: Pad
+welcome.rs: Sampler 1
+welcome.rs: Soft Pad
+welcome.rs: Vocal
+workspace.rs: Arrange
+workspace.rs: Compose
+workspace.rs: Edit
+workspace.rs: no config directory

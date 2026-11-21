@@ -5,6 +5,7 @@
 //! a compact visual modulation matrix.
 
 use super::{App, Tone, kit};
+use crate::i18n::fill;
 use crate::theme as t;
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 use keyframexl::sampler::{
@@ -14,7 +15,6 @@ use keyframexl::sampler::{
 use keyframexl::sequence::InstrumentKind;
 use std::sync::Arc;
 
-const PAGES: [&str; 5] = ["Program", "Zone", "Filter & Env", "Modulation", "Zones"];
 const TWO_COLUMNS: f32 = 740.0;
 
 /// Per-window editor state: page and zone selection (None = all zones).
@@ -81,7 +81,6 @@ impl WaveViewState {
 }
 
 /// DirectWave Loop Type, mapped onto loop mode + one-shot.
-const LOOP_TYPES: [&str; 5] = ["Off", "Forward", "One Shot", "Sustained", "Bounce"];
 fn loop_type(z: &Zone) -> usize {
     if z.params.one_shot {
         return 2;
@@ -450,10 +449,8 @@ fn smp_bipolar_bar(
         t::mono(12.0),
         if enabled { t::text() } else { t::faint() },
     );
-    kit::tip(
-        resp,
-        format!("{hint}\nDrag left/right · Shift fine · Double-click resets"),
-    );
+    let tr = crate::i18n::ctx_tr(ui.ctx());
+    kit::tip(resp, fill(tr.smp_bipolar_tip, &[("hint", hint)]));
     (started, changed)
 }
 
@@ -495,7 +492,8 @@ impl App {
             let p = Arc::make_mut(arc);
             f(p);
             if p.validate_params().is_err() {
-                self.say(Tone::Bad, "That value is out of range; it was not applied.");
+                let msg = self.tr().smp_val_out_of_range.to_string();
+                self.say(Tone::Bad, msg);
             }
         }
         self.publish();
@@ -547,11 +545,10 @@ impl App {
     }
 
     pub(super) fn sampler_editor(&mut self, ui: &mut Ui, id: u64, preset: &SamplePreset) {
+        let tr = self.tr();
+        let lang = tr.lang;
         if preset.zones.is_empty() {
-            ui.label(
-                egui::RichText::new("This preset has no zones. Load another .dwp or audio sample.")
-                    .color(t::muted()),
-            );
+            ui.label(egui::RichText::new(tr.smp_no_zones).color(t::muted()));
             return;
         }
         let mut st = *self.sampler_ui(id);
@@ -563,6 +560,7 @@ impl App {
         }
         let zi = st.zone.unwrap_or(0).min(preset.zones.len() - 1);
         let z = preset.zones[zi].clone();
+        let pages = tr.smp_pages();
 
         egui::Frame::new()
             .fill(t::SMP_CHASSIS)
@@ -585,8 +583,8 @@ impl App {
                     if let Some(p) = smp_pills(
                         ui,
                         &format!("smp-page-{id}"),
-                        &PAGES,
-                        st.page.min(PAGES.len() - 1),
+                        &pages,
+                        st.page.min(pages.len() - 1),
                         t::SMP_GOLD,
                     ) {
                         self.sampler_ui(id).page = p;
@@ -594,13 +592,13 @@ impl App {
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let scope_text = match st.zone {
-                            Some(i) => format!(
-                                "EDITING ZONE {:02}  ({}..{})",
-                                i + 1,
-                                super::roll::note_name(z.low),
-                                super::roll::note_name(z.high)
-                            ),
-                            None => format!("GLOBAL EDIT · ALL {} ZONES", preset.zones.len()),
+                            Some(i) => {
+                                let n = format!("{:02}", i + 1);
+                                let lo = super::roll::note_name(z.low);
+                                let hi = super::roll::note_name(z.high);
+                                fill(tr.smp_editing_zone, &[("n", &n), ("lo", &lo), ("hi", &hi)])
+                            }
+                            None => tr.smp_global_edit_zones.fmt(lang, preset.zones.len()),
                         };
                         ui.label(egui::RichText::new(scope_text).font(t::mono(12.0)).color(
                             if st.zone.is_some() {
@@ -638,6 +636,7 @@ impl App {
         zi: usize,
         st: SamplerUi,
     ) {
+        let tr = self.tr();
         egui::Frame::new()
             .fill(t::SMP_DECK)
             .stroke(Stroke::new(1.0_f32, t::SMP_LINE))
@@ -660,8 +659,9 @@ impl App {
                     let dur = z.end.saturating_sub(z.offset) as f64 / z.sample_rate.max(1) as f64;
                     let sample_name = super::instrument::file_name(&z.name);
                     let meta = format!(
-                        "{} ZN · {:02} {} · {} · {:.1} kHz · {}",
+                        "{} {} · {:02} {} · {} · {:.1} kHz · {}",
                         preset.zones.len(),
+                        tr.smp_zn_short,
                         zi + 1,
                         kit::elide(ui.painter(), &sample_name, t::mono(12.0), 170.0),
                         super::roll::note_name(z.root),
@@ -676,8 +676,10 @@ impl App {
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // Current Zone vs All Zones scope toggle.
-                        let all_label = format!("All ({})", preset.zones.len());
-                        let cur_label = format!("Zone {:02}", zi + 1);
+                        let zn_total = preset.zones.len().to_string();
+                        let zn_cur = format!("{:02}", zi + 1);
+                        let all_label = fill(tr.smp_scope_all, &[("n", &zn_total)]);
+                        let cur_label = fill(tr.smp_scope_zone, &[("n", &zn_cur)]);
                         if let Some(pick) = smp_pills(
                             ui,
                             &format!("smp-scope-{id}"),
@@ -734,7 +736,7 @@ impl App {
                             t::mono(12.0),
                             if held_now { t::edge() } else { t::SMP_GOLD },
                         );
-                        kit::tip(btn_resp, "Hold to audition the active zone at its root key");
+                        kit::tip(btn_resp, tr.smp_audition_tip);
                     });
                 });
             });
@@ -1012,22 +1014,33 @@ impl App {
         if let Some(i) = hovered_zone
             && mode == 0
         {
+            let tr = self.tr();
             let z = &preset.zones[i];
+            let n_str = format!("{:02}", i + 1);
+            let name = super::instrument::file_name(&z.name);
+            let lo_s = super::roll::note_name(z.low);
+            let hi_s = super::roll::note_name(z.high);
+            let root_s = super::roll::note_name(z.root);
+            let vlo_s = z.low_velocity.to_string();
+            let vhi_s = z.high_velocity.to_string();
+            let tip_text = fill(
+                tr.smp_zone_map_tip,
+                &[
+                    ("n", &n_str),
+                    ("name", &name),
+                    ("lo", &lo_s),
+                    ("hi", &hi_s),
+                    ("root", &root_s),
+                    ("vlo", &vlo_s),
+                    ("vhi", &vhi_s),
+                ],
+            );
             egui::show_tooltip_at_pointer(
                 ui.ctx(),
                 ui.layer_id(),
                 egui::Id::new(("zone-tip", id)),
                 |ui| {
-                    ui.label(format!(
-                        "Zone {:02}: {}\nKeys {} – {}, root {} (drag ◆ to move root)\nVelocity {} – {} · drag zone edges to resize\nClick to select · Shift+click to audition key/vel",
-                        i + 1,
-                        super::instrument::file_name(&z.name),
-                        super::roll::note_name(z.low),
-                        super::roll::note_name(z.high),
-                        super::roll::note_name(z.root),
-                        z.low_velocity,
-                        z.high_velocity,
-                    ));
+                    ui.label(tip_text);
                 },
             );
         }
@@ -1036,58 +1049,60 @@ impl App {
     // ---------------------------------------------------------------- Page 0: Program
 
     fn page_program(&mut self, ui: &mut Ui, id: u64, preset: &SamplePreset) {
+        let tr = self.tr();
+        let lang = tr.lang;
         let pr = preset.program.clone();
         let wide = ui.available_width() >= TWO_COLUMNS;
         let draw_output = |this: &mut Self, ui: &mut Ui| {
             smp_bay(ui, |ui| {
-                smp_section_head(ui, "program output & tuning", t::SMP_GOLD);
+                smp_section_head(ui, tr.smp_sec_prog_out, t::SMP_GOLD);
                 ui.horizontal_wrapped(|ui| {
                     let c = t::SMP_GOLD;
                     let specs: [(P, f64); 4] = [
                         (
                             P {
-                                label: "Volume",
+                                label: tr.smp_k_volume,
                                 min: -60.0,
                                 max: 12.0,
                                 default: 0.0,
                                 fmt: &db,
-                                hint: "Master program volume",
+                                hint: tr.smp_k_volume_hint,
                                 log: false,
                             },
                             pr.volume_db,
                         ),
                         (
                             P {
-                                label: "Pan",
+                                label: tr.smp_k_pan,
                                 min: -1.0,
                                 max: 1.0,
                                 default: 0.0,
                                 fmt: &pan,
-                                hint: "Program pan offset",
+                                hint: tr.smp_k_pan_hint,
                                 log: false,
                             },
                             pr.pan,
                         ),
                         (
                             P {
-                                label: "Trans",
+                                label: tr.smp_k_trans,
                                 min: -48.0,
                                 max: 48.0,
                                 default: 0.0,
                                 fmt: &|v| format!("{:+.0} st", v.round()),
-                                hint: "Global transpose in semitones",
+                                hint: tr.smp_k_trans_hint,
                                 log: false,
                             },
                             pr.transpose as f64,
                         ),
                         (
                             P {
-                                label: "PB Rng",
+                                label: tr.smp_k_pb_rng,
                                 min: 0.0,
                                 max: 4800.0,
                                 default: 200.0,
                                 fmt: &|v| format!("{:.0} ct", v),
-                                hint: "MIDI pitch bend range (cents)",
+                                hint: tr.smp_k_pb_rng_hint,
                                 log: false,
                             },
                             pr.bend_range,
@@ -1109,9 +1124,10 @@ impl App {
 
         let draw_voice = |this: &mut Self, ui: &mut Ui| {
             smp_bay(ui, |ui| {
-                smp_section_head(ui, "voice mode & glide", t::SMP_LOOP);
+                smp_section_head(ui, tr.smp_sec_voice_glide, t::SMP_LOOP);
                 ui.horizontal_wrapped(|ui| {
-                    let modes: Vec<&str> = PlayMode::ALL.iter().map(|m| m.label()).collect();
+                    let modes: Vec<&str> =
+                        PlayMode::ALL.iter().map(|m| tr.smp_play_mode(*m)).collect();
                     let cur = PlayMode::ALL
                         .iter()
                         .position(|m| *m == pr.play_mode)
@@ -1119,7 +1135,10 @@ impl App {
                     if let Some(i) = smp_pills(ui, &format!("pm-{id}"), &modes, cur, t::SMP_GOLD) {
                         this.edit_preset(id, true, |p| p.program.play_mode = PlayMode::ALL[i]);
                     }
-                    let gm: Vec<&str> = GlideMode::ALL.iter().map(|m| m.label()).collect();
+                    let gm: Vec<&str> = GlideMode::ALL
+                        .iter()
+                        .map(|m| tr.smp_glide_mode(*m))
+                        .collect();
                     let gcur = GlideMode::ALL
                         .iter()
                         .position(|m| *m == pr.glide_mode)
@@ -1132,12 +1151,12 @@ impl App {
                     if let Some(v) = this.pknob(
                         ui,
                         &P {
-                            label: "Poly",
+                            label: tr.smp_k_poly,
                             min: 1.0,
                             max: 64.0,
                             default: 32.0,
                             fmt: &|v| format!("{:.0}", v.round()),
-                            hint: "Voice limit in Poly mode",
+                            hint: tr.smp_k_poly_hint,
                             log: false,
                         },
                         t::SMP_GOLD,
@@ -1145,15 +1164,19 @@ impl App {
                     ) {
                         this.edit_preset(id, false, |p| p.program.polyphony = v.round() as u8);
                     }
+                    let off_str = tr.smp_off_lower;
+                    let fmt_glide = move |v: f64| {
+                        if v <= 0.0 { off_str.into() } else { secs(v) }
+                    };
                     if let Some(v) = this.pknob(
                         ui,
                         &P {
-                            label: "Glide",
+                            label: tr.smp_k_glide,
                             min: 0.0,
                             max: 10.0,
                             default: 0.0,
-                            fmt: &|v| if v <= 0.0 { "off".into() } else { secs(v) },
-                            hint: "Portamento time",
+                            fmt: &fmt_glide,
+                            hint: tr.smp_k_glide_hint,
                             log: true,
                         },
                         t::SMP_LOOP,
@@ -1190,7 +1213,7 @@ impl App {
 
         // Preset Diagnostics & Import Report.
         smp_bay(ui, |ui| {
-            smp_section_head(ui, "preset summary", t::SMP_SAND);
+            smp_section_head(ui, tr.smp_sec_summary, t::SMP_SAND);
             let lo = preset.zones.iter().map(|z| z.low).min().unwrap_or(0);
             let hi = preset.zones.iter().map(|z| z.high).max().unwrap_or(127);
             let total_frames: usize = preset.zones.iter().map(|z| z.frames.len()).sum();
@@ -1199,14 +1222,21 @@ impl App {
                 .iter()
                 .filter(|z| z.loop_mode != LoopMode::None)
                 .count();
+            let zones_str = tr.smp_zones_count.fmt(lang, preset.zones.len());
+            let lo_str = super::roll::note_name(lo);
+            let hi_str = super::roll::note_name(hi);
+            let looped_str = looping.to_string();
+            let mb_str = format!("{:.2}", (total_frames * 8) as f64 / (1024.0 * 1024.0));
             ui.label(
-                egui::RichText::new(format!(
-                    "{} zone(s) · Range {} – {} · {} looped · {:.2} MB decoded audio",
-                    preset.zones.len(),
-                    super::roll::note_name(lo),
-                    super::roll::note_name(hi),
-                    looping,
-                    (total_frames * 8) as f64 / (1024.0 * 1024.0),
+                egui::RichText::new(fill(
+                    tr.smp_summary_line,
+                    &[
+                        ("zones", &zones_str),
+                        ("lo", &lo_str),
+                        ("hi", &hi_str),
+                        ("looped", &looped_str),
+                        ("mb", &mb_str),
+                    ],
                 ))
                 .font(t::mono(12.5))
                 .color(t::text()),
@@ -1231,6 +1261,7 @@ impl App {
     // ---------------------------------------------------------------- Page 1: Zone & Waveform
 
     fn page_zone(&mut self, ui: &mut Ui, id: u64, zi: usize, z: &Zone) {
+        let tr = self.tr();
         // Hero Interactive Sample Waveform Scope.
         self.waveform_scope(ui, id, zi, z);
 
@@ -1245,24 +1276,28 @@ impl App {
                         ui.painter(),
                         pos2(sq.right() + 6.0, sq.center().y),
                         Align2::LEFT_CENTER,
-                        "pitch & root",
+                        tr.smp_sec_pitch_root,
                         11.0,
                         t::SMP_SAND,
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button("▶").on_hover_text("Root key up").clicked()
+                        if ui
+                            .small_button("▶")
+                            .on_hover_text(tr.smp_root_up_tip)
+                            .clicked()
                             && z.root < 127
                         {
                             this.edit_zones(id, true, |z| z.root = (z.root + 1).min(127));
                         }
+                        let note_str = super::roll::note_name(z.root);
                         ui.label(
-                            egui::RichText::new(format!("ROOT {}", super::roll::note_name(z.root)))
+                            egui::RichText::new(fill(tr.smp_root_badge, &[("note", &note_str)]))
                                 .font(t::mono(12.0))
                                 .color(t::SMP_GOLD),
                         );
                         if ui
                             .small_button("◀")
-                            .on_hover_text("Root key down")
+                            .on_hover_text(tr.smp_root_down_tip)
                             .clicked()
                             && z.root > 0
                         {
@@ -1276,36 +1311,36 @@ impl App {
                     let rows: [(P, f64); 3] = [
                         (
                             P {
-                                label: "Semi",
+                                label: tr.smp_k_semi,
                                 min: -36.0,
                                 max: 36.0,
                                 default: 0.0,
                                 fmt: &|v| format!("{:+.0} st", v.round()),
-                                hint: "Transpose in semitones",
+                                hint: tr.smp_k_semi_hint,
                                 log: false,
                             },
                             semi,
                         ),
                         (
                             P {
-                                label: "Fine",
+                                label: tr.smp_k_fine,
                                 min: -50.0,
                                 max: 50.0,
                                 default: 0.0,
                                 fmt: &|v| format!("{v:+.0} ct"),
-                                hint: "Fine tune in cents",
+                                hint: tr.smp_k_fine_hint,
                                 log: false,
                             },
                             fine,
                         ),
                         (
                             P {
-                                label: "KTrk",
+                                label: tr.smp_k_ktrk,
                                 min: -1.0,
                                 max: 1.0,
                                 default: 1.0,
                                 fmt: &|v| format!("{:+.0}%", v * 100.0),
-                                hint: "Keyboard pitch tracking",
+                                hint: tr.smp_k_ktrk_hint,
                                 log: false,
                             },
                             z.params.key_track,
@@ -1330,60 +1365,62 @@ impl App {
 
         let draw_amp = |this: &mut Self, ui: &mut Ui| {
             smp_bay(ui, |ui| {
-                smp_section_head(ui, "amp & group", t::SMP_START);
+                smp_section_head(ui, tr.smp_sec_amp_grp, t::SMP_START);
                 ui.horizontal_wrapped(|ui| {
                     let gain_db = 20.0 * z.gain.max(1e-6).log10();
+                    let off_str = tr.smp_off_lower;
+                    let fmt_grp = move |v: f64| {
+                        if v < 0.5 {
+                            off_str.into()
+                        } else {
+                            format!("{:.0}", v.round())
+                        }
+                    };
                     let rows: [(P, f64); 4] = [
                         (
                             P {
-                                label: "Gain",
+                                label: tr.smp_k_gain,
                                 min: -60.0,
                                 max: 24.0,
                                 default: 0.0,
                                 fmt: &db,
-                                hint: "Zone output gain",
+                                hint: tr.smp_k_gain_hint,
                                 log: false,
                             },
                             gain_db.max(-60.0),
                         ),
                         (
                             P {
-                                label: "Pan",
+                                label: tr.smp_k_pan,
                                 min: -1.0,
                                 max: 1.0,
                                 default: 0.0,
                                 fmt: &pan,
-                                hint: "Zone stereo pan",
+                                hint: tr.smp_k_zone_pan_hint,
                                 log: false,
                             },
                             z.pan,
                         ),
                         (
                             P {
-                                label: "Vel",
+                                label: tr.smp_k_vel,
                                 min: 0.0,
                                 max: 1.0,
                                 default: 1.0,
                                 fmt: &pct,
-                                hint: "Velocity loudness sensitivity",
+                                hint: tr.smp_k_vel_hint,
                                 log: false,
                             },
                             z.velocity_tracking,
                         ),
                         (
                             P {
-                                label: "Group",
+                                label: tr.smp_k_group,
                                 min: 0.0,
                                 max: 16.0,
                                 default: 0.0,
-                                fmt: &|v| {
-                                    if v < 0.5 {
-                                        "off".into()
-                                    } else {
-                                        format!("{:.0}", v.round())
-                                    }
-                                },
-                                hint: "Choke / mute group (e.g. open & closed hats)",
+                                fmt: &fmt_grp,
+                                hint: tr.smp_k_group_hint,
                                 log: false,
                             },
                             z.params.mute_group as f64,
@@ -1427,9 +1464,12 @@ impl App {
         // Time stretch: the pitch stays, the length follows a ratio or the tempo.
         smp_bay(ui, |ui| {
             use keyframexl::sampler::StretchMode;
-            smp_section_head(ui, "time stretch", t::SMP_FILTER2);
+            smp_section_head(ui, tr.smp_sec_stretch, t::SMP_FILTER2);
             ui.horizontal_wrapped(|ui| {
-                let modes: Vec<&str> = StretchMode::ALL.iter().map(|m| m.label()).collect();
+                let modes: Vec<&str> = StretchMode::ALL
+                    .iter()
+                    .map(|m| tr.smp_stretch_mode(*m))
+                    .collect();
                 let cur = StretchMode::ALL
                     .iter()
                     .position(|m| *m == z.stretch.mode)
@@ -1447,12 +1487,12 @@ impl App {
                     StretchMode::Off => {}
                     StretchMode::Time => {
                         let spec = P {
-                            label: "Length",
+                            label: tr.smp_k_length,
                             min: 0.25,
                             max: 4.0,
                             default: 1.0,
                             fmt: &|v| format!("{:.0}%", v * 100.0),
-                            hint: "New length against the sample's (pitch kept)",
+                            hint: tr.smp_k_length_hint,
                             log: true,
                         };
                         if let Some(nv) = self.pknob(ui, &spec, t::SMP_FILTER2, z.stretch.amount) {
@@ -1461,12 +1501,12 @@ impl App {
                     }
                     StretchMode::Beat => {
                         let spec = P {
-                            label: "Beats",
+                            label: tr.smp_k_beats,
                             min: 0.25,
                             max: 64.0,
                             default: 4.0,
                             fmt: &|v| format!("{v:.2}"),
-                            hint: "The sample's length in beats: it plays that long at the song's tempo",
+                            hint: tr.smp_k_beats_hint,
                             log: true,
                         };
                         if let Some(nv) = self.pknob(ui, &spec, t::SMP_FILTER2, z.stretch.beats) {
@@ -1478,21 +1518,32 @@ impl App {
                     }
                 }
                 let len = z.end.saturating_sub(z.offset) as f64 / z.sample_rate.max(1) as f64;
+                let len_str = format!("{len:.2}");
                 let state = match z.stretch_target(self.song.tempo) {
-                    None if z.stretch.mode != StretchMode::Off => format!("{len:.2} s, as recorded"),
+                    None if z.stretch.mode != StretchMode::Off => {
+                        fill(tr.smp_stretch_recorded, &[("len", &len_str)])
+                    }
                     None => String::new(),
                     Some(n) => {
                         let to = n as f64 / z.sample_rate.max(1) as f64;
+                        let to_str = format!("{to:.2}");
                         let ready = if z.stretch_stale(self.song.tempo) {
-                            "rendering…"
+                            tr.smp_stretch_rendering
                         } else {
-                            "ready"
+                            tr.smp_stretch_ready
                         };
-                        format!("{len:.2} s → {to:.2} s · {ready}")
+                        fill(
+                            tr.smp_stretch_arrow,
+                            &[("len", &len_str), ("to", &to_str), ("state", ready)],
+                        )
                     }
                 };
                 if !state.is_empty() {
-                    ui.label(egui::RichText::new(state).font(t::mono(11.0)).color(t::faint()));
+                    ui.label(
+                        egui::RichText::new(state)
+                            .font(t::mono(11.0))
+                            .color(t::faint()),
+                    );
                 }
             });
         });
@@ -1503,7 +1554,7 @@ impl App {
             if let Some(new_env) = self.envelope_bay(
                 ui,
                 &format!("amp-{id}"),
-                "amp envelope (dahdsr)",
+                tr.smp_sec_amp_env,
                 t::SMP_GOLD,
                 &env,
             ) {
@@ -1515,6 +1566,9 @@ impl App {
     /// Hero Interactive Audio Waveform Scope with draggable Start/End/Loop flags,
     /// zoom/pan, loop mode controls, and zero-crossing snap.
     fn waveform_scope(&mut self, ui: &mut Ui, id: u64, zi: usize, z: &Zone) {
+        let tr = self.tr();
+        let lang = tr.lang;
+        let loop_types = tr.smp_loop_types();
         let wv_key = egui::Id::new(("smp-wave-view", id, zi));
         let mut wv: WaveViewState = ui.ctx().data(|d| d.get_temp(wv_key)).unwrap_or_default();
         let total = z.frames.len().max(1);
@@ -1526,7 +1580,7 @@ impl App {
                 if let Some(i) = smp_pills(
                     ui,
                     &format!("lt-{id}"),
-                    &LOOP_TYPES,
+                    &loop_types,
                     loop_type(z),
                     t::SMP_LOOP,
                 ) {
@@ -1535,7 +1589,7 @@ impl App {
                 if let Some(i) = smp_pills(
                     ui,
                     &format!("rev-{id}"),
-                    &["Fwd", "Rev"],
+                    &[tr.smp_dir_fwd, tr.smp_dir_rev],
                     z.params.reverse as usize,
                     t::SMP_GOLD,
                 ) {
@@ -1544,10 +1598,8 @@ impl App {
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
-                        .small_button("Snap 0×")
-                        .on_hover_text(
-                            "Snap Start and Loop markers to nearest zero-crossing to remove clicks",
-                        )
+                        .small_button(tr.smp_snap_0x)
+                        .on_hover_text(tr.smp_snap_0x_tip)
                         .clicked()
                     {
                         self.edit_zones(id, true, |z| {
@@ -1579,16 +1631,24 @@ impl App {
                         });
                     }
                     if ui
-                        .small_button("Fit")
-                        .on_hover_text("Reset waveform zoom")
+                        .small_button(tr.smp_fit)
+                        .on_hover_text(tr.smp_fit_tip)
                         .clicked()
                     {
                         wv = WaveViewState::default();
                     }
-                    if ui.small_button("+").on_hover_text("Zoom in").clicked() {
+                    if ui
+                        .small_button("+")
+                        .on_hover_text(tr.smp_zoom_in_tip)
+                        .clicked()
+                    {
                         wv.zoom_at(0.5, 0.55);
                     }
-                    if ui.small_button("−").on_hover_text("Zoom out").clicked() {
+                    if ui
+                        .small_button("−")
+                        .on_hover_text(tr.smp_zoom_out_tip)
+                        .clicked()
+                    {
                         wv.zoom_at(0.5, 1.8);
                     }
                 });
@@ -1836,15 +1896,19 @@ impl App {
 
             // Centered top telemetry readout (stays clear of S and E splice flags).
             let active_ms = z.end.saturating_sub(z.offset) as f64 / z.sample_rate.max(1) as f64;
+            let len_s = secs(active_ms);
             let info = if looping {
                 let lp_ms =
                     z.loop_end.saturating_sub(z.loop_start) as f64 / z.sample_rate.max(1) as f64;
-                format!("LEN {}  ·  LOOP {}", secs(active_ms), secs(lp_ms))
+                let lp_s = secs(lp_ms);
+                fill(tr.smp_wave_len_loop, &[("len", &len_s), ("lp", &lp_s)])
             } else {
-                format!(
-                    "LEN {}  ·  {} frames",
-                    secs(active_ms),
-                    z.end.saturating_sub(z.offset)
+                let frames_s = tr
+                    .smp_frames_count
+                    .fmt(lang, z.end.saturating_sub(z.offset));
+                fill(
+                    tr.smp_wave_len_frames,
+                    &[("len", &len_s), ("frames", &frames_s)],
                 )
             };
             p.text(
@@ -1854,11 +1918,22 @@ impl App {
                 t::mono(12.0),
                 t::SMP_SAND,
             );
+            let s_str = z.offset.to_string();
+            let e_str = z.end.to_string();
+            let tot_str = total.to_string();
+            let ls_str = z.loop_start.to_string();
+            let le_str = z.loop_end.to_string();
             kit::tip(
                 resp,
-                format!(
-                    "Start..End: {}..{} / {} · Loop: {}..{}\nDrag S / E / LS / LE flags to trim sample and loop points · Wheel zooms · Middle-drag pans",
-                    z.offset, z.end, total, z.loop_start, z.loop_end
+                fill(
+                    tr.smp_wave_tip,
+                    &[
+                        ("s", &s_str),
+                        ("e", &e_str),
+                        ("total", &tot_str),
+                        ("ls", &ls_str),
+                        ("le", &le_str),
+                    ],
                 ),
             );
         });
@@ -1869,6 +1944,7 @@ impl App {
     // ---------------------------------------------------------------- Page 2: Filter & Env
 
     fn page_filter(&mut self, ui: &mut Ui, id: u64, z: &Zone) {
+        let tr = self.tr();
         // Hero Interactive Dual-Filter Frequency Graph.
         smp_bay(ui, |ui| {
             ui.horizontal(|ui| {
@@ -1878,12 +1954,12 @@ impl App {
                     ui.painter(),
                     pos2(sq.right() + 6.0, sq.center().y),
                     Align2::LEFT_CENTER,
-                    "dual filter response",
+                    tr.smp_sec_dual_filter,
                     11.0,
                     t::SMP_SAND,
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let routes = ["Serial  F1→F2", "Parallel  F1//F2"];
+                    let routes = [tr.smp_route_serial, tr.smp_route_parallel];
                     let cur = FilterRouting::ALL
                         .iter()
                         .position(|r| *r == z.params.routing)
@@ -1910,12 +1986,20 @@ impl App {
                 ui.horizontal_wrapped(|ui| {
                     let (sq, _) = ui.allocate_exact_size(vec2(7.0, 7.0), Sense::hover());
                     ui.painter().rect_filled(sq, 1.5, col);
+                    let fn_str = (fi + 1).to_string();
                     ui.label(
-                        egui::RichText::new(format!("FILTER {}", fi + 1))
+                        egui::RichText::new(fill(tr.smp_filter_n, &[("n", &fn_str)]))
                             .font(t::mono(12.0))
                             .color(t::SMP_SAND),
                     );
-                    let short = ["Off", "LP", "HP", "BP", "Notch", "AP"];
+                    let short = [
+                        tr.smp_fk_short_off,
+                        "LP",
+                        "HP",
+                        "BP",
+                        tr.smp_fk_short_notch,
+                        "AP",
+                    ];
                     let cur = FilterKind::ALL
                         .iter()
                         .position(|k| *k == f.kind)
@@ -1930,12 +2014,12 @@ impl App {
                     if let Some(v) = this.pknob(
                         ui,
                         &P {
-                            label: "Freq",
+                            label: tr.smp_k_freq,
                             min: 20.0,
                             max: 20000.0,
                             default: 20000.0,
                             fmt: &hz,
-                            hint: "Cutoff frequency",
+                            hint: tr.smp_k_freq_hint,
                             log: true,
                         },
                         col,
@@ -1946,12 +2030,12 @@ impl App {
                     if let Some(v) = this.pknob(
                         ui,
                         &P {
-                            label: "Emph",
+                            label: tr.smp_k_emph,
                             min: 0.0,
                             max: 1.0,
                             default: 0.0,
                             fmt: &pct,
-                            hint: "Filter resonance / emphasis",
+                            hint: tr.smp_k_emph_hint,
                             log: false,
                         },
                         col,
@@ -1996,12 +2080,14 @@ impl App {
                 .matrix
                 .iter()
                 .filter(|m| m.source == src && m.amount.abs() > 0.001)
-                .map(|m| m.target.label())
+                .map(|m| tr.smp_mod_target(m.target))
                 .collect();
+            let en_str = (ei + 1).to_string();
             let title = if routed.is_empty() {
-                format!("env {} · unrouted (assign in modulation)", ei + 1)
+                fill(tr.smp_env_unrouted, &[("n", &en_str)])
             } else {
-                format!("env {} → {}", ei + 1, routed.join(", "))
+                let targets = routed.join(", ");
+                fill(tr.smp_env_routed, &[("n", &en_str), ("targets", &targets)])
             };
             let env = z.params.env[ei].clone();
             smp_bay(ui, |ui| {
@@ -2015,6 +2101,7 @@ impl App {
     }
 
     fn dual_filter_scope(&mut self, ui: &mut Ui, id: u64, z: &Zone) {
+        let tr = self.tr();
         let (area, resp) =
             ui.allocate_exact_size(vec2(ui.available_width(), 108.0), Sense::click_and_drag());
         let p = ui.painter().clone();
@@ -2159,14 +2246,14 @@ impl App {
         }
 
         let status = match (f1.kind != FilterKind::Off, f2.kind != FilterKind::Off) {
-            (false, false) => "BOTH FILTERS BYPASSED · ENABLE FILTER 1 OR 2 BELOW".to_string(),
-            (true, false) => format!("F1 {} {}", f1.kind.label(), hz(f1.cutoff)),
-            (false, true) => format!("F2 {} {}", f2.kind.label(), hz(f2.cutoff)),
+            (false, false) => tr.smp_filters_bypassed.to_string(),
+            (true, false) => format!("F1 {} {}", tr.smp_filter_kind(f1.kind), hz(f1.cutoff)),
+            (false, true) => format!("F2 {} {}", tr.smp_filter_kind(f2.kind), hz(f2.cutoff)),
             (true, true) => format!(
                 "F1 {} · F2 {} ({})",
                 hz(f1.cutoff),
                 hz(f2.cutoff),
-                z.params.routing.label()
+                tr.smp_filter_routing(z.params.routing)
             ),
         };
         p.text(
@@ -2176,15 +2263,13 @@ impl App {
             t::mono(12.0),
             t::SMP_SAND,
         );
-        kit::tip(
-            resp,
-            "Drag active filter nodes (1 / 2) to sculpt Cutoff & Emphasis · Shift fine",
-        );
+        kit::tip(resp, tr.smp_dual_filter_tip);
     }
 
     // ---------------------------------------------------------------- Page 3: Modulation
 
     fn page_modulation(&mut self, ui: &mut Ui, id: u64, z: &Zone) {
+        let tr = self.tr();
         let wide = ui.available_width() >= TWO_COLUMNS;
         let lfo_card = |this: &mut Self, ui: &mut Ui, li: usize| {
             let l = z.params.lfo[li].clone();
@@ -2199,12 +2284,12 @@ impl App {
                     );
                     let mut shape = l.shape;
                     egui::ComboBox::from_id_salt(("lfo-shape", id, li))
-                        .selected_text(shape.label())
+                        .selected_text(tr.smp_lfo_shape(shape))
                         .width(104.0)
                         .show_ui(ui, |ui| {
                             kit::menu_style(ui);
                             for s in LfoShape::ALL {
-                                ui.selectable_value(&mut shape, *s, s.label());
+                                ui.selectable_value(&mut shape, *s, tr.smp_lfo_shape(*s));
                             }
                         });
                     if shape != l.shape {
@@ -2214,7 +2299,7 @@ impl App {
                         if let Some(i) = smp_pills(
                             ui,
                             &format!("fr-{id}-{li}"),
-                            &["Sync", "Free"],
+                            &[tr.smp_lfo_sync, tr.smp_lfo_free],
                             l.free_run as usize,
                             t::SMP_START,
                         ) {
@@ -2229,36 +2314,36 @@ impl App {
                     let rows: [(P, f64); 3] = [
                         (
                             P {
-                                label: "Rate",
+                                label: tr.smp_k_rate,
                                 min: 0.01,
                                 max: 50.0,
                                 default: 5.0,
                                 fmt: &|v| format!("{v:.2} Hz"),
-                                hint: "LFO rate",
+                                hint: tr.smp_k_lfo_rate_hint,
                                 log: true,
                             },
                             l.rate,
                         ),
                         (
                             P {
-                                label: "Attack",
+                                label: tr.smp_k_attack,
                                 min: 0.0,
                                 max: 10.0,
                                 default: 0.0,
                                 fmt: &|v| if v <= 0.0 { "0".into() } else { secs(v) },
-                                hint: "Modulation fade-in time",
+                                hint: tr.smp_k_mod_fade_hint,
                                 log: false,
                             },
                             l.attack,
                         ),
                         (
                             P {
-                                label: "Phase",
+                                label: tr.smp_k_phase,
                                 min: 0.0,
                                 max: 1.0,
                                 default: 0.0,
                                 fmt: &|v| format!("{:.0}°", v * 360.0),
-                                hint: "Start phase",
+                                hint: tr.smp_k_phase_hint,
                                 log: false,
                             },
                             l.phase,
@@ -2304,17 +2389,38 @@ impl App {
                 let (sq, _) = ui.allocate_exact_size(vec2(7.0, 7.0), Sense::hover());
                 ui.painter().rect_filled(sq, 1.5, t::SMP_GOLD);
                 ui.label(
-                    egui::RichText::new("MODULATION MATRIX")
+                    egui::RichText::new(tr.smp_mod_matrix_caps)
                         .font(t::mono(12.0))
                         .color(t::SMP_SAND),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    for (label, src, dst, amt) in [
-                        ("+ LFO2→Pan", ModSource::Lfo2, ModTarget::Pan, 0.45),
-                        ("+ Vel→F1", ModSource::Velocity, ModTarget::Cutoff1, 0.45),
-                        ("+ ENV1→F1", ModSource::Env1, ModTarget::Cutoff1, 0.50),
-                        ("+ LFO1→Pitch", ModSource::Lfo1, ModTarget::Pitch, 0.05),
-                    ] {
+                    let quick = [
+                        (
+                            format!("+ LFO2→{}", tr.smp_k_pan),
+                            ModSource::Lfo2,
+                            ModTarget::Pan,
+                            0.45,
+                        ),
+                        (
+                            format!("+ {}→F1", tr.smp_k_vel),
+                            ModSource::Velocity,
+                            ModTarget::Cutoff1,
+                            0.45,
+                        ),
+                        (
+                            format!("+ {}→F1", tr.smp_ms_env1),
+                            ModSource::Env1,
+                            ModTarget::Cutoff1,
+                            0.50,
+                        ),
+                        (
+                            format!("+ LFO1→{}", tr.smp_mt_pitch),
+                            ModSource::Lfo1,
+                            ModTarget::Pitch,
+                            0.05,
+                        ),
+                    ];
+                    for (label, src, dst, amt) in quick {
                         if ui.small_button(label).clicked() {
                             self.edit_zones(id, true, |z| {
                                 z.params.route(src, dst, amt);
@@ -2360,23 +2466,31 @@ impl App {
                                 );
                                 let mut src = m.source;
                                 egui::ComboBox::from_id_salt(("msrc", id, si))
-                                    .selected_text(src.label())
+                                    .selected_text(tr.smp_mod_source(src))
                                     .width(86.0)
                                     .show_ui(ui, |ui| {
                                         kit::menu_style(ui);
                                         for s in ModSource::ALL {
-                                            ui.selectable_value(&mut src, *s, s.label());
+                                            ui.selectable_value(
+                                                &mut src,
+                                                *s,
+                                                tr.smp_mod_source(*s),
+                                            );
                                         }
                                     });
                                 ui.label(egui::RichText::new("→").color(t::SMP_SAND));
                                 let mut tgt = m.target;
                                 egui::ComboBox::from_id_salt(("mtgt", id, si))
-                                    .selected_text(tgt.label())
+                                    .selected_text(tr.smp_mod_target(tgt))
                                     .width(106.0)
                                     .show_ui(ui, |ui| {
                                         kit::menu_style(ui);
                                         for s in ModTarget::ALL {
-                                            ui.selectable_value(&mut tgt, *s, s.label());
+                                            ui.selectable_value(
+                                                &mut tgt,
+                                                *s,
+                                                tr.smp_mod_target(*s),
+                                            );
                                         }
                                     });
                                 if src != m.source || tgt != m.target {
@@ -2398,7 +2512,7 @@ impl App {
                                     mod_source_color(src),
                                     &mut a,
                                     src != ModSource::None,
-                                    "Modulation depth (±100%)",
+                                    tr.smp_mod_depth_hint,
                                 );
                                 if started {
                                     self.checkpoint();
@@ -2407,7 +2521,10 @@ impl App {
                                     self.edit_zones(id, false, |z| z.params.matrix[si].amount = a);
                                 }
                                 if m.source != ModSource::None
-                                    && ui.small_button("×").on_hover_text("Clear slot").clicked()
+                                    && ui
+                                        .small_button("×")
+                                        .on_hover_text(tr.smp_clear_slot_tip)
+                                        .clicked()
                                 {
                                     self.edit_zones(id, true, |z| {
                                         z.params.matrix[si].source = ModSource::None;
@@ -2425,17 +2542,19 @@ impl App {
     // ---------------------------------------------------------------- Page 4: Zones Table
 
     fn page_zones(&mut self, ui: &mut Ui, id: u64, preset: &SamplePreset, selected: Option<usize>) {
+        let tr = self.tr();
+        let loop_types = tr.smp_loop_types();
         smp_bay(ui, |ui| {
             let p = ui.painter().clone();
             let cols = [
                 ("", 0.0),
                 ("#", 0.04),
-                ("Wave", 0.085),
-                ("Sample", 0.20),
-                ("Keys", 0.425),
-                ("Root", 0.535),
-                ("Vel", 0.605),
-                ("Loop", 0.695),
+                (tr.smp_col_wave, 0.085),
+                (tr.smp_col_sample, 0.20),
+                (tr.smp_col_keys, 0.425),
+                (tr.smp_col_root, 0.535),
+                (tr.smp_col_vel, 0.605),
+                (tr.smp_col_loop, 0.695),
                 ("A / D / S / R", 0.795),
             ];
             let (head, _) =
@@ -2538,7 +2657,7 @@ impl App {
                     ),
                     super::roll::note_name(z.root),
                     format!("{}–{}", z.low_velocity, z.high_velocity),
-                    LOOP_TYPES[loop_type(z)].to_string(),
+                    loop_types[loop_type(z)].to_string(),
                     format!(
                         "{} / {} / {:.0}% / {}",
                         short_t(z.adsr.attack),
@@ -2676,7 +2795,8 @@ impl App {
                 let pr = k as f64 / steps as f64;
                 pts.push(pos2(
                     x(r0 + shown_env.release * pr),
-                    y(shown_env.sustain * (1.0 - keyframexl::sampler::bend(pr, shown_env.release_curve))),
+                    y(shown_env.sustain
+                        * (1.0 - keyframexl::sampler::bend(pr, shown_env.release_curve))),
                 ));
             }
             if let Some(i) = seg.or(hover) {
@@ -2689,15 +2809,82 @@ impl App {
             }
             fill_under_curve(&p, &pts, r.bottom(), color.gamma_multiply(0.14));
             p.add(Shape::line(pts, Stroke::new(1.8_f32, color)));
-            kit::tip(resp, "Drag Attack / Decay / Release segment up or down to bend · Double-click straightens");
+            let tr = self.tr();
+            kit::tip(resp, tr.smp_env_curve_tip);
 
             let rows: [(P, f64); 6] = [
-                (P { label: "Delay", min: 0.0, max: 10.0, default: 0.0, fmt: &secs, hint: "Delay before attack", log: true }, env.delay),
-                (P { label: "Attack", min: 0.0, max: 10.0, default: 0.005, fmt: &secs, hint: "Rise time", log: true }, env.attack),
-                (P { label: "Hold", min: 0.0, max: 10.0, default: 0.0, fmt: &secs, hint: "Peak hold time", log: true }, env.hold),
-                (P { label: "Decay", min: 0.0, max: 20.0, default: 0.0, fmt: &secs, hint: "Fall to sustain", log: true }, env.decay),
-                (P { label: "Sustain", min: 0.0, max: 1.0, default: 1.0, fmt: &pct, hint: "Held level", log: false }, env.sustain),
-                (P { label: "Release", min: 0.0, max: 20.0, default: 0.015, fmt: &secs, hint: "Fade after release", log: true }, env.release),
+                (
+                    P {
+                        label: tr.smp_k_delay,
+                        min: 0.0,
+                        max: 10.0,
+                        default: 0.0,
+                        fmt: &secs,
+                        hint: tr.smp_k_delay_hint,
+                        log: true,
+                    },
+                    env.delay,
+                ),
+                (
+                    P {
+                        label: tr.smp_k_attack,
+                        min: 0.0,
+                        max: 10.0,
+                        default: 0.005,
+                        fmt: &secs,
+                        hint: tr.smp_k_attack_hint,
+                        log: true,
+                    },
+                    env.attack,
+                ),
+                (
+                    P {
+                        label: tr.smp_k_hold,
+                        min: 0.0,
+                        max: 10.0,
+                        default: 0.0,
+                        fmt: &secs,
+                        hint: tr.smp_k_hold_hint,
+                        log: true,
+                    },
+                    env.hold,
+                ),
+                (
+                    P {
+                        label: tr.smp_k_decay,
+                        min: 0.0,
+                        max: 20.0,
+                        default: 0.0,
+                        fmt: &secs,
+                        hint: tr.smp_k_decay_hint,
+                        log: true,
+                    },
+                    env.decay,
+                ),
+                (
+                    P {
+                        label: tr.smp_k_sustain,
+                        min: 0.0,
+                        max: 1.0,
+                        default: 1.0,
+                        fmt: &pct,
+                        hint: tr.smp_k_sustain_hint,
+                        log: false,
+                    },
+                    env.sustain,
+                ),
+                (
+                    P {
+                        label: tr.smp_k_release,
+                        min: 0.0,
+                        max: 20.0,
+                        default: 0.015,
+                        fmt: &secs,
+                        hint: tr.smp_k_release_hint,
+                        log: true,
+                    },
+                    env.release,
+                ),
             ];
             for (k, (spec, v)) in rows.iter().enumerate() {
                 if let Some(nv) = self.pknob(ui, spec, color, *v) {

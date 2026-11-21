@@ -38,6 +38,10 @@ ureq = "2"
 [build-dependencies]
 cc = "1.2"
 
+[dev-dependencies]
+syn = { version = "2", features = ["full", "visit"] }
+proc-macro2 = { version = "1", features = ["span-locations"] }
+
 # winit with one fix: X11 file drops whose uri-list ends lines with LF only
 # (yabridge, dragging a clip out of a Windows plugin) were silently lost.
 [patch.crates-io]

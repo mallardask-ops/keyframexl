@@ -2,6 +2,7 @@
 //! edit its envelope, and drive plugin parameters while the song plays.
 
 use super::{App, Tone, kit};
+use crate::i18n::fill;
 use crate::plugins::Req;
 use crate::theme as t;
 use eframe::egui::{self, Align2, Pos2, Rect, Sense, Stroke, pos2, vec2};
@@ -33,19 +34,32 @@ pub(crate) struct AutoTake {
 impl App {
     /// The control's name as people know it: "Insert 2 volume", "Bass pan", "Reverb · Mix".
     pub(crate) fn auto_label(&self, target: Target) -> String {
+        let tr = self.tr();
         match target {
-            Target::MixerVolume { track } => format!("{} volume", self.mixer_name(track as usize)),
-            Target::MixerPan { track } => format!("{} pan", self.mixer_name(track as usize)),
-            Target::ChannelVolume { inst } => format!("{} volume", self.instrument_name(inst)),
-            Target::ChannelPan { inst } => format!("{} pan", self.instrument_name(inst)),
+            Target::MixerVolume { track } => fill(
+                tr.auto_l_volume,
+                &[("name", &self.mixer_name(track as usize))],
+            ),
+            Target::MixerPan { track } => {
+                fill(tr.auto_l_pan, &[("name", &self.mixer_name(track as usize))])
+            }
+            Target::ChannelVolume { inst } => {
+                fill(tr.auto_l_volume, &[("name", &self.instrument_name(inst))])
+            }
+            Target::ChannelPan { inst } => {
+                fill(tr.auto_l_pan, &[("name", &self.instrument_name(inst))])
+            }
             Target::FxMix { track, slot } => {
                 let name = self
                     .song
                     .mixer
                     .get(track as usize)
                     .and_then(|m| m.fx.get(slot as usize))
-                    .map_or("Effect", |fx| fx.label());
-                format!("{name} mix · {}", self.mixer_name(track as usize))
+                    .map_or(tr.auto_effect, |fx| fx.label());
+                fill(
+                    tr.auto_l_fx_mix,
+                    &[("fx", name), ("track", &self.mixer_name(track as usize))],
+                )
             }
             Target::FxEnabled { track, slot } => {
                 let name = self
@@ -53,13 +67,18 @@ impl App {
                     .mixer
                     .get(track as usize)
                     .and_then(|m| m.fx.get(slot as usize))
-                    .map_or("Effect", |fx| fx.label());
-                format!("{name} on · {}", self.mixer_name(track as usize))
+                    .map_or(tr.auto_effect, |fx| fx.label());
+                fill(
+                    tr.auto_l_fx_on,
+                    &[("fx", name), ("track", &self.mixer_name(track as usize))],
+                )
             }
-            Target::SendLevel { track, to } => format!(
-                "{} send to {}",
-                self.mixer_name(track as usize),
-                self.mixer_name(to as usize)
+            Target::SendLevel { track, to } => fill(
+                tr.auto_l_send,
+                &[
+                    ("track", &self.mixer_name(track as usize)),
+                    ("to", &self.mixer_name(to as usize)),
+                ],
             ),
             Target::FxParam { track, slot, param } => {
                 let slot = self
@@ -70,9 +89,16 @@ impl App {
                 let name = slot
                     .and_then(|s| s.kind.params().get(param as usize))
                     .map(|p| p.name)
-                    .unwrap_or("parameter");
-                let fx = slot.map(|s| s.kind.label()).unwrap_or("Effect");
-                format!("{fx} {name} · {}", self.mixer_name(track as usize))
+                    .unwrap_or(tr.auto_parameter);
+                let fx = slot.map(|s| s.kind.label()).unwrap_or(tr.auto_effect);
+                fill(
+                    tr.auto_l_fx_param,
+                    &[
+                        ("fx", fx),
+                        ("param", name),
+                        ("track", &self.mixer_name(track as usize)),
+                    ],
+                )
             }
             Target::PluginParam { plugin, param } => {
                 let row = self
@@ -85,10 +111,13 @@ impl App {
                     .live
                     .get(&plugin)
                     .map(|l| l.name.clone())
-                    .unwrap_or_else(|| "Plugin".into());
+                    .unwrap_or_else(|| tr.auto_plugin.into());
                 match row {
                     Some(r) => format!("{pname} · {}", r.name),
-                    None => format!("{pname} · parameter {param}"),
+                    None => fill(
+                        tr.auto_l_plugin_param,
+                        &[("plugin", &pname), ("n", &param.to_string())],
+                    ),
                 }
             }
         }
@@ -169,6 +198,7 @@ impl App {
 
     /// Copy the last tweaked control's current value for `Tools → Last tweaked → Copy value`.
     pub(crate) fn copy_last_tweaked(&mut self, ctx: &egui::Context) {
+        let tr = self.tr();
         let Some(target) = self.last_tweaked_target() else {
             return;
         };
@@ -178,12 +208,16 @@ impl App {
         ctx.copy_text(text.clone());
         self.say(
             Tone::Quiet,
-            format!("Copied {} ({text}).", self.auto_label(target)),
+            fill(
+                tr.auto_copied,
+                &[("label", &self.auto_label(target)), ("value", &text)],
+            ),
         );
     }
 
     /// Paste the previously copied value into the last tweaked control.
     pub(crate) fn paste_last_tweaked(&mut self) {
+        let tr = self.tr();
         let (Some(target), Some((src, raw))) = (self.last_tweaked_target(), self.auto_clipboard)
         else {
             return;
@@ -207,9 +241,9 @@ impl App {
             let text = self.auto_value_text(target, value);
             self.say(
                 Tone::Quiet,
-                format!(
-                    "Pasted {text} to {}. Ctrl+Z undoes.",
-                    self.auto_label(target)
+                fill(
+                    tr.auto_pasted,
+                    &[("value", &text), ("label", &self.auto_label(target))],
                 ),
             );
         }
@@ -217,6 +251,7 @@ impl App {
 
     /// Reset the last tweaked control back to its default value.
     pub(crate) fn reset_last_tweaked(&mut self) {
+        let tr = self.tr();
         let Some(target) = self.last_tweaked_target() else {
             return;
         };
@@ -229,9 +264,9 @@ impl App {
             let text = self.auto_value_text(target, def);
             self.say(
                 Tone::Quiet,
-                format!(
-                    "Reset {} to {text}. Ctrl+Z undoes.",
-                    self.auto_label(target)
+                fill(
+                    tr.auto_reset,
+                    &[("label", &self.auto_label(target)), ("value", &text)],
                 ),
             );
         }
@@ -239,48 +274,38 @@ impl App {
 
     /// Toggle Multilink to controllers (`Ctrl+J`).
     pub(crate) fn toggle_multilink(&mut self) {
+        let tr = self.tr();
         if self.multilink.is_some() {
             self.cancel_multilink();
             return;
         }
         self.midi_learn = None;
         self.multilink = Some(Multilink::default());
-        self.say(
-            Tone::Wait,
-            "Multilink armed: tweak controls to queue them, then move knobs on your controller. Ctrl+J or Esc finishes.",
-        );
+        self.say(Tone::Wait, tr.auto_ml_armed);
     }
 
     /// End or cancel Multilink mode.
     pub(crate) fn cancel_multilink(&mut self) {
+        let tr = self.tr();
         let Some(ml) = self.multilink.take() else {
             return;
         };
         if ml.linked > 0 {
-            self.say(
-                Tone::Done,
-                format!(
-                    "Multilink finished: {} control{} linked.",
-                    ml.linked,
-                    if ml.linked == 1 { "" } else { "s" }
-                ),
-            );
+            self.say(Tone::Done, tr.auto_ml_finished.fmt(tr.lang, ml.linked));
         } else {
-            self.say(Tone::Quiet, "Multilink cancelled.");
+            self.say(Tone::Quiet, tr.auto_ml_cancelled);
         }
     }
 
     /// Consume an incoming MIDI CC while Multilink is armed.
     /// Returns `true` if Multilink handled the event.
     pub(crate) fn multilink_cc(&mut self, channel: u8, cc: u8) -> bool {
+        let tr = self.tr();
         let Some(ml) = &mut self.multilink else {
             return false;
         };
         if ml.targets.is_empty() {
-            self.say(
-                Tone::Wait,
-                "Multilink armed: tweak one or more controls first, then move a controller knob.",
-            );
+            self.say(Tone::Wait, tr.auto_ml_tweak_first);
             return true;
         }
         // Ignore repeated CC values from a physical knob already bound during this session.
@@ -300,8 +325,14 @@ impl App {
             self.multilink = None;
             self.say(
                 Tone::Done,
-                format!(
-                    "Multilink complete: linked CH {channel} CC {cc} to {label} ({total_linked} total)."
+                fill(
+                    tr.auto_ml_complete,
+                    &[
+                        ("channel", &channel.to_string()),
+                        ("cc", &cc.to_string()),
+                        ("label", &label),
+                        ("total", &total_linked.to_string()),
+                    ],
                 ),
             );
         } else {
@@ -313,8 +344,15 @@ impl App {
                 .unwrap_or_default();
             self.say(
                 Tone::Wait,
-                format!(
-                    "Linked CH {channel} CC {cc} to {label}. Move next controller knob for {next} ({remaining} left)…"
+                fill(
+                    tr.auto_ml_linked_next,
+                    &[
+                        ("channel", &channel.to_string()),
+                        ("cc", &cc.to_string()),
+                        ("label", &label),
+                        ("next", &next),
+                        ("left", &remaining.to_string()),
+                    ],
                 ),
             );
         }
@@ -323,18 +361,18 @@ impl App {
 
     /// Live status-bar override while Multilink is armed.
     pub(crate) fn multilink_status(&self) -> Option<String> {
+        let tr = self.tr();
         let ml = self.multilink.as_ref()?;
         if let Some(&next) = ml.targets.first() {
-            Some(format!(
-                "Multilink ({} queued — next: {}): move a controller knob, or tweak more controls. Esc finishes.",
-                ml.targets.len(),
-                self.auto_label(next)
+            Some(fill(
+                tr.auto_ml_queued,
+                &[
+                    ("n", &ml.targets.len().to_string()),
+                    ("next", &self.auto_label(next)),
+                ],
             ))
         } else {
-            Some(
-                "Multilink armed: tweak controls to queue them, then move knobs on your controller. Ctrl+J or Esc finishes."
-                    .into(),
-            )
+            Some(tr.auto_ml_armed.into())
         }
     }
 
@@ -361,6 +399,7 @@ impl App {
     /// Finalize all recorded live automation lanes into thinned playlist automation clips
     /// as a single undo step.
     pub(crate) fn commit_auto_take(&mut self) {
+        let tr = self.tr();
         let lanes = std::mem::take(&mut self.auto_take.lanes);
         if lanes.is_empty() {
             return;
@@ -431,10 +470,13 @@ impl App {
                     *clen = pat_len - clip_offset;
                 }
                 let track = self.song.clips[ci].track;
-                last_summary = format!(
-                    "Recorded automation for \"{name}\" ({} points) on playlist track {}.",
-                    thinned.len(),
-                    track + 1
+                last_summary = fill(
+                    tr.auto_rec_one,
+                    &[
+                        ("name", &name),
+                        ("points", &thinned.len().to_string()),
+                        ("track", &(track + 1).to_string()),
+                    ],
                 );
             } else {
                 let start_bar = (first_tick / BAR) * BAR;
@@ -486,10 +528,13 @@ impl App {
                     .max()
                     .unwrap_or(0);
                 self.song.clips.push(Clip::new(id, start_bar, track));
-                last_summary = format!(
-                    "Recorded automation for \"{name}\" ({} points) on playlist track {}.",
-                    thinned.len(),
-                    track + 1
+                last_summary = fill(
+                    tr.auto_rec_one,
+                    &[
+                        ("name", &name),
+                        ("points", &thinned.len().to_string()),
+                        ("track", &(track + 1).to_string()),
+                    ],
                 );
             }
             committed += 1;
@@ -502,12 +547,16 @@ impl App {
         let mode_note = if self.song_mode {
             ""
         } else {
-            " Switch to Song mode (L) to hear it."
+            tr.auto_switch_song
         };
         let msg = if committed == 1 {
-            format!("{last_summary}{mode_note} Ctrl+Z undoes.")
+            fill(
+                tr.auto_rec_done,
+                &[("summary", &last_summary), ("note", mode_note)],
+            )
         } else {
-            format!("Recorded automation for {committed} controls.{mode_note} Ctrl+Z undoes.")
+            tr.auto_rec_many
+                .fmt_with(tr.lang, committed, &[("note", mode_note)])
         };
         self.say(Tone::Done, msg);
     }
@@ -515,6 +564,7 @@ impl App {
     /// FL: right-click a control → Create automation clip. A flat envelope at the
     /// current value on a free playlist track at bar 1; the editor opens.
     pub(crate) fn create_automation(&mut self, target: Target) {
+        let tr = self.tr();
         self.checkpoint();
         let id = self.song.patterns.iter().map(|p| p.id).max().unwrap_or(0) + 1;
         let name = self.auto_label(target);
@@ -534,9 +584,9 @@ impl App {
         self.auto_open = Some(id);
         self.say(
             Tone::Quiet,
-            format!(
-                "Automation clip \"{name}\" on playlist track {}. It plays in Song mode. Ctrl+Z undoes.",
-                track + 1
+            fill(
+                tr.auto_clip_created,
+                &[("name", &name), ("track", &(track + 1).to_string())],
             ),
         );
     }
@@ -603,6 +653,7 @@ impl App {
 
     /// The envelope editor (FL: the automation clip window).
     pub(crate) fn automation_window(&mut self, ctx: &egui::Context) {
+        let tr = self.tr();
         let Some(id) = self.auto_open else { return };
         let Some(pi) = self
             .song
@@ -613,7 +664,7 @@ impl App {
             self.auto_open = None;
             return;
         };
-        let title = format!("Automation · {}", self.song.patterns[pi].name);
+        let title = fill(tr.ae_title, &[("name", &self.song.patterns[pi].name)]);
         let mut open = true;
         egui::Window::new(title)
             .id(egui::Id::new("automation-editor"))
@@ -629,6 +680,7 @@ impl App {
     }
 
     fn automation_body(&mut self, ui: &mut egui::Ui, pi: usize) {
+        let tr = self.tr();
         let env = self.song.patterns[pi].automation.clone().expect("checked");
         let len = self.song.patterns[pi].length.max(STEP);
         let (lo, hi) = env.target.range(&self.song);
@@ -637,31 +689,35 @@ impl App {
             let (ok, note) = if env.target.exists(&self.song) {
                 (t::muted(), self.auto_label(env.target))
             } else {
-                (t::bad(), "Its control is gone".to_string())
+                (t::bad(), tr.ae_control_gone.to_string())
             };
             ui.label(egui::RichText::new(note).font(t::sans(13.0)).color(ok));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let bars = len / BAR;
                 if kit::tool_button(ui, "+", kit::Kind::Ghost, bars < 64)
-                    .on_hover_text("One bar longer")
+                    .on_hover_text(tr.ae_longer)
                     .clicked()
                 {
                     self.set_auto_length(pi, len + BAR);
                 }
                 ui.label(
-                    egui::RichText::new(format!("{bars} bar{}", if bars == 1 { "" } else { "s" }))
+                    egui::RichText::new(tr.ae_bars.fmt(tr.lang, bars as usize))
                         .font(t::mono(12.0))
                         .color(t::text()),
                 );
                 if kit::tool_button(ui, "−", kit::Kind::Ghost, bars > 1)
-                    .on_hover_text("One bar shorter")
+                    .on_hover_text(tr.ae_shorter)
                     .clicked()
                 {
                     self.set_auto_length(pi, len - BAR);
                 }
             });
         });
-        ui.label(egui::RichText::new("Click to add a point, drag to move it, right-click to delete. Alt+drag up/down on a segment bends it.").font(t::sans(11.5)).color(t::faint()));
+        ui.label(
+            egui::RichText::new(tr.ae_help)
+                .font(t::sans(11.5))
+                .color(t::faint()),
+        );
         let size = vec2(ui.available_width(), ui.available_height().max(160.0));
         let (rect, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
         let p = ui.painter_at(rect);
@@ -903,6 +959,7 @@ impl App {
 
     /// A value as the control shows it.
     fn auto_value_text(&self, target: Target, v: f32) -> String {
+        let tr = self.tr();
         match target {
             Target::MixerVolume { .. } => {
                 if v <= 1e-5 {
@@ -929,7 +986,7 @@ impl App {
                 .and_then(|s| s.kind.params().get(param as usize))
                 .map(|spec| keyframexl::fx::format(spec, v))
                 .unwrap_or_else(|| format!("{v:.2}")),
-            Target::FxEnabled { .. } => if v >= 0.5 { "On" } else { "Off" }.into(),
+            Target::FxEnabled { .. } => if v >= 0.5 { tr.ae_on } else { tr.ae_off }.into(),
             Target::FxMix { .. } | Target::SendLevel { .. } | Target::PluginParam { .. } => {
                 format!("{:.0}%", v * 100.0)
             }

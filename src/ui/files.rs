@@ -5,6 +5,7 @@
 //! window. Roots and open folders persist in ~/.config/keyframexl/browser.ron.
 
 use super::{App, Tone, kit};
+use crate::i18n::fill;
 use crate::theme as t;
 use eframe::egui::{self, Align2, Rect, Sense, Stroke, Ui, pos2, vec2};
 use std::collections::{HashMap, HashSet};
@@ -22,11 +23,20 @@ pub struct FileDrag(pub PathBuf);
 #[derive(Clone)]
 struct RootOrder(PathBuf);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EntryKind {
+    Dir,
+    File,
+    Reading,
+    Unreadable,
+}
+
 #[derive(Clone, Debug)]
 pub struct Entry {
     pub path: PathBuf,
     pub name: String,
     pub dir: bool,
+    pub kind: EntryKind,
     pub size: u64,
     pub modified: Option<std::time::SystemTime>,
 }
@@ -37,9 +47,25 @@ impl Entry {
             path,
             name,
             dir,
+            kind: if dir { EntryKind::Dir } else { EntryKind::File },
             size: 0,
             modified: None,
         }
+    }
+
+    fn placeholder(path: PathBuf, name: String, kind: EntryKind) -> Self {
+        Self {
+            path,
+            name,
+            dir: false,
+            kind,
+            size: 0,
+            modified: None,
+        }
+    }
+
+    fn is_placeholder(&self) -> bool {
+        matches!(self.kind, EntryKind::Reading | EntryKind::Unreadable)
     }
 }
 
@@ -55,12 +81,12 @@ pub enum Sort {
 
 impl Sort {
     pub const ALL: [Sort; 4] = [Sort::Name, Sort::Type, Sort::Newest, Sort::Largest];
-    pub fn label(self) -> &'static str {
+    pub fn label(self, tr: &crate::i18n::Strings) -> &'static str {
         match self {
-            Sort::Name => "Name",
-            Sort::Type => "Type",
-            Sort::Newest => "Newest",
-            Sort::Largest => "Largest",
+            Sort::Name => tr.fb_sort_name,
+            Sort::Type => tr.fb_sort_type,
+            Sort::Newest => tr.fb_sort_newest,
+            Sort::Largest => tr.fb_sort_largest,
         }
     }
     fn order(self, v: &mut [Entry]) {
@@ -153,6 +179,7 @@ pub fn list(dir: &Path, sort: Sort) -> Result<Vec<Entry>, String> {
                 path,
                 name,
                 dir,
+                kind: if dir { EntryKind::Dir } else { EntryKind::File },
                 size: meta.as_ref().map(|m| m.len()).unwrap_or(0),
                 modified: meta.and_then(|m| m.modified().ok()),
             })
@@ -337,7 +364,11 @@ impl Files {
     /// Visible rows: (depth, entry, open). A filter shows matching files
     /// under every root, flat, in sort order; the first search starts a
     /// background scan of all subfolders.
-    pub(crate) fn rows(&mut self, filter: &str) -> Vec<(usize, Entry, bool)> {
+    pub(crate) fn rows(
+        &mut self,
+        filter: &str,
+        tr: &crate::i18n::Strings,
+    ) -> Vec<(usize, Entry, bool)> {
         let mut out = Vec::new();
         let roots = self.roots.clone();
         if !filter.is_empty() {
@@ -368,19 +399,29 @@ impl Files {
             let open = self.open.contains(&r);
             out.push((0, Entry::bare(r.clone(), name, true), open));
             if open {
-                self.walk(&r, 1, &mut out);
+                self.walk(&r, 1, &mut out, tr);
             }
         }
         out
     }
 
-    fn walk(&mut self, dir: &Path, depth: usize, out: &mut Vec<(usize, Entry, bool)>) {
+    fn walk(
+        &mut self,
+        dir: &Path,
+        depth: usize,
+        out: &mut Vec<(usize, Entry, bool)>,
+        tr: &crate::i18n::Strings,
+    ) {
         let entries = match self.listing(dir) {
             Some(Ok(v)) => v.clone(),
             Some(Err(e)) => {
                 out.push((
                     depth,
-                    Entry::bare(dir.join("?"), format!("Unreadable: {e}"), false),
+                    Entry::placeholder(
+                        dir.join("?"),
+                        crate::i18n::fill(tr.fb_unreadable, &[("err", e)]),
+                        EntryKind::Unreadable,
+                    ),
                     false,
                 ));
                 return;
@@ -388,7 +429,7 @@ impl Files {
             None => {
                 out.push((
                     depth,
-                    Entry::bare(dir.join("…"), "Reading…".into(), false),
+                    Entry::placeholder(dir.join("…"), tr.fb_reading.into(), EntryKind::Reading),
                     false,
                 ));
                 return;
@@ -398,7 +439,7 @@ impl Files {
             let open = e.dir && self.open.contains(&e.path);
             out.push((depth, e.clone(), open));
             if open && depth < 24 {
-                self.walk(&e.path, depth + 1, out);
+                self.walk(&e.path, depth + 1, out, tr);
             }
         }
     }
@@ -406,19 +447,20 @@ impl Files {
 
 impl App {
     pub(super) fn files_tab(&mut self, ui: &mut Ui, filter: &str) {
+        let tr = self.tr();
         if self.files.poll() {
             ui.ctx().request_repaint();
         }
         ui.horizontal(|ui| {
-            if kit::tool_button(ui, "Add folder", kit::Kind::Normal, true)
-                .on_hover_text("Add a folder to the browser")
+            if kit::tool_button(ui, tr.fb_add_folder, kit::Kind::Normal, true)
+                .on_hover_text(tr.fb_add_folder_tip)
                 .clicked()
                 && let Some(dir) = rfd::FileDialog::new().pick_folder()
             {
                 self.files.add_root(dir);
             }
-            if kit::tool_button(ui, "Refresh", kit::Kind::Ghost, true)
-                .on_hover_text("Read the folders again")
+            if kit::tool_button(ui, tr.fb_refresh, kit::Kind::Ghost, true)
+                .on_hover_text(tr.fb_refresh_tip)
                 .clicked()
             {
                 self.files.refresh();
@@ -426,21 +468,21 @@ impl App {
         });
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            let (r, _) = ui.allocate_exact_size(vec2(36.0, kit::TOOL_H), Sense::hover());
-            kit::caps(
-                ui.painter(),
-                pos2(r.left() + 2.0, r.center().y),
-                Align2::LEFT_CENTER,
-                "sort",
-                11.0,
+            // The caption is as wide as its translation ("sort" / "сортування").
+            let g = kit::caps_galley(ui.painter(), tr.fb_sort_caps, 11.0, t::faint());
+            let (r, _) =
+                ui.allocate_exact_size(vec2(g.size().x + 6.0, kit::TOOL_H), Sense::hover());
+            ui.painter().galley(
+                pos2(r.left() + 2.0, r.center().y - g.size().y / 2.0),
+                g,
                 t::faint(),
             );
             let mut pick = None;
             let w = ui.available_width() - 2.0;
-            kit::dropdown(ui, "files-sort", self.files.sort.label(), w, |ui| {
+            kit::dropdown(ui, "files-sort", self.files.sort.label(tr), w, |ui| {
                 for s in Sort::ALL {
                     if ui
-                        .selectable_label(self.files.sort == s, s.label())
+                        .selectable_label(self.files.sort == s, s.label(tr))
                         .clicked()
                     {
                         pick = Some(s);
@@ -448,19 +490,20 @@ impl App {
                     }
                 }
             })
-            .on_hover_text("Sort files: name, type, newest or largest first. Folders stay on top.");
+            .on_hover_text(tr.fb_sort_tip);
             if let Some(s) = pick {
                 self.files.set_sort(s);
             }
         });
         ui.add_space(4.0);
-        let rows = self.files.rows(filter);
+        let rows = self.files.rows(filter, tr);
         if !filter.is_empty() {
             let (dirs, done) = self.files.index_state();
             let text = if done {
-                format!("{} match(es) in {dirs} folders", rows.len())
+                tr.fb_matches
+                    .fmt_with(tr.lang, rows.len(), &[("dirs", &dirs.to_string())])
             } else {
-                format!("Searching… {dirs} folders read")
+                fill(tr.fb_searching, &[("dirs", &dirs.to_string())])
             };
             ui.label(
                 egui::RichText::new(text)
@@ -474,7 +517,7 @@ impl App {
         }
         if rows.is_empty() && filter.is_empty() {
             ui.label(
-                egui::RichText::new("No folders. Add one above.")
+                egui::RichText::new(tr.fb_no_folders)
                     .font(t::sans(12.0))
                     .color(t::faint()),
             );
@@ -522,7 +565,7 @@ impl App {
                     ]
                 };
                 p.add(egui::Shape::convex_polygon(pts, t::muted(), Stroke::NONE));
-            } else if !e.name.ends_with('…') {
+            } else if !e.is_placeholder() {
                 let tag = ext(&e.path);
                 let playing = self.previewing.as_ref() == Some(&e.path);
                 kit::caps(
@@ -548,7 +591,7 @@ impl App {
                 t::sans(13.0),
                 ink,
             );
-            if e.name.ends_with('…') || e.name.starts_with("Unreadable") {
+            if e.is_placeholder() {
                 continue;
             }
             // Drag a file out (FL: drop on a channel or the rack).
@@ -562,7 +605,7 @@ impl App {
                     let layer =
                         egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("file-drag"));
                     let lp = ui.ctx().layer_painter(layer);
-                    let label = format!("{}  →  drop on a channel", e.name);
+                    let label = fill(tr.fb_drag, &[("name", &e.name)]);
                     let wdt = kit::text_width(&lp, &label, t::sans(13.0)) + 20.0;
                     let r = Rect::from_min_size(pos + vec2(14.0, 8.0), vec2(wdt, 26.0));
                     kit::control(&lp, r, 6.0, 0.0, false);
@@ -587,7 +630,7 @@ impl App {
                 action = Some((e.path.clone(), "load"));
             }
             let resp = if is_root {
-                resp.on_hover_text("Drag to reorder folders")
+                resp.on_hover_text(tr.fb_drag_reorder)
             } else {
                 resp
             };
@@ -595,28 +638,28 @@ impl App {
                 kit::menu_style(ui);
                 let key = e.path.display().to_string();
                 let fav = if super::browser::is_favorite(ui.ctx(), &key) {
-                    "Remove from favorites"
+                    tr.fb_fav_remove
                 } else {
-                    "Add to favorites"
+                    tr.fb_fav_add
                 };
                 if ui.button(fav).clicked() {
                     super::browser::toggle_favorite(ui.ctx(), key.clone());
                     ui.close_menu();
                 }
                 super::browser::tag_menu(ui, &key);
-                if !e.dir && ui.button("Load into the selected channel").clicked() {
+                if !e.dir && ui.button(tr.fb_load_selected).clicked() {
                     action = Some((e.path.clone(), "load"));
                     ui.close_menu();
                 }
-                if !e.dir && ui.button("Load into a new channel").clicked() {
+                if !e.dir && ui.button(tr.fb_load_new).clicked() {
                     action = Some((e.path.clone(), "new"));
                     ui.close_menu();
                 }
-                if is_root && ui.button("Remove from browser").clicked() {
+                if is_root && ui.button(tr.fb_remove_root).clicked() {
                     action = Some((e.path.clone(), "remove"));
                     ui.close_menu();
                 }
-                if ui.button("Copy path").clicked() {
+                if ui.button(tr.fb_copy_path).clicked() {
                     ui.ctx().copy_text(e.path.display().to_string());
                     ui.close_menu();
                 }
@@ -753,6 +796,7 @@ impl App {
 
     /// Hand a decoded preview to the audio thread.
     pub(super) fn poll_preview(&mut self) {
+        let tr = self.tr();
         let Some((path, rx)) = &self.preview_rx else {
             return;
         };
@@ -772,7 +816,7 @@ impl App {
                         .unwrap_or_default()
                         .to_string_lossy()
                         .to_string();
-                    self.say(Tone::Quiet, format!("Previewing {name}. Click it again or Esc to stop, double-click to load."));
+                    self.say(Tone::Quiet, fill(tr.fb_previewing, &[("name", &name)]));
                 }
             }
             Err(e) => {
@@ -886,11 +930,15 @@ mod tests {
         files.roots = vec![dir.path().to_path_buf()];
         files.open.clear();
         assert!(
-            files.rows("kick").is_empty() || !files.index_state().1,
+            files.rows("kick", &crate::i18n::EN).is_empty() || !files.index_state().1,
             "the first search starts a scan"
         );
         files.wait_index();
-        let hits: Vec<String> = files.rows("kick").into_iter().map(|r| r.1.name).collect();
+        let hits: Vec<String> = files
+            .rows("kick", &crate::i18n::EN)
+            .into_iter()
+            .map(|r| r.1.name)
+            .collect();
         assert_eq!(hits, ["Kick Punchy.wav", "kick top.wav"]);
         assert_eq!(files.index_state(), (4, true), "every folder read once");
     }

@@ -6,6 +6,7 @@ use super::{
     App, Tone, kit,
     settings_ui::{card, kit_switch, row},
 };
+use crate::i18n::fill;
 use crate::plugins::{Reply, Req, Scanned, Status};
 use crate::settings::Settings;
 use crate::theme as t;
@@ -173,6 +174,7 @@ impl App {
 
     /// A crashed or failed plugin: load it again from its last saved state.
     pub(crate) fn reload_plugin(&mut self, id: u64) {
+        let tr = self.tr();
         let name = self
             .plugins
             .live
@@ -181,7 +183,7 @@ impl App {
             .unwrap_or_default();
         self.say(
             Tone::Wait,
-            format!("Reloading {name} from its last saved state…"),
+            fill(tr.plg_reloading, &[(tr.plg_col_name, &name)]),
         );
         self.unload_plugin(id);
         // plugins_frame loads it again next frame, as the song still has it.
@@ -223,16 +225,26 @@ impl App {
 
     /// Once per frame: scan news, host replies, load/unload to match the song.
     pub(crate) fn plugins_frame(&mut self) {
+        let tr = self.tr();
         if let Some(rx) = &self.plugins.scan_rx {
             for msg in rx.try_iter().collect::<Vec<_>>() {
                 match msg {
                     ScanMsg::Progress(d, n, name) => {
-                        self.plugins.scan_note = Some(format!("Checking plugins {d}/{n}: {name}"))
+                        self.plugins.scan_note = Some(fill(
+                            tr.plg_checking,
+                            &[
+                                ("d", &d.to_string()),
+                                ("n", &n.to_string()),
+                                (tr.plg_col_name, &name),
+                            ],
+                        ))
                     }
                     ScanMsg::Done(list) => {
                         let ok = list.iter().filter(|s| s.usable()).count();
-                        self.plugins.scan_note =
-                            Some(format!("{ok} of {} plugins ready", list.len()));
+                        self.plugins.scan_note = Some(fill(
+                            tr.plg_scan_done,
+                            &[("ok", &ok.to_string()), ("n", &list.len().to_string())],
+                        ));
                         self.plugins.list = list;
                         self.plugins.scan_rx = None;
                     }
@@ -319,6 +331,7 @@ impl App {
     }
 
     fn sync_native_fl(&mut self, wanted: &[PluginRef]) {
+        let tr = self.tr();
         use crate::fl_native::{Message, Session, slot};
         let has_channels = wanted.iter().any(|r| slot(&r.path).is_some());
         let source = self.song.native_fl.clone().filter(|_| has_channels);
@@ -343,7 +356,7 @@ impl App {
             }
             self.plugins.native_fl = source.map(|source| Session::start(source, rate));
             if self.plugins.native_fl.is_some() {
-                self.say(Tone::Wait, "Opening instruments in FL Studio…");
+                self.say(Tone::Wait, tr.plg_opening_fl);
             }
         }
         let mut notice = None;
@@ -353,7 +366,7 @@ impl App {
                     Message::Ready(outputs) => {
                         notice = Some((
                             Tone::Done,
-                            format!("FL Studio connected {} instrument channels.", outputs.len()),
+                            fill(tr.plg_fl_connected, &[("n", &outputs.len().to_string())]),
                         ));
                         session.outputs = outputs;
                     }
@@ -375,23 +388,17 @@ impl App {
                 .get_mut(index)
                 .is_some_and(|seen| std::mem::replace(seen, true));
             let (proc, error) = if duplicate {
-                (
-                    None,
-                    Some("This FL Studio output already belongs to another channel.".into()),
-                )
+                (None, Some(tr.plg_fl_output_taken.into()))
             } else if let Some(session) = &self.plugins.native_fl {
                 (
                     session.outputs.get(index).cloned(),
                     session.error.clone().or_else(|| {
                         (index >= session.source.channels.len())
-                            .then(|| "Invalid FL Studio output.".into())
+                            .then(|| tr.plg_fl_output_invalid.into())
                     }),
                 )
             } else {
-                (
-                    None,
-                    Some("This project has no saved state for the FL Studio instruments.".into()),
-                )
+                (None, Some(tr.plg_fl_no_state.into()))
             };
             let old = self.plugins.live.get(&r.id);
             let unchanged = old.is_some_and(|l| {
@@ -433,6 +440,7 @@ impl App {
     }
 
     fn plugin_reply(&mut self, r: Reply) {
+        let tr = self.tr();
         if std::env::var_os("KFXL_PLUGIN_TRACE").is_some() {
             match &r {
                 Reply::Loaded { id, name, gui, .. } => {
@@ -475,7 +483,7 @@ impl App {
                 {
                     self.say(
                         Tone::Bad,
-                        format!("{name}: the audio thread is busy, try again."),
+                        fill(tr.plg_audio_busy, &[(tr.plg_col_name, &name)]),
                     );
                 }
                 if show {
@@ -791,6 +799,7 @@ impl App {
     /// The plugin window's body (FL wrapper): page tabs, then the editor or
     /// the parameter list.
     pub(crate) fn plugin_wrapper(&mut self, ui: &mut egui::Ui, plugin: &PluginRef) {
+        let tr = self.tr();
         let id = plugin.id;
         let page = self.plugins.page.get(&id).copied().unwrap_or_default();
         let (status, color) = self.plugin_status(id);
@@ -800,7 +809,7 @@ impl App {
             let (pick, _) = kit::chips(
                 ui,
                 &format!("wrap-page-{id}"),
-                &["Plugin", "Parameters", "Settings"],
+                &[tr.plg_page_plugin, tr.plg_page_params, tr.plg_page_settings],
                 pages.iter().position(|p| *p == page).unwrap_or(0),
                 None,
             );
@@ -819,15 +828,15 @@ impl App {
             match failed {
                 Some(err) => {
                     let short = if err.contains("crashed") || err.contains("stopped responding") {
-                        "crashed"
+                        tr.plg_crashed
                     } else {
-                        "failed"
+                        tr.plg_failed
                     };
                     ui.label(RichText::new(short).font(t::sans(12.0)).color(t::bad()))
                         .on_hover_text(&err);
                     if kit::tip(
-                        kit::tool_button(ui, "Reload", kit::Kind::Normal, true),
-                        format!("{err}\nLoad it again from the last saved state"),
+                        kit::tool_button(ui, tr.plg_reload, kit::Kind::Normal, true),
+                        fill(tr.plg_reload_err_tip, &[("err", &err)]),
                     )
                     .clicked()
                     {
@@ -854,33 +863,33 @@ impl App {
                             .map(|k| (t, k))
                     });
                     if let Some(ch) = channel {
-                        if ui.button("Save channel preset…").clicked() {
+                        if ui.button(tr.inst_save_ch_preset).clicked() {
                             ui.close_menu();
                             self.save_channel_preset(ch);
                         }
-                        if ui.button("Load channel preset…").clicked() {
+                        if ui.button(tr.inst_load_ch_preset).clicked() {
                             ui.close_menu();
                             self.load_preset_dialog_for(super::presets_ui::Target::Channel(ch));
                         }
                         ui.separator();
                     }
                     if let Some((t, k)) = slot {
-                        if ui.button("Save effect preset…").clicked() {
+                        if ui.button(tr.plg_save_fx_preset).clicked() {
                             ui.close_menu();
                             self.save_fx_preset(t, k);
                         }
-                        if ui.button("Load effect preset…").clicked() {
+                        if ui.button(tr.plg_load_fx_preset).clicked() {
                             ui.close_menu();
                             self.load_preset_dialog_for(super::presets_ui::Target::Fx(t, k));
                         }
                         ui.separator();
                     }
                     if let Some(ch) = channel {
-                        if ui.button("Piano roll  F7").clicked() {
+                        if ui.button(tr.plg_piano_roll_f7).clicked() {
                             self.open_roll(ch);
                             ui.close_menu();
                         }
-                        if ui.button("Delete channel").clicked() {
+                        if ui.button(tr.inst_delete_channel).clicked() {
                             self.delete_channel(ch);
                             ui.close_menu();
                         }
@@ -893,9 +902,9 @@ impl App {
                         .is_some_and(|l| l.editor && !self.plugins.placed.contains_key(&id));
                     if ui
                         .button(if separate {
-                            "Close separate window"
+                            tr.plg_close_separate
                         } else {
-                            "Editor in a separate window"
+                            tr.plg_editor_separate
                         })
                         .clicked()
                     {
@@ -908,7 +917,7 @@ impl App {
                         self.plugins.placed.remove(&id);
                         ui.close_menu();
                     }
-                    if ui.button("Parameters").clicked() {
+                    if ui.button(tr.plg_page_params).clicked() {
                         new_page = WrapPage::Parameters;
                         ui.close_menu();
                     }
@@ -929,6 +938,7 @@ impl App {
     /// A multi-out instrument's outputs (FL: the wrapper's output routing):
     /// auto-map every pair to its own insert, or route each pair by hand.
     fn output_rows(&mut self, ui: &mut egui::Ui, ch: u64, id: u64, extra: usize) {
+        let tr = self.tr();
         let outs = self
             .song
             .instrument(ch)
@@ -936,30 +946,31 @@ impl App {
             .map(|p| p.outs.clone())
             .unwrap_or_default();
         let routed = outs.iter().filter(|&&o| o > 0).count();
-        let hint = "Outputs 1-2 play on the channel's insert. Each other pair plays on the insert set here; an unrouted pair joins 1-2. Choose which sound goes to which output in the plugin's own mixer.";
-        row(ui, "Outputs", Some(hint), |ui| {
+        let hint = tr.plg_outputs_hint;
+        row(ui, tr.plg_outputs, Some(hint), |ui| {
             ui.label(
-                egui::RichText::new(format!("{} stereo · {routed} routed", extra + 1))
-                    .font(t::mono(12.0))
-                    .color(t::muted()),
+                egui::RichText::new(fill(
+                    tr.plg_outputs_summary,
+                    &[
+                        ("n", &(extra + 1).to_string()),
+                        ("routed", &routed.to_string()),
+                    ],
+                ))
+                .font(t::mono(12.0))
+                .color(t::muted()),
             );
-            if kit::tool_button(ui, "Map to inserts", kit::Kind::Ghost, true)
-                .on_hover_text(
-                    "Give every output pair its own free insert, named after it (FL: auto map)",
-                )
+            if kit::tool_button(ui, tr.plg_map_to_inserts, kit::Kind::Ghost, true)
+                .on_hover_text(tr.plg_map_to_inserts_tip)
                 .clicked()
             {
                 self.checkpoint();
                 let n = self.song.map_plugin_outputs(ch, extra);
                 self.publish();
-                self.say(
-                    Tone::Done,
-                    format!("Mapped {n} output pairs to inserts. Ctrl+Z undoes."),
-                );
+                self.say(Tone::Done, fill(tr.plg_mapped, &[("n", &n.to_string())]));
             }
             if routed > 0
-                && kit::tool_button(ui, "Unroute", kit::Kind::Ghost, true)
-                    .on_hover_text("Every pair back on the channel's insert")
+                && kit::tool_button(ui, tr.plg_unroute, kit::Kind::Ghost, true)
+                    .on_hover_text(tr.plg_unroute_tip)
                     .clicked()
             {
                 self.checkpoint();
@@ -978,14 +989,14 @@ impl App {
         let names: Vec<String> = (0..self.song.mixer.len())
             .map(|m| {
                 if m == 0 {
-                    "With 1-2".to_string()
+                    tr.plg_with_1_2.to_string()
                 } else {
                     format!("{m:02}  {}", self.mixer_name(m))
                 }
             })
             .collect();
         egui::CollapsingHeader::new(
-            egui::RichText::new("Route each pair")
+            egui::RichText::new(tr.plg_route_each_pair)
                 .font(t::sans(12.0))
                 .color(t::muted()),
         )
@@ -1046,6 +1057,7 @@ impl App {
     /// The wrapper's Settings page (FL: wrapper settings): where the plugin
     /// plays, how it runs, its saved state.
     fn wrapper_settings(&mut self, ui: &mut egui::Ui, plugin: &PluginRef) {
+        let tr = self.tr();
         let id = plugin.id;
         let channel = self
             .song
@@ -1058,146 +1070,291 @@ impl App {
                 .position(|f| f.plugin.as_ref().is_some_and(|p| p.id == id))
                 .map(|k| (t, k))
         });
-        egui::ScrollArea::vertical().id_salt(("wrap-settings", id)).auto_shrink([false, false]).show(ui, |ui| {
-            if let Some(ch) = channel {
-                card(ui, "channel", |ui| {
-                    row(ui, "Mixer insert", Some("Where this channel plays. Ctrl+L in the mixer routes the selected channels."), |ui| {
-                        let now = self.song.instrument(ch).map(|i| i.mixer).unwrap_or(0);
-                        let names: Vec<String> = (0..self.song.mixer.len()).map(|m| if m == 0 { "Master".to_string() } else { format!("{m:02}  {}", self.mixer_name(m)) }).collect();
-                        let mut pick = None;
-                        kit::dropdown(ui, &format!("wrap-insert-{id}"), &names[now as usize], 200.0, |ui| {
-                            for (m, label) in names.iter().enumerate() {
-                                if ui.selectable_label(now as usize == m, label).clicked() {
-                                    pick = Some(m as u16);
+        egui::ScrollArea::vertical()
+            .id_salt(("wrap-settings", id))
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                if let Some(ch) = channel {
+                    card(ui, tr.plg_card_channel, |ui| {
+                        row(
+                            ui,
+                            tr.plg_mixer_insert,
+                            Some(tr.plg_mixer_insert_hint),
+                            |ui| {
+                                let now = self.song.instrument(ch).map(|i| i.mixer).unwrap_or(0);
+                                let names: Vec<String> = (0..self.song.mixer.len())
+                                    .map(|m| {
+                                        if m == 0 {
+                                            tr.mixer_master.to_string()
+                                        } else {
+                                            format!("{m:02}  {}", self.mixer_name(m))
+                                        }
+                                    })
+                                    .collect();
+                                let mut pick = None;
+                                kit::dropdown(
+                                    ui,
+                                    &format!("wrap-insert-{id}"),
+                                    &names[now as usize],
+                                    200.0,
+                                    |ui| {
+                                        for (m, label) in names.iter().enumerate() {
+                                            if ui
+                                                .selectable_label(now as usize == m, label)
+                                                .clicked()
+                                            {
+                                                pick = Some(m as u16);
+                                            }
+                                        }
+                                    },
+                                );
+                                if let Some(m) = pick
+                                    && m != now
+                                {
+                                    self.checkpoint();
+                                    if let Some(i) =
+                                        self.song.instruments.iter_mut().find(|i| i.id == ch)
+                                    {
+                                        i.mixer = m;
+                                    }
+                                    self.publish();
+                                }
+                            },
+                        );
+                        let extra = self.plugins.live.get(&id).map(|l| l.outs).unwrap_or(0);
+                        if extra > 0 {
+                            self.output_rows(ui, ch, id, extra);
+                        }
+                        row(ui, tr.plg_vol_pan, None, |ui| {
+                            let Some(inst) = self.song.instrument(ch).cloned() else {
+                                return;
+                            };
+                            let pan_fmt = |v: f64| {
+                                if v.abs() < 0.005 {
+                                    "C".to_string()
+                                } else if v < 0.0 {
+                                    format!("L{:.0}", -v * 100.0)
+                                } else {
+                                    format!("R{:.0}", v * 100.0)
+                                }
+                            };
+                            let vol_fmt = |pos: f64| {
+                                keyframexl::sequence::gain_db_text(
+                                    keyframexl::sequence::volume_gain(pos as f32),
+                                )
+                            };
+                            let knobs = [
+                                (
+                                    kit::Knob {
+                                        label: tr.plg_k_volume,
+                                        color: t::enc_orange(),
+                                        min: 0.0,
+                                        max: 1.0,
+                                        default: keyframexl::sequence::volume_pos(1.0) as f64,
+                                        log: false,
+                                        fmt: &vol_fmt,
+                                        hint: tr.plg_k_volume_hint,
+                                    },
+                                    keyframexl::sequence::volume_pos(inst.volume) as f64,
+                                    keyframexl::automation::Target::ChannelVolume { inst: ch },
+                                ),
+                                (
+                                    kit::Knob {
+                                        label: tr.plg_k_pan,
+                                        color: t::enc_white(),
+                                        min: -1.0,
+                                        max: 1.0,
+                                        default: 0.0,
+                                        log: false,
+                                        fmt: &pan_fmt,
+                                        hint: tr.plg_k_pan_hint,
+                                    },
+                                    inst.pan as f64,
+                                    keyframexl::automation::Target::ChannelPan { inst: ch },
+                                ),
+                            ];
+                            for (k, (spec, v, target)) in knobs.into_iter().enumerate() {
+                                let mut v = v;
+                                kit::automatable(ui, target);
+                                let (_, started, changed) = kit::knob(ui, &spec, &mut v);
+                                if started {
+                                    self.checkpoint();
+                                }
+                                if changed
+                                    && let Some(i) =
+                                        self.song.instruments.iter_mut().find(|i| i.id == ch)
+                                {
+                                    if k == 0 {
+                                        i.volume = keyframexl::sequence::volume_gain(v as f32);
+                                    } else {
+                                        i.pan = v as f32;
+                                    }
+                                    self.publish();
                                 }
                             }
                         });
-                        if let Some(m) = pick
-                            && m != now
-                        {
-                            self.checkpoint();
-                            if let Some(i) = self.song.instruments.iter_mut().find(|i| i.id == ch) {
-                                i.mixer = m;
-                            }
-                            self.publish();
-                        }
+                        row(
+                            ui,
+                            tr.plg_stuck_notes,
+                            Some(tr.plg_stuck_notes_hint),
+                            |ui| {
+                                if kit::tool_button(ui, tr.plg_notes_off, kit::Kind::Ghost, true)
+                                    .clicked()
+                                    && let Some(a) = &self.audio
+                                    && let Ok(mut q) = a.live.lock()
+                                {
+                                    let _ = q.push(crate::audio::LiveCmd::Midi {
+                                        inst: ch,
+                                        bytes: [0xB0, 120, 0],
+                                    });
+                                    let _ = q.push(crate::audio::LiveCmd::Midi {
+                                        inst: ch,
+                                        bytes: [0xB0, 123, 0],
+                                    });
+                                }
+                            },
+                        );
                     });
-                    let extra = self.plugins.live.get(&id).map(|l| l.outs).unwrap_or(0);
-                    if extra > 0 {
-                        self.output_rows(ui, ch, id, extra);
-                    }
-                    row(ui, "Volume and pan", None, |ui| {
-                        let Some(inst) = self.song.instrument(ch).cloned() else { return };
-                        let pan_fmt = |v: f64| if v.abs() < 0.005 { "C".to_string() } else if v < 0.0 { format!("L{:.0}", -v * 100.0) } else { format!("R{:.0}", v * 100.0) };
-                        let vol_fmt = |pos: f64| keyframexl::sequence::gain_db_text(keyframexl::sequence::volume_gain(pos as f32));
-                        let knobs = [
-                            (kit::Knob { label: "Volume", color: t::enc_orange(), min: 0.0, max: 1.0, default: keyframexl::sequence::volume_pos(1.0) as f64, log: false, fmt: &vol_fmt, hint: "Channel volume. Double-click for 0 dB." }, keyframexl::sequence::volume_pos(inst.volume) as f64, keyframexl::automation::Target::ChannelVolume { inst: ch }),
-                            (kit::Knob { label: "Pan", color: t::enc_white(), min: -1.0, max: 1.0, default: 0.0, log: false, fmt: &pan_fmt, hint: "Channel pan" }, inst.pan as f64, keyframexl::automation::Target::ChannelPan { inst: ch }),
-                        ];
-                        for (k, (spec, v, target)) in knobs.into_iter().enumerate() {
-                            let mut v = v;
-                            kit::automatable(ui, target);
+                }
+                if let Some((track, k)) = slot {
+                    card(ui, tr.plg_card_mixer_slot, |ui| {
+                        row(ui, tr.plg_place, None, |ui| {
+                            ui.label(
+                                RichText::new(fill(
+                                    tr.plg_place_slot,
+                                    &[
+                                        ("track", &self.mixer_name(track)),
+                                        ("n", &(k + 1).to_string()),
+                                    ],
+                                ))
+                                .font(t::sans(13.0))
+                                .color(t::text()),
+                            );
+                        });
+                        row(ui, "On", Some(tr.plg_on_hint), |ui| {
+                            let mut on = self.song.mixer[track].fx[k].enabled;
+                            if kit_switch(ui, &mut on) {
+                                self.checkpoint();
+                                self.song.mixer[track].fx[k].enabled = on;
+                                self.publish();
+                            }
+                        });
+                        row(ui, tr.plg_mix, Some(tr.plg_mix_hint), |ui| {
+                            let mut v = self.song.mixer[track].fx[k].mix as f64;
+                            let fmt = |v: f64| format!("{:.0}%", v * 100.0);
+                            let spec = kit::Knob {
+                                label: tr.plg_mix,
+                                color: t::enc_green(),
+                                min: 0.0,
+                                max: 1.0,
+                                default: 1.0,
+                                log: false,
+                                fmt: &fmt,
+                                hint: tr.plg_mix_knob_hint,
+                            };
                             let (_, started, changed) = kit::knob(ui, &spec, &mut v);
                             if started {
                                 self.checkpoint();
                             }
-                            if changed && let Some(i) = self.song.instruments.iter_mut().find(|i| i.id == ch) {
-                                if k == 0 {
-                                    i.volume = keyframexl::sequence::volume_gain(v as f32);
-                                } else {
-                                    i.pan = v as f32;
-                                }
+                            if changed {
+                                self.song.mixer[track].fx[k].mix = v as f32;
                                 self.publish();
                             }
-                        }
+                        });
                     });
-                    row(ui, "Stuck notes", Some("All notes off for this plugin (MIDI CC 120 and 123)."), |ui| {
-                        if kit::tool_button(ui, "Notes off", kit::Kind::Ghost, true).clicked()
-                            && let Some(a) = &self.audio
-                            && let Ok(mut q) = a.live.lock()
+                }
+                card(ui, tr.plg_card_processing, |ui| {
+                    let bridged = self.settings.plugins.bridged
+                        && std::env::var_os("KFXL_NO_BRIDGE").is_none();
+                    row(ui, tr.plg_process, None, |ui| {
+                        let text = if bridged {
+                            tr.plg_process_bridged
+                        } else {
+                            tr.plg_process_inside
+                        };
+                        ui.label(RichText::new(text).font(t::sans(13.0)).color(if bridged {
+                            t::ok()
+                        } else {
+                            t::wait()
+                        }));
+                    });
+                    row(ui, tr.plg_latency, None, |ui| {
+                        let ms = self
+                            .audio
+                            .as_ref()
+                            .map(|a| a.running.latency_ms())
+                            .unwrap_or(0.0);
+                        let text = if bridged {
+                            fill(tr.plg_latency_buffer, &[("ms", &format!("{ms:.1}"))])
+                        } else {
+                            tr.plg_latency_none.to_string()
+                        };
+                        ui.label(RichText::new(text).font(t::sans(13.0)).color(t::text()));
+                    });
+                    ui.horizontal(|ui| {
+                        if kit::tool_button(ui, tr.plg_change_in_settings, kit::Kind::Ghost, true)
+                            .clicked()
                         {
-                            let _ = q.push(crate::audio::LiveCmd::Midi { inst: ch, bytes: [0xB0, 120, 0] });
-                            let _ = q.push(crate::audio::LiveCmd::Midi { inst: ch, bytes: [0xB0, 123, 0] });
+                            self.open_settings(super::settings_ui::Page::Plugins);
                         }
                     });
                 });
-            }
-            if let Some((tr, k)) = slot {
-                card(ui, "mixer slot", |ui| {
-                    row(ui, "Place", None, |ui| {
-                        ui.label(RichText::new(format!("{} · slot {}", self.mixer_name(tr), k + 1)).font(t::sans(13.0)).color(t::text()));
+                card(ui, tr.plg_card_state, |ui| {
+                    row(ui, tr.plg_file, None, |ui| {
+                        ui.label(
+                            RichText::new(&plugin.path)
+                                .font(t::mono(11.5))
+                                .color(t::faint()),
+                        );
                     });
-                    row(ui, "On", Some("Off bypasses the effect (the slot LED)."), |ui| {
-                        let mut on = self.song.mixer[tr].fx[k].enabled;
-                        if kit_switch(ui, &mut on) {
+                    row(
+                        ui,
+                        tr.plg_saved_state,
+                        Some(tr.plg_saved_state_hint),
+                        |ui| {
+                            let size = plugin.state.len() * 3 / 4;
+                            let text = if size == 0 {
+                                tr.plg_none_yet.to_string()
+                            } else if size < 1024 {
+                                fill(tr.plg_state_bytes, &[("n", &size.to_string())])
+                            } else {
+                                format!("{:.1} KB", size as f64 / 1024.0)
+                            };
+                            ui.label(RichText::new(text).font(t::sans(13.0)).color(t::text()));
+                        },
+                    );
+                    ui.horizontal(|ui| {
+                        if kit::tool_button(ui, tr.plg_reload, kit::Kind::Ghost, true)
+                            .on_hover_text(tr.plg_reload_tip)
+                            .clicked()
+                        {
+                            self.reload_plugin(id);
+                        }
+                        if kit::tool_button(ui, tr.plg_reset_defaults, kit::Kind::Ghost, true)
+                            .on_hover_text(tr.plg_reset_defaults_tip)
+                            .clicked()
+                        {
                             self.checkpoint();
-                            self.song.mixer[tr].fx[k].enabled = on;
+                            if let Some(r) = self.song.plugin_ref_mut(id) {
+                                r.state.clear();
+                            }
                             self.publish();
+                            self.reload_plugin(id);
+                            self.say(
+                                Tone::Quiet,
+                                fill(tr.plg_reset_done, &[(tr.plg_col_name, &plugin.name)]),
+                            );
                         }
                     });
-                    row(ui, "Mix", Some("Dry/wet of this slot."), |ui| {
-                        let mut v = self.song.mixer[tr].fx[k].mix as f64;
-                        let fmt = |v: f64| format!("{:.0}%", v * 100.0);
-                        let spec = kit::Knob { label: "Mix", color: t::enc_green(), min: 0.0, max: 1.0, default: 1.0, log: false, fmt: &fmt, hint: "Slot dry/wet" };
-                        let (_, started, changed) = kit::knob(ui, &spec, &mut v);
-                        if started {
-                            self.checkpoint();
-                        }
-                        if changed {
-                            self.song.mixer[tr].fx[k].mix = v as f32;
-                            self.publish();
-                        }
-                    });
-                });
-            }
-            card(ui, "processing", |ui| {
-                let bridged = self.settings.plugins.bridged && std::env::var_os("KFXL_NO_BRIDGE").is_none();
-                row(ui, "Process", None, |ui| {
-                    let text = if bridged { "Own process (bridged): a crash silences only this plugin" } else { "Inside the program: a crash closes it" };
-                    ui.label(RichText::new(text).font(t::sans(13.0)).color(if bridged { t::ok() } else { t::wait() }));
-                });
-                row(ui, "Latency", None, |ui| {
-                    let ms = self.audio.as_ref().map(|a| a.running.latency_ms()).unwrap_or(0.0);
-                    let text = if bridged { format!("One audio buffer, ≈{ms:.1} ms") } else { "None added".to_string() };
-                    ui.label(RichText::new(text).font(t::sans(13.0)).color(t::text()));
-                });
-                ui.horizontal(|ui| {
-                    if kit::tool_button(ui, "Change in Settings → Plugins", kit::Kind::Ghost, true).clicked() {
-                        self.open_settings(super::settings_ui::Page::Plugins);
-                    }
                 });
             });
-            card(ui, "state", |ui| {
-                row(ui, "File", None, |ui| {
-                    ui.label(RichText::new(&plugin.path).font(t::mono(11.5)).color(t::faint()));
-                });
-                row(ui, "Saved state", Some("The plugin's settings are stored in the project when it is saved."), |ui| {
-                    let size = plugin.state.len() * 3 / 4;
-                    let text = if size == 0 { "none yet".to_string() } else if size < 1024 { format!("{size} bytes") } else { format!("{:.1} KB", size as f64 / 1024.0) };
-                    ui.label(RichText::new(text).font(t::sans(13.0)).color(t::text()));
-                });
-                ui.horizontal(|ui| {
-                    if kit::tool_button(ui, "Reload", kit::Kind::Ghost, true).on_hover_text("Load it again from the last saved state").clicked() {
-                        self.reload_plugin(id);
-                    }
-                    if kit::tool_button(ui, "Reset to defaults", kit::Kind::Ghost, true).on_hover_text("Forget its settings and load it fresh. Ctrl+Z undoes.").clicked() {
-                        self.checkpoint();
-                        if let Some(r) = self.song.plugin_ref_mut(id) {
-                            r.state.clear();
-                        }
-                        self.publish();
-                        self.reload_plugin(id);
-                        self.say(Tone::Quiet, format!("{} reset to its defaults. Ctrl+Z undoes.", plugin.name));
-                    }
-                });
-            });
-        });
     }
 
     fn embedded_editor(&mut self, ui: &mut egui::Ui, id: u64) {
+        let tr = self.tr();
         let Some(l) = self.plugins.live.get(&id) else {
             ui.label(
-                RichText::new("Not loaded.")
+                RichText::new(tr.plg_not_loaded_dot)
                     .font(t::sans(13.0))
                     .color(t::faint()),
             );
@@ -1212,22 +1369,34 @@ impl App {
         }
         if crate::fl_native::slot(&l.path).is_some() {
             ui.label(
-                RichText::new("FLEX runs in standalone FL Studio.")
+                RichText::new(tr.plg_flex_standalone)
                     .font(t::sans(13.0))
                     .color(t::text()),
             );
             return;
         }
         if !l.gui {
-            ui.label(RichText::new("This plugin has no editor of its own. Its controls are on the Parameters page.").font(t::sans(13.0)).color(t::muted()));
+            ui.label(
+                RichText::new(tr.plg_no_editor)
+                    .font(t::sans(13.0))
+                    .color(t::muted()),
+            );
             return;
         }
         if self.plugins.parent.is_none() {
-            ui.label(RichText::new("The editor opens in its own window here (Wayland). Settings → General → \"Run as an X11 window\" puts it inside this window, like FL.").font(t::sans(12.0)).color(t::faint()));
+            ui.label(
+                RichText::new(tr.plg_wayland_note)
+                    .font(t::sans(12.0))
+                    .color(t::faint()),
+            );
             let open = l.editor;
             if kit::button(
                 ui,
-                if open { "Hide editor" } else { "Show editor" },
+                if open {
+                    tr.plg_hide_editor
+                } else {
+                    tr.plg_show_editor
+                },
                 kit::Kind::Primary,
                 true,
             )
@@ -1291,6 +1460,7 @@ impl App {
     }
 
     fn parameters_page(&mut self, ui: &mut egui::Ui, id: u64) {
+        let tr = self.tr();
         let now = ui.input(|i| i.time);
         // Re-read twice a second: the editor changes them too.
         let stale = self.plugins.params.get(&id).is_none_or(|p| now - p.1 > 0.5);
@@ -1309,12 +1479,12 @@ impl App {
         ui.horizontal(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.plugins.param_filter)
-                    .hint_text("Filter parameters")
+                    .hint_text(tr.plg_filter_params)
                     .desired_width(240.0),
             );
             let n = self.plugins.params.get(&id).map(|p| p.0.len()).unwrap_or(0);
             ui.label(
-                RichText::new(format!("{n} parameters"))
+                RichText::new(fill(tr.plg_n_params, &[("n", &n.to_string())]))
                     .font(t::sans(12.0))
                     .color(t::faint()),
             );
@@ -1377,7 +1547,7 @@ impl App {
                                 let (pick, _) = kit::chips(
                                     ui,
                                     &format!("param-{id}-{}", r.id),
-                                    &["Off", "On"],
+                                    &[tr.plg_off, tr.plg_on],
                                     on as usize,
                                     Some(&[44.0, 44.0]),
                                 );
@@ -1565,6 +1735,7 @@ impl App {
     }
 
     pub(crate) fn show_editor(&mut self, id: u64) {
+        let tr = self.tr();
         let Some(l) = self.plugins.live.get_mut(&id) else {
             return;
         };
@@ -1574,7 +1745,10 @@ impl App {
         }
         if !l.gui {
             let name = l.name.clone();
-            self.say(Tone::Quiet, format!("{name} has no editor window."));
+            self.say(
+                Tone::Quiet,
+                fill(tr.plg_no_editor_window, &[(tr.plg_col_name, &name)]),
+            );
             return;
         }
         if let Some(h) = &self.plugins.host {
@@ -1588,6 +1762,7 @@ impl App {
 
     /// FL: Add → instrument plugin. A new channel on Master, selected, editor opens.
     pub(crate) fn add_plugin_channel(&mut self, s: &Scanned) {
+        let tr = self.tr();
         // FL plays only its selected channel: a second link would play the
         // same sound twice.
         if crate::fl_link::is_link(&s.path)
@@ -1598,10 +1773,7 @@ impl App {
         {
             self.say(
                 Tone::Bad,
-                format!(
-                    "\"{}\" already links to FL Studio. One link channel at a time: FL plays only its selected channel.",
-                    other.name
-                ),
+                fill(tr.plg_link_exists, &[(tr.plg_col_name, &other.name)]),
             );
             return;
         }
@@ -1627,22 +1799,27 @@ impl App {
         if let Some(l) = self.plugins.live.get_mut(&pid) {
             l.show_when_loaded = true;
         }
-        self.say(Tone::Wait, format!("Loading {}…", s.name));
+        self.say(
+            Tone::Wait,
+            fill(tr.plg_loading_name, &[(tr.plg_col_name, &s.name)]),
+        );
     }
 
     /// Status line for a plugin channel or slot.
     pub(crate) fn plugin_status(&self, id: u64) -> (String, eframe::egui::Color32) {
+        let tr = self.tr();
         match self.plugins.live.get(&id) {
-            None => ("not loaded".into(), t::faint()),
+            None => (tr.plg_st_not_loaded.into(), t::faint()),
             Some(l) if l.error.is_some() => (l.error.clone().unwrap_or_default(), t::bad()),
-            Some(l) if l.proc.is_none() => ("loading…".into(), t::wait()),
-            Some(l) if l.editor => ("editor open".into(), t::ok()),
-            Some(_) => ("ready".into(), t::muted()),
+            Some(l) if l.proc.is_none() => (tr.plg_st_loading.into(), t::wait()),
+            Some(l) if l.editor => (tr.plg_st_editor_open.into(), t::ok()),
+            Some(_) => (tr.plg_st_ready.into(), t::muted()),
         }
     }
 
     /// Settings → Plugins (FL: Manage plugins): find, check and act on plugins.
     pub(crate) fn plugins_page(&mut self, ui: &mut egui::Ui, s: &mut Settings) {
+        let tr = self.tr();
         let id = egui::Id::new("settings-plugins");
         let (mut query, mut kind, mut picked) = ui
             .data(|d| d.get_temp::<(String, usize, Option<PathBuf>)>(id))
@@ -1671,20 +1848,13 @@ impl App {
         }
         let busy = self.plugins.scan_rx.is_some();
         let single_busy = self.plugins.rescan_one.as_ref().map(|(p, _)| p.clone());
-        card(ui, "safety", |ui| {
-            row(
-                ui,
-                "Bridged",
-                Some(
-                    "Each plugin runs in its own process. A crash silences it and offers Reload instead of closing the program. Costs one audio buffer of latency.",
-                ),
-                |ui| {
-                    let mut on = s.plugins.bridged;
-                    if kit_switch(ui, &mut on) {
-                        s.plugins.bridged = on;
-                    }
-                },
-            );
+        card(ui, tr.plg_card_safety, |ui| {
+            row(ui, tr.plg_bridged, Some(tr.plg_bridged_hint), |ui| {
+                let mut on = s.plugins.bridged;
+                if kit_switch(ui, &mut on) {
+                    s.plugins.bridged = on;
+                }
+            });
         });
         // Toolbar: search, kind filter, counts, rescan.
         let list = self.plugins.list.clone();
@@ -1695,17 +1865,26 @@ impl App {
         ui.horizontal(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut query)
-                    .hint_text("Search name or vendor")
+                    .hint_text(tr.plg_search)
                     .desired_width(190.0),
             );
-            let kinds = ["All", "Instruments", "Effects", "Problems"];
+            let kinds = [
+                tr.plg_kind_all,
+                tr.plg_kind_instruments,
+                tr.plg_kind_effects,
+                tr.plg_kind_problems,
+            ];
             if let (Some(i), _) = kit::chips(ui, "plug-kind", &kinds, kind, None) {
                 kind = i;
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if kit::tool_button(
                     ui,
-                    if busy { "Scanning…" } else { "Rescan all" },
+                    if busy {
+                        tr.plg_scanning
+                    } else {
+                        tr.plg_rescan_all
+                    },
                     kit::Kind::Ghost,
                     !busy,
                 )
@@ -1719,9 +1898,13 @@ impl App {
         let note = if busy {
             self.plugins.scan_note.clone().unwrap_or_default()
         } else {
-            format!(
-                "{} found · {ready} ready · {problems} with problems",
-                list.len()
+            fill(
+                tr.plg_counts,
+                &[
+                    ("n", &list.len().to_string()),
+                    (tr.plg_st_ready, &ready.to_string()),
+                    ("problems", &problems.to_string()),
+                ],
             )
         };
         ui.label(RichText::new(note).font(t::sans(12.0)).color(if busy {
@@ -1745,65 +1928,138 @@ impl App {
             })
             .collect();
         // The table.
-        egui::Frame::new().fill(t::sunken()).stroke(egui::Stroke::new(1.0_f32, t::edge())).corner_radius(9.0).inner_margin(egui::Margin::symmetric(0, 4)).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            let w = ui.available_width();
-            let cols = [30.0, 0.40 * w, 0.14 * w, 0.24 * w];
-            let x = |i: usize| cols[..i].iter().sum::<f32>();
-            let (head, _) = ui.allocate_exact_size(egui::vec2(w, 22.0), egui::Sense::hover());
-            for (i, h) in ["name", "type", "vendor", "status"].iter().enumerate() {
-                kit::caps(ui.painter(), egui::pos2(head.left() + x(i + 1), head.center().y), egui::Align2::LEFT_CENTER, h, 10.5, t::faint());
-            }
-            if shown.is_empty() {
-                ui.add_space(8.0);
-                let text = if list.is_empty() { "No plugins yet. Windows plugins (e.g. SSD5) need yabridge: yabridgectl add <folder>, then yabridgectl sync. Then Rescan all, or add the folder below." } else { "Nothing matches." };
-                ui.horizontal(|ui| {
-                    ui.add_space(16.0);
-                    ui.label(RichText::new(text).font(t::sans(13.0)).color(t::faint()));
-                });
-                ui.add_space(8.0);
-            }
-            egui::ScrollArea::vertical().id_salt("plug-table").max_height(210.0).auto_shrink([false, true]).show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                for (n, p) in shown.iter().enumerate() {
-                    let (r, resp) = ui.allocate_exact_size(egui::vec2(w, 26.0), egui::Sense::click());
-                    let on = picked.as_ref() == Some(&p.path);
-                    let fill = if on { t::selection() } else if resp.hovered() { t::raised() } else if n % 2 == 1 { t::side() } else { t::sunken() };
-                    let pt = ui.painter();
-                    pt.rect_filled(r, 0.0, fill);
-                    let off = hidden(p);
-                    let ink = if off || !p.usable() { t::faint() } else { t::text() };
-                    let y = r.center().y;
-                    let (status, color) = match &p.status {
-                        Status::Ok if off => ("hidden from lists".to_string(), t::faint()),
-                        Status::Ok => ("ready".to_string(), t::ok()),
-                        Status::Hangs => ("hangs, not loaded".to_string(), t::bad()),
-                        Status::Crashes => ("crashes, not loaded".to_string(), t::bad()),
-                        Status::Failed(e) => (e.clone(), t::bad()),
-                    };
-                    kit::led(pt, egui::pos2(r.left() + 16.0, y), 3.5, Some(color));
-                    let font = t::sans(13.0);
-                    let cell = |i: usize| r.left() + x(i);
-                    pt.text(egui::pos2(cell(1), y), egui::Align2::LEFT_CENTER, kit::elide(pt, &p.name, font.clone(), cols[1] - 10.0), font.clone(), ink);
-                    pt.text(egui::pos2(cell(2), y), egui::Align2::LEFT_CENTER, format!("{} · {}", if p.instrument { "Instrument" } else { "Effect" }, crate::plugins::format_of(&p.path).to_uppercase()), t::sans(12.0), t::muted());
-                    pt.text(egui::pos2(cell(3), y), egui::Align2::LEFT_CENTER, kit::elide(pt, &p.vendor, t::sans(12.0), cols[3] - 10.0), t::sans(12.0), t::muted());
-                    pt.text(egui::pos2(cell(4), y), egui::Align2::LEFT_CENTER, kit::elide(pt, &status, t::sans(12.0), w - x(4) - 12.0), t::sans(12.0), color);
-                    if resp.clicked() {
-                        picked = Some(p.path.clone());
-                    }
-                    if resp.double_clicked() && p.usable() && p.instrument {
-                        self.add_plugin_channel(p);
-                    }
+        egui::Frame::new()
+            .fill(t::sunken())
+            .stroke(egui::Stroke::new(1.0_f32, t::edge()))
+            .corner_radius(9.0)
+            .inner_margin(egui::Margin::symmetric(0, 4))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                let w = ui.available_width();
+                let cols = [30.0, 0.40 * w, 0.14 * w, 0.24 * w];
+                let x = |i: usize| cols[..i].iter().sum::<f32>();
+                let (head, _) = ui.allocate_exact_size(egui::vec2(w, 22.0), egui::Sense::hover());
+                for (i, h) in [
+                    tr.plg_col_name,
+                    tr.plg_col_type,
+                    tr.plg_col_vendor,
+                    tr.plg_col_status,
+                ]
+                .iter()
+                .enumerate()
+                {
+                    kit::caps(
+                        ui.painter(),
+                        egui::pos2(head.left() + x(i + 1), head.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        h,
+                        10.5,
+                        t::faint(),
+                    );
                 }
+                if shown.is_empty() {
+                    ui.add_space(8.0);
+                    let text = if list.is_empty() {
+                        tr.plg_list_empty
+                    } else {
+                        tr.plg_nothing_matches
+                    };
+                    ui.horizontal(|ui| {
+                        ui.add_space(16.0);
+                        ui.label(RichText::new(text).font(t::sans(13.0)).color(t::faint()));
+                    });
+                    ui.add_space(8.0);
+                }
+                egui::ScrollArea::vertical()
+                    .id_salt("plug-table")
+                    .max_height(210.0)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        for (n, p) in shown.iter().enumerate() {
+                            let (r, resp) =
+                                ui.allocate_exact_size(egui::vec2(w, 26.0), egui::Sense::click());
+                            let on = picked.as_ref() == Some(&p.path);
+                            let fill = if on {
+                                t::selection()
+                            } else if resp.hovered() {
+                                t::raised()
+                            } else if n % 2 == 1 {
+                                t::side()
+                            } else {
+                                t::sunken()
+                            };
+                            let pt = ui.painter();
+                            pt.rect_filled(r, 0.0, fill);
+                            let off = hidden(p);
+                            let ink = if off || !p.usable() {
+                                t::faint()
+                            } else {
+                                t::text()
+                            };
+                            let y = r.center().y;
+                            let (status, color) = match &p.status {
+                                Status::Ok if off => (tr.plg_st_hidden.to_string(), t::faint()),
+                                Status::Ok => (tr.plg_st_ready.to_string(), t::ok()),
+                                Status::Hangs => (tr.plg_st_hangs.to_string(), t::bad()),
+                                Status::Crashes => (tr.plg_st_crashes.to_string(), t::bad()),
+                                Status::Failed(e) => (e.clone(), t::bad()),
+                            };
+                            kit::led(pt, egui::pos2(r.left() + 16.0, y), 3.5, Some(color));
+                            let font = t::sans(13.0);
+                            let cell = |i: usize| r.left() + x(i);
+                            pt.text(
+                                egui::pos2(cell(1), y),
+                                egui::Align2::LEFT_CENTER,
+                                kit::elide(pt, &p.name, font.clone(), cols[1] - 10.0),
+                                font.clone(),
+                                ink,
+                            );
+                            pt.text(
+                                egui::pos2(cell(2), y),
+                                egui::Align2::LEFT_CENTER,
+                                format!(
+                                    "{} · {}",
+                                    if p.instrument {
+                                        tr.plg_instrument
+                                    } else {
+                                        tr.plg_effect
+                                    },
+                                    crate::plugins::format_of(&p.path).to_uppercase()
+                                ),
+                                t::sans(12.0),
+                                t::muted(),
+                            );
+                            pt.text(
+                                egui::pos2(cell(3), y),
+                                egui::Align2::LEFT_CENTER,
+                                kit::elide(pt, &p.vendor, t::sans(12.0), cols[3] - 10.0),
+                                t::sans(12.0),
+                                t::muted(),
+                            );
+                            pt.text(
+                                egui::pos2(cell(4), y),
+                                egui::Align2::LEFT_CENTER,
+                                kit::elide(pt, &status, t::sans(12.0), w - x(4) - 12.0),
+                                t::sans(12.0),
+                                color,
+                            );
+                            if resp.clicked() {
+                                picked = Some(p.path.clone());
+                            }
+                            if resp.double_clicked() && p.usable() && p.instrument {
+                                self.add_plugin_channel(p);
+                            }
+                        }
+                    });
             });
-        });
         // Details and actions for the picked plugin.
         if let Some(p) = picked
             .as_ref()
             .and_then(|path| list.iter().find(|p| &p.path == path))
             .cloned()
         {
-            card(ui, "selected", |ui| {
+            card(ui, tr.plg_card_selected, |ui| {
                 ui.label(
                     RichText::new(&p.name)
                         .font(t::medium(16.0))
@@ -1811,14 +2067,14 @@ impl App {
                 );
                 let mut facts = vec![
                     if p.vendor.is_empty() {
-                        "unknown vendor".to_string()
+                        tr.plg_unknown_vendor.to_string()
                     } else {
                         p.vendor.clone()
                     },
                     if p.instrument {
-                        "Instrument".into()
+                        tr.plg_instrument.into()
                     } else {
-                        "Effect".into()
+                        tr.plg_effect.into()
                     },
                     crate::plugins::format_of(&p.path).to_uppercase(),
                 ];
@@ -1826,10 +2082,10 @@ impl App {
                     facts.push(p.category.clone());
                 }
                 if p.bridged {
-                    facts.push("Windows plugin via yabridge".into());
+                    facts.push(tr.plg_via_yabridge.into());
                 }
                 if !p.gui {
-                    facts.push("no editor of its own".into());
+                    facts.push(tr.plg_no_own_editor.into());
                 }
                 ui.label(
                     RichText::new(facts.join(" · "))
@@ -1845,24 +2101,40 @@ impl App {
                 let this_busy = single_busy.as_ref() == Some(&p.path);
                 ui.horizontal_wrapped(|ui| {
                     if p.instrument {
-                        if kit::tool_button(ui, "Add to channel rack", kit::Kind::Primary, p.usable()).clicked() {
+                        if kit::tool_button(ui, tr.plg_add_to_rack, kit::Kind::Primary, p.usable())
+                            .clicked()
+                        {
                             self.add_plugin_channel(&p);
                         }
                     } else {
                         let t_ = self.mix_sel;
-                        let label = format!("Add to {}", self.mixer_name(t_));
+                        let label = fill(tr.plg_add_to, &[("track", &self.mixer_name(t_))]);
                         if kit::tool_button(ui, &label, kit::Kind::Primary, p.usable()).clicked() {
                             let k = self.song.mixer.get(t_).map(|m| m.fx.len()).unwrap_or(0);
                             self.set_slot_plugin(t_, k, &p);
                         }
                     }
-                    if kit::tool_button(ui, "Show in folder", kit::Kind::Ghost, true).clicked() {
-                        let dir = p.path.parent().map(PathBuf::from).unwrap_or_else(|| p.path.clone());
+                    if kit::tool_button(ui, tr.plg_show_in_folder, kit::Kind::Ghost, true).clicked()
+                    {
+                        let dir = p
+                            .path
+                            .parent()
+                            .map(PathBuf::from)
+                            .unwrap_or_else(|| p.path.clone());
                         let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
                     }
-                    if kit::tool_button(ui, if this_busy { "Probing…" } else { "Rescan this plugin" }, kit::Kind::Ghost, !this_busy && !busy)
-                        .on_hover_text("Probe just this bundle again (up to 90 s) without rescanning everything.")
-                        .clicked()
+                    if kit::tool_button(
+                        ui,
+                        if this_busy {
+                            tr.plg_probing
+                        } else {
+                            tr.plg_rescan_this
+                        },
+                        kit::Kind::Ghost,
+                        !this_busy && !busy,
+                    )
+                    .on_hover_text(tr.plg_rescan_this_tip)
+                    .clicked()
                     {
                         let path = p.path.clone();
                         let (tx, rx) = mpsc::channel();
@@ -1873,9 +2145,18 @@ impl App {
                         self.plugins.rescan_one = Some((p.path.clone(), rx));
                     }
                     let key = p.path.display().to_string();
-                    if kit::tool_button(ui, if off { "Show in lists" } else { "Hide from lists" }, kit::Kind::Ghost, true)
-                        .on_hover_text("Hidden plugins stay installed but are not offered in the browser, the + menu or F8.")
-                        .clicked()
+                    if kit::tool_button(
+                        ui,
+                        if off {
+                            tr.plg_show_in_lists
+                        } else {
+                            tr.plg_hide_from_lists
+                        },
+                        kit::Kind::Ghost,
+                        true,
+                    )
+                    .on_hover_text(tr.plg_hide_tip)
+                    .clicked()
                     {
                         if off {
                             s.plugins.blocked.retain(|b| b != &key);
@@ -1885,12 +2166,19 @@ impl App {
                     }
                 });
                 if !p.usable() {
-                    ui.label(RichText::new("It failed the test load, so the browser hides it. If you just installed it (e.g. SSD5 via yabridge sync), press Rescan this plugin. You can also try loading it anyway:").font(t::sans(12.0)).color(t::wait()));
+                    ui.label(
+                        RichText::new(tr.plg_failed_test)
+                            .font(t::sans(12.0))
+                            .color(t::wait()),
+                    );
                     ui.horizontal_wrapped(|ui| {
                         let label = if p.instrument {
-                            "Try adding to channel rack anyway".to_string()
+                            tr.plg_try_rack.to_string()
                         } else {
-                            format!("Try adding to {} anyway", self.mixer_name(self.mix_sel))
+                            fill(
+                                tr.plg_try_add_to,
+                                &[("track", &self.mixer_name(self.mix_sel))],
+                            )
                         };
                         if kit::tool_button(ui, label.as_str(), kit::Kind::Ghost, true).clicked() {
                             if p.instrument {
@@ -1902,11 +2190,15 @@ impl App {
                             }
                         }
                     });
-                    ui.label(RichText::new("If it is missing from the list entirely, it is not under any folder below. Add its folder below, then Rescan all. Check with: keyframexl plugin-scan").font(t::sans(12.0)).color(t::faint()));
+                    ui.label(
+                        RichText::new(tr.plg_missing_hint)
+                            .font(t::sans(12.0))
+                            .color(t::faint()),
+                    );
                 }
             });
         }
-        card(ui, "windows plugins", |ui| {
+        card(ui, tr.plg_card_windows, |ui| {
             // Builds are found on disk once per opening of the page.
             let key = egui::Id::new("wine-builds");
             let builds: Vec<(String, Option<PathBuf>)> = match ui.data(|d| d.get_temp(key)) {
@@ -1926,72 +2218,55 @@ impl App {
                         .wine
                         .as_ref()
                         .map(|b| b.display().to_string())
-                        .unwrap_or_else(|| "System Wine".into())
+                        .unwrap_or_else(|| tr.plg_system_wine.into())
                 });
-            row(
-                ui,
-                "Wine",
-                Some(
-                    "yabridge runs Windows plugins with this Wine. Some plugins (SSD5 and others) behave better on Wine Staging or Proton builds. All use the same prefix (~/.wine); a newer Wine updates it.",
-                ),
-                |ui| {
-                    egui::ComboBox::from_id_salt("wine-build")
-                        .width(300.0)
-                        .selected_text(current)
-                        .show_ui(ui, |ui| {
-                            kit::menu_style(ui);
-                            for (label, bin) in &builds {
-                                if ui
-                                    .selectable_label(*bin == s.plugins.wine, label)
-                                    .on_hover_text(
-                                        bin.as_ref()
-                                            .map(|b| b.display().to_string())
-                                            .unwrap_or_else(|| "wine from PATH".into()),
-                                    )
-                                    .clicked()
-                                {
-                                    s.plugins.wine = bin.clone();
-                                }
+            row(ui, "Wine", Some(tr.plg_wine_hint), |ui| {
+                egui::ComboBox::from_id_salt("wine-build")
+                    .width(300.0)
+                    .selected_text(current)
+                    .show_ui(ui, |ui| {
+                        kit::menu_style(ui);
+                        for (label, bin) in &builds {
+                            if ui
+                                .selectable_label(*bin == s.plugins.wine, label)
+                                .on_hover_text(
+                                    bin.as_ref()
+                                        .map(|b| b.display().to_string())
+                                        .unwrap_or_else(|| tr.plg_wine_from_path.into()),
+                                )
+                                .clicked()
+                            {
+                                s.plugins.wine = bin.clone();
                             }
-                        });
-                    if kit::tool_button(ui, "Other…", kit::Kind::Ghost, true)
-                        .on_hover_text("Pick a Wine bin folder (it must contain wine)")
-                        .clicked()
-                        && let Some(d) = rfd::FileDialog::new().pick_folder()
-                    {
-                        let bin = if d.join("wine").is_file() {
-                            d
-                        } else if d.join("bin/wine").is_file() {
-                            d.join("bin")
-                        } else {
-                            d.join("files/bin")
-                        };
-                        if bin.join("wine").is_file() {
-                            s.plugins.wine = Some(bin);
-                        } else {
-                            self.say(
-                                Tone::Bad,
-                                "No wine in that folder (looked in it, bin/ and files/bin/).",
-                            );
                         }
+                    });
+                if kit::tool_button(ui, tr.plg_other, kit::Kind::Ghost, true)
+                    .on_hover_text(tr.plg_other_tip)
+                    .clicked()
+                    && let Some(d) = rfd::FileDialog::new().pick_folder()
+                {
+                    let bin = if d.join("wine").is_file() {
+                        d
+                    } else if d.join("bin/wine").is_file() {
+                        d.join("bin")
+                    } else {
+                        d.join("files/bin")
+                    };
+                    if bin.join("wine").is_file() {
+                        s.plugins.wine = Some(bin);
+                    } else {
+                        self.say(Tone::Bad, tr.plg_no_wine);
                     }
-                },
-            );
+                }
+            });
             if s.plugins
                 .wine
                 .as_deref()
                 .is_some_and(crate::plugins::has_dxvk)
             {
-                row(
-                    ui,
-                    "DXVK",
-                    Some(
-                        "Direct3D through Vulkan from this build, for plugin windows. JUCE 8 plugins (SSD5 and others) only redraw with it: without it they draw once and clicks seem to do nothing.",
-                    ),
-                    |ui| {
-                        kit_switch(ui, &mut s.plugins.dxvk);
-                    },
-                );
+                row(ui, "DXVK", Some(tr.plg_dxvk_hint), |ui| {
+                    kit_switch(ui, &mut s.plugins.dxvk);
+                });
             }
             // Another Wine's server on the same prefix blocks this one entirely.
             let now = ui.input(|i| i.time);
@@ -2013,15 +2288,19 @@ impl App {
                     .unwrap_or_default();
                 ui.add_space(6.0);
                 ui.horizontal_wrapped(|ui| {
-                    let (r, _) = ui.allocate_exact_size(egui::vec2(10.0, 16.0), egui::Sense::hover());
+                    let (r, _) =
+                        ui.allocate_exact_size(egui::vec2(10.0, 16.0), egui::Sense::hover());
                     kit::led(ui.painter(), r.center(), 3.0, Some(t::bad()));
                     ui.label(
-                        RichText::new(format!("Another Wine is running on {prefix} ({}). Plugins cannot start with the chosen Wine until it stops.", exe.display()))
-                            .font(t::sans(12.5))
-                            .color(t::text()),
+                        RichText::new(fill(
+                            tr.plg_other_wine,
+                            &[("prefix", &prefix), ("exe", &exe.display().to_string())],
+                        ))
+                        .font(t::sans(12.5))
+                        .color(t::text()),
                     );
-                    if kit::tool_button(ui, "Stop it", kit::Kind::Normal, true)
-                        .on_hover_text("Runs its wineserver -k: Windows programs using this prefix close. Then reload the plugins.")
+                    if kit::tool_button(ui, tr.plg_stop_it, kit::Kind::Normal, true)
+                        .on_hover_text(tr.plg_stop_it_tip)
                         .clicked()
                     {
                         match crate::plugins::stop_foreign_wineserver(pid, &exe) {
@@ -2030,15 +2309,18 @@ impl App {
                                 let bin = s.plugins.wine.clone();
                                 crate::plugins::set_wine(bin);
                                 self.restart_plugin_host(ui.ctx());
-                                self.say(Tone::Quiet, "The other Wine stopped. Plugins restart with the chosen Wine.");
+                                self.say(Tone::Quiet, tr.plg_wine_stopped);
                             }
-                            Err(e) => self.say(Tone::Bad, format!("Could not stop the other Wine: {e}")),
+                            Err(e) => self.say(
+                                Tone::Bad,
+                                fill(tr.plg_stop_wine_err, &[("err", &e.to_string())]),
+                            ),
                         }
                     }
                 });
             }
         });
-        card(ui, "folders", |ui| {
+        card(ui, tr.plg_card_folders, |ui| {
             let mut std_dirs = crate::plugins::search_dirs(&[]);
             std_dirs.extend(crate::plugins::vst2_dirs());
             std_dirs.extend(crate::plugins::clap_dirs());
@@ -2056,7 +2338,7 @@ impl App {
                     );
                     if !there {
                         ui.label(
-                            RichText::new("missing")
+                            RichText::new(tr.plg_missing)
                                 .font(t::sans(11.5))
                                 .color(t::faint()),
                         );
@@ -2074,7 +2356,7 @@ impl App {
                             .font(t::mono(12.0))
                             .color(t::text()),
                     );
-                    if kit::tool_button(ui, "Remove", kit::Kind::Ghost, true).clicked() {
+                    if kit::tool_button(ui, tr.mixer_remove, kit::Kind::Ghost, true).clicked() {
                         remove = Some(i);
                     }
                 });
@@ -2083,13 +2365,17 @@ impl App {
                 s.plugins.extra_dirs.remove(i);
             }
             ui.horizontal(|ui| {
-                if kit::tool_button(ui, "Add folder…", kit::Kind::Ghost, true).clicked()
+                if kit::tool_button(ui, tr.plg_add_folder, kit::Kind::Ghost, true).clicked()
                     && let Some(d) = rfd::FileDialog::new().pick_folder()
                     && !s.plugins.extra_dirs.contains(&d)
                 {
                     s.plugins.extra_dirs.push(d);
                 }
-                ui.label(RichText::new("Also $VST3_PATH, $VST_PATH, and $CLAP_PATH. yabridge puts Windows plugins in ~/.vst3/yabridge (VST3) and ~/.vst/yabridge (VST2).").font(t::sans(12.0)).color(t::faint()));
+                ui.label(
+                    RichText::new(tr.plg_paths_note)
+                        .font(t::sans(12.0))
+                        .color(t::faint()),
+                );
             });
         });
         ui.data_mut(|d| d.insert_temp(id, (query, kind, picked)));
@@ -2126,6 +2412,7 @@ impl App {
     /// FL wrapper ◀ preset ▶: steps through our saved presets of this plugin
     /// (channel presets for a channel, effect presets for a mixer slot).
     fn preset_stepper(&mut self, ui: &mut egui::Ui, plugin: &PluginRef, channel: Option<u64>) {
+        let tr = self.tr();
         use super::presets_ui::Target;
         use keyframexl::preset::Kind;
         let id = plugin.id;
@@ -2166,13 +2453,18 @@ impl App {
         ui.add_space(8.0);
         let n = list.len();
         let tip = if n == 0 {
-            format!(
-                "No saved {}s for {} yet: ☰ → Save",
-                kind.label().to_lowercase(),
-                plugin.name
+            fill(
+                tr.plg_no_saved_presets,
+                &[
+                    ("kind", &kind.label().to_lowercase()),
+                    (tr.plg_col_name, &plugin.name),
+                ],
             )
         } else {
-            format!("{n} saved preset(s) of {}", plugin.name)
+            fill(
+                tr.plg_saved_presets,
+                &[("n", &n.to_string()), (tr.plg_col_name, &plugin.name)],
+            )
         };
         let prev = kit::tool_button(ui, "◀", kit::Kind::Ghost, n > 0);
         let name = cur
@@ -2185,9 +2477,9 @@ impl App {
             })
             .unwrap_or_else(|| {
                 if n == 0 {
-                    "No presets".into()
+                    tr.plg_no_presets.into()
                 } else {
-                    "Preset".into()
+                    tr.plg_preset.into()
                 }
             });
         // Fixed width: the arrows stay put while stepping (FL's preset box).
@@ -2203,9 +2495,9 @@ impl App {
         );
         kit::tip(resp, tip);
         let next = kit::tool_button(ui, "▶", kit::Kind::Ghost, n > 0);
-        let step = if kit::tip(prev, "Previous preset").clicked() {
+        let step = if kit::tip(prev, tr.tide_prev_preset).clicked() {
             Some(cur.map(|i| (i + n - 1) % n).unwrap_or(n - 1))
-        } else if kit::tip(next, "Next preset").clicked() {
+        } else if kit::tip(next, tr.tide_next_preset).clicked() {
             Some(cur.map(|i| (i + 1) % n).unwrap_or(0))
         } else {
             None
@@ -2222,6 +2514,7 @@ impl App {
 /// there); this shows the link's state, its measured delay and what FLEX
 /// needs, and starts or reconnects it.
 fn fl_link_panel(ui: &mut egui::Ui) {
+    let tr = crate::i18n::ctx_tr(ui.ctx());
     use crate::fl_link::{self as fl, LinkState};
     let st = fl::status();
     let progress = fl::progress();
@@ -2231,16 +2524,16 @@ fn fl_link_panel(ui: &mut egui::Ui) {
     ui.add_space(6.0);
     ui.horizontal(|ui| {
         ui.label(
-            RichText::new("FL Studio (live link)")
+            RichText::new(tr.plg_fl_live_link)
                 .font(t::medium(15.0))
                 .color(t::text()),
         );
         let (word, color) = match &state {
-            LinkState::Off => ("Not running", None),
-            LinkState::Starting(_) => ("Starting", Some(t::wait())),
-            LinkState::Connected => ("Connected", Some(t::ok())),
-            LinkState::Degraded(_) => ("Check", Some(t::wait())),
-            LinkState::Error(_) => ("Error", Some(t::bad())),
+            LinkState::Off => (tr.plg_link_not_running, None),
+            LinkState::Starting(_) => (tr.plg_link_starting, Some(t::wait())),
+            LinkState::Connected => (tr.plg_link_connected, Some(t::ok())),
+            LinkState::Degraded(_) => (tr.plg_link_check, Some(t::wait())),
+            LinkState::Error(_) => (tr.plg_link_error, Some(t::bad())),
         };
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(RichText::new(word).font(t::sans(13.0)).color(t::text()));
@@ -2248,7 +2541,11 @@ fn fl_link_panel(ui: &mut egui::Ui) {
             kit::led(ui.painter(), r.center(), 4.0, color);
         });
     });
-    ui.label(RichText::new("This channel plays FL Studio's selected channel: its notes go to FL, FL's sound comes back here. Use it for FLEX and other Image-Line instruments that do not work inside FL Studio VSTi.").font(t::sans(13.0)).color(t::muted()));
+    ui.label(
+        RichText::new(tr.plg_link_about)
+            .font(t::sans(13.0))
+            .color(t::muted()),
+    );
     match &state {
         LinkState::Starting(m) | LinkState::Degraded(m) => {
             ui.label(RichText::new(m).font(t::sans(13.0)).color(t::wait()));
@@ -2261,50 +2558,61 @@ fn fl_link_panel(ui: &mut egui::Ui) {
     ui.add_space(8.0);
     let stats = st.stats.clone().unwrap_or_default();
     let delay = match stats.round_trip_ms() {
-        Some(ms) => format!("{ms:.0} ms ({} frames), compensated", stats.round_trip),
-        None => "not measured yet: play a note".into(),
+        Some(ms) => fill(
+            tr.plg_link_delay_val,
+            &[
+                ("ms", &format!("{ms:.0}")),
+                ("frames", &stats.round_trip.to_string()),
+            ],
+        ),
+        None => tr.plg_link_not_measured.into(),
     };
     let flow = match stats.silent_secs {
-        _ if st.stats.is_none() => "the link channel is not running".to_string(),
-        None => "no sound from FL yet".to_string(),
-        Some(s) if s < 1.0 => "FL's sound is coming in".to_string(),
-        Some(s) => format!("last sound {s:.0} s ago"),
+        _ if st.stats.is_none() => tr.plg_link_chan_off.to_string(),
+        None => tr.plg_link_no_sound.to_string(),
+        Some(s) if s < 1.0 => tr.plg_link_sound_in.to_string(),
+        Some(s) => fill(tr.plg_link_last_sound, &[("s", &format!("{s:.0}"))]),
     };
     let rows: [(Option<bool>, &str, String); 7] = [
         (
             Some(st.fl),
             "FL Studio",
-            if st.fl { "running" } else { "not running" }.into(),
+            if st.fl {
+                tr.plg_link_running
+            } else {
+                tr.plg_link_not_running_lc
+            }
+            .into(),
         ),
         (
             Some(st.port),
-            "Notes",
+            tr.plg_link_notes,
             if st.port {
-                "port \"KeyFrameXL - FL link\" ready"
+                tr.plg_link_port_ready
             } else {
-                "port missing (reload this channel)"
+                tr.plg_link_port_missing
             }
             .into(),
         ),
         (
             st.fl.then_some(st.listens),
-            "FL listens",
+            tr.plg_link_fl_listens,
             if !st.fl {
                 "—"
             } else if st.listens {
-                "FL has the input open"
+                tr.plg_link_input_open
             } else {
-                "not yet: restart FL Studio"
+                tr.plg_link_restart_fl
             }
             .into(),
         ),
         (
             Some(st.sink),
-            "Sound",
+            tr.plg_link_sound,
             if st.sink {
-                "FL plays into this channel"
+                tr.plg_link_plays_here
             } else {
-                "no link sink (Reconnect makes it)"
+                tr.plg_link_no_sink
             }
             .into(),
         ),
@@ -2312,16 +2620,24 @@ fn fl_link_panel(ui: &mut egui::Ui) {
             st.stats
                 .as_ref()
                 .map(|s| s.silent_secs.is_some_and(|x| x < 5.0)),
-            "Flow",
+            tr.plg_link_flow,
             flow,
         ),
-        (st.stats.as_ref().map(|s| s.round_trip > 0), "Delay", delay),
+        (
+            st.stats.as_ref().map(|s| s.round_trip > 0),
+            tr.plg_link_delay,
+            delay,
+        ),
         (
             st.stats.as_ref().map(|s| s.recent_underruns == 0),
-            "Gaps",
-            format!(
-                "{} in all, {} lately · {} frames queued",
-                stats.underruns, stats.recent_underruns, stats.queue
+            tr.plg_link_gaps,
+            fill(
+                tr.plg_link_gaps_val,
+                &[
+                    ("all", &stats.underruns.to_string()),
+                    ("recent", &stats.recent_underruns.to_string()),
+                    ("queued", &stats.queue.to_string()),
+                ],
             ),
         ),
     ];
@@ -2345,14 +2661,14 @@ fn fl_link_panel(ui: &mut egui::Ui) {
     ui.add_space(8.0);
     let busy = matches!(progress, fl::Progress::Busy(_));
     ui.horizontal(|ui| {
-        if kit::button(ui, "Open FL Studio", kit::Kind::Primary, !st.fl && !busy).clicked() {
-            fl::run("Starting FL Studio…", || fl::open_fl(None));
+        if kit::button(ui, tr.plg_open_fl, kit::Kind::Primary, !st.fl && !busy).clicked() {
+            fl::run(tr.plg_starting_fl, || fl::open_fl(None));
         }
-        if kit::button(ui, "Reconnect", kit::Kind::Ghost, !busy)
-            .on_hover_text("Make the port and the sound sink again and move FL's sound onto it")
+        if kit::button(ui, tr.plg_reconnect, kit::Kind::Ghost, !busy)
+            .on_hover_text(tr.plg_reconnect_tip)
             .clicked()
         {
-            fl::run("Reconnecting…", fl::reconnect);
+            fl::run(tr.plg_reconnecting, fl::reconnect);
         }
     });
     ui.add_space(10.0);
@@ -2362,39 +2678,55 @@ fn fl_link_panel(ui: &mut egui::Ui) {
     let ready = pf.vkd3d && pf.verdana;
     ui.label(
         RichText::new(if ready {
-            "FL's Wine prefix has vkd3d-proton and Verdana, which FLEX is reported to need."
+            tr.plg_flex_ready
         } else {
-            "FLEX is reported to start under Wine only when FL's prefix has vkd3d-proton (its d3d12.dll in system32) and the Verdana font; without them it crashes while loading. Nothing is installed for you."
+            tr.plg_flex_needs
         })
         .font(t::sans(12.0))
         .color(if ready { t::muted() } else { t::wait() }),
     );
     ui.label(
-        RichText::new(format!(
-            "vkd3d-proton: {} · Verdana: {} · {} · {}",
-            if pf.vkd3d { "yes" } else { "no" },
-            if pf.verdana { "yes" } else { "no" },
-            match pf.fl {
-                0 => "FL Studio not found".to_string(),
-                v => format!("FL Studio {v}"),
-            },
-            pf.wine.as_deref().unwrap_or("system Wine not found"),
+        RichText::new(fill(
+            tr.plg_flex_facts,
+            &[
+                ("vkd3d", if pf.vkd3d { tr.plg_yes } else { tr.plg_no }),
+                ("verdana", if pf.verdana { tr.plg_yes } else { tr.plg_no }),
+                (
+                    "fl",
+                    &match pf.fl {
+                        0 => tr.plg_fl_not_found.to_string(),
+                        v => format!("FL Studio {v}"),
+                    },
+                ),
+                (
+                    "wine",
+                    pf.wine.as_deref().unwrap_or(tr.plg_system_wine_missing),
+                ),
+            ],
         ))
         .font(t::mono(11.0))
         .color(t::faint()),
     );
     if pf.needs_cert_patch() {
-        ui.label(RichText::new("FL Studio 2026.1.4 and later do not start on stock Wine (\"The validity of the program could not be verified\"): use a Wine with merge request 11824, such as DAW-GE-Proton11-6c, or FL 2026.1.3.").font(t::sans(12.0)).color(t::wait()));
+        ui.label(
+            RichText::new(tr.plg_fl_cert_note)
+                .font(t::sans(12.0))
+                .color(t::wait()),
+        );
     }
     ui.label(
-        RichText::new("FLEX does not run inside FL Studio VSTi; this link is the way to use it.")
+        RichText::new(tr.plg_flex_not_vsti)
             .font(t::sans(12.0))
             .color(t::faint()),
     );
     ui.add_space(8.0);
-    ui.label(RichText::new("In FL: add the instrument to the Channel rack and keep its channel selected. FL hears this channel's notes on its MIDI input \"KeyFrameXL - FL link\" (switched on for you). The input stays while KeyFrameXL runs; restart FL only if it was opened before the first FL link channel of this session. One link channel at a time: FL plays only its selected channel.").font(t::sans(12.0)).color(t::faint()));
     ui.label(
-        RichText::new("Not in WAV export yet: FL cannot render faster than real time.")
+        RichText::new(tr.plg_link_howto)
+            .font(t::sans(12.0))
+            .color(t::faint()),
+    );
+    ui.label(
+        RichText::new(tr.plg_link_no_export)
             .font(t::sans(12.0))
             .color(t::faint()),
     );

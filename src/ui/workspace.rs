@@ -51,20 +51,6 @@ impl Tab {
     }
 }
 
-impl Kind {
-    pub fn title(self) -> &'static str {
-        match self {
-            Kind::Playlist => "Playlist",
-            Kind::Rack => "Channel rack",
-            Kind::Roll => "Piano roll",
-            Kind::Instrument => "Instrument",
-            Kind::Mixer => "Mixer",
-            Kind::Riff => "Riff Machine",
-            Kind::Settings => "Settings",
-        }
-    }
-}
-
 pub const PRESETS: [&str; 3] = ["Arrange", "Compose", "Edit"];
 
 /// Default layout of a preset. `roll` is the instrument a piano roll opens for.
@@ -344,15 +330,22 @@ impl App {
                 }
                 Cmd::Preset(i) => {
                     self.ws.active = i.min(PRESETS.len() - 1);
+                    let tr = self.tr();
+                    let name = tr.workspace_preset(self.ws.active);
                     self.say(
                         super::Tone::Quiet,
-                        format!("Workspace {}", PRESETS[self.ws.active]),
+                        crate::i18n::fill(tr.status_ws_switched, &[("name", name)]),
                     );
                 }
                 Cmd::Reset => {
                     let a = self.ws.active;
                     self.ws.slots[a] = preset_layout(a, self.default_roll());
-                    self.say(super::Tone::Quiet, format!("{} layout reset", PRESETS[a]));
+                    let tr = self.tr();
+                    let name = tr.workspace_preset(a);
+                    self.say(
+                        super::Tone::Quiet,
+                        crate::i18n::fill(tr.status_ws_reset, &[("name", name)]),
+                    );
                 }
             }
         }
@@ -506,7 +499,11 @@ impl App {
         let text = self.ws.to_text();
         if text != self.layout_text {
             if let Err(e) = Workspace::save(&text) {
-                self.say(super::Tone::Bad, format!("Layout not saved: {e}"));
+                let tr = self.tr();
+                self.say(
+                    super::Tone::Bad,
+                    crate::i18n::fill(tr.status_layout_not_saved, &[("err", &e)]),
+                );
             }
             self.layout_text = text;
         }
@@ -518,7 +515,7 @@ impl App {
             .iter()
             .find(|i| i.id == id)
             .map(|i| i.name.clone())
-            .unwrap_or_else(|| "Sampler".into())
+            .unwrap_or_else(|| self.tr().inst_kind_sampler.into())
     }
 }
 
@@ -530,22 +527,30 @@ impl egui_dock::TabViewer for Viewer<'_> {
     type Tab = Tab;
 
     fn title(&mut self, tab: &mut Tab) -> egui::WidgetText {
+        let tr = self.app.tr();
         match tab {
-            Tab::Roll { instrument } => {
-                format!("Piano roll · {}", self.app.instrument_name(*instrument)).into()
-            }
+            Tab::Roll { instrument } => format!(
+                "{} · {}",
+                tr.win_roll,
+                self.app.instrument_name(*instrument)
+            )
+            .into(),
             Tab::Instrument { id } => {
                 let kind = match self.app.song.instrument(*id).map(|i| &i.kind) {
-                    Some(keyframexl::sequence::InstrumentKind::Sampler { .. }) => "Sampler",
-                    Some(keyframexl::sequence::InstrumentKind::Plugin { .. }) => "Plugin",
-                    Some(keyframexl::sequence::InstrumentKind::Synth { .. }) => "Synth",
-                    Some(keyframexl::sequence::InstrumentKind::Vocal { .. }) => "Vocal",
-                    Some(keyframexl::sequence::InstrumentKind::Forge { .. }) => "Forge",
-                    _ => "Drum",
+                    Some(keyframexl::sequence::InstrumentKind::Sampler { .. }) => {
+                        tr.inst_kind_sampler
+                    }
+                    Some(keyframexl::sequence::InstrumentKind::Plugin { .. }) => {
+                        tr.inst_kind_plugin
+                    }
+                    Some(keyframexl::sequence::InstrumentKind::Synth { .. }) => tr.inst_kind_synth,
+                    Some(keyframexl::sequence::InstrumentKind::Vocal { .. }) => tr.inst_kind_vocal,
+                    Some(keyframexl::sequence::InstrumentKind::Forge { .. }) => tr.inst_kind_forge,
+                    _ => tr.inst_kind_drum,
                 };
                 format!("{kind} · {}", self.app.instrument_name(*id)).into()
             }
-            other => other.kind().title().into(),
+            other => tr.kind_title(other.kind()).into(),
         }
     }
 
@@ -576,12 +581,13 @@ impl egui_dock::TabViewer for Viewer<'_> {
         surface: SurfaceIndex,
         _node: NodeIndex,
     ) {
+        let tr = self.app.tr();
         if surface.is_main() {
-            if ui.button("Float this window").clicked() {
+            if ui.button(tr.ws_float_window).clicked() {
                 self.app.win(Cmd::Float(tab.clone()));
                 ui.close_menu();
             }
-        } else if ui.button("Dock this window").clicked() {
+        } else if ui.button(tr.ws_dock_window).clicked() {
             self.app.win(Cmd::Dock(tab.clone()));
             ui.close_menu();
         }

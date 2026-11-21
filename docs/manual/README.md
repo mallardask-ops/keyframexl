@@ -16,3 +16,6 @@ offline and searches every chapter.
 11. [Projects, export and updates](11-files.md)
 12. [Keyboard shortcuts](12-shortcuts.md)
 13. [Command line and troubleshooting](13-help.md)
+
+Українською: [uk/README.md](uk/README.md). The program shows the manual in
+the interface language (*Settings → General*).
