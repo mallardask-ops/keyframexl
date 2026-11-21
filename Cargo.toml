@@ -42,9 +42,12 @@ libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 eframe = { version = "0.31", default-features = false, features = ["wayland", "x11"] }
-# PipeWire as its own host (a node in the graph), ALSA as the fallback;
-# realtime-dbus asks rtkit for the audio thread's priority.
-cpal = { version = "0.18.2", features = ["pipewire", "realtime-dbus"] }
+# PipeWire as its own host (a node in the graph), ALSA as the fallback.
+# Do NOT enable `realtime-dbus`: audio_thread_priority lowers the whole
+# process's RLIMIT_RTTIME soft limit to one quantum (e.g. 5333 us), which
+# plugin-host / yabridge / Wine children inherit and get killed by SIGXCPU
+# during plugin initialization.
+cpal = { version = "0.18.2", features = ["pipewire"] }
 vst3-host = { version = "0.11.1", path = "vendor/vst3-host", default-features = false }
 xcb = { version = "1", features = ["shape", "xtest"] }
 

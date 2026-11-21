@@ -13,7 +13,9 @@ See [docs/v0.2.1.md](docs/v0.2.1.md) for the Windows port and 0.2.1 plan.
 - **Native PipeWire output**: the program is a PipeWire node of its own
   (cpal 0.18), with ALSA as the fallback; the buffer setting is the node's
   quantum, xruns are counted, and the device list shows hardware outputs
-  and *System default* instead of ALSA plug names.
+  and *System default* instead of ALSA plug names. `realtime-dbus` is kept
+  off so `RLIMIT_RTTIME` is never lowered to one quantum (which killed
+  yabridge/Wine plugins during initialization).
 - **Windows foundation (W0)**: platform-gated dependencies and stubs so the
   library and application build and pass tests on `windows-latest` in CI.
 
