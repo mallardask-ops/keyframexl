@@ -1,116 +1,17 @@
-//! MP3 export through the system's LAME (`libmp3lame.so.0`), loaded when
-//! first used: no build dependency, and a clear message when it is missing.
+//! MP3 export through a statically compiled LAME (`mp3lame-sys`), so MP3
+//! export works out of the box on Linux and Windows with no external library.
 //! The ID3v2.4 tag (UTF-8, so any script) is written here, not by LAME,
 //! whose own tag calls take Latin-1 only. LAME's info frame (delay and
 //! padding) leads the audio, so players play exactly the rendered length.
 
 use crate::sequence::ProjectInfo;
-#[cfg(unix)]
-use std::ffi::{CStr, c_char};
-use std::ffi::{c_int, c_uchar, c_void};
+use std::ffi::c_int;
 use std::io::Write;
 use std::path::Path;
-use std::sync::OnceLock;
 
-type Lame = *mut c_void;
-
-struct Api {
-    init: unsafe extern "C" fn() -> Lame,
-    set_in_samplerate: unsafe extern "C" fn(Lame, c_int) -> c_int,
-    set_num_channels: unsafe extern "C" fn(Lame, c_int) -> c_int,
-    set_brate: unsafe extern "C" fn(Lame, c_int) -> c_int,
-    set_quality: unsafe extern "C" fn(Lame, c_int) -> c_int,
-    set_write_vbr_tag: unsafe extern "C" fn(Lame, c_int) -> c_int,
-    init_params: unsafe extern "C" fn(Lame) -> c_int,
-    encode: unsafe extern "C" fn(Lame, *const f32, c_int, *mut c_uchar, c_int) -> c_int,
-    flush: unsafe extern "C" fn(Lame, *mut c_uchar, c_int) -> c_int,
-    close: unsafe extern "C" fn(Lame) -> c_int,
-    lametag: unsafe extern "C" fn(Lame, *mut c_uchar, usize) -> usize,
-}
-
-// The library handle stays open for the program's life; the functions are
-// plain C calls on a handle each encode owns.
-unsafe impl Send for Api {}
-unsafe impl Sync for Api {}
-
-fn api() -> Result<&'static Api, String> {
-    static API: OnceLock<Result<Api, String>> = OnceLock::new();
-    API.get_or_init(load).as_ref().map_err(Clone::clone)
-}
-
-#[cfg(unix)]
-fn load() -> Result<Api, String> {
-    let names: [&CStr; 2] = [c"libmp3lame.so.0", c"libmp3lame.so"];
-    let lib = names
-        .iter()
-        .map(|n| unsafe { libc::dlopen(n.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL) })
-        .find(|h| !h.is_null());
-    let Some(lib) = lib else {
-        return Err("MP3 needs LAME (libmp3lame); install the lame package".into());
-    };
-    let sym = |name: &CStr| -> Result<*mut c_void, String> {
-        let p = unsafe { libc::dlsym(lib, name.as_ptr() as *const c_char) };
-        if p.is_null() {
-            Err(format!("LAME has no {}", name.to_string_lossy()))
-        } else {
-            Ok(p)
-        }
-    };
-    // SAFETY: each symbol is LAME's public C function with this signature (lame.h).
-    unsafe {
-        Ok(Api {
-            init: std::mem::transmute::<*mut c_void, unsafe extern "C" fn() -> Lame>(sym(
-                c"lame_init",
-            )?),
-            set_in_samplerate: std::mem::transmute::<
-                *mut c_void,
-                unsafe extern "C" fn(Lame, c_int) -> c_int,
-            >(sym(c"lame_set_in_samplerate")?),
-            set_num_channels: std::mem::transmute::<
-                *mut c_void,
-                unsafe extern "C" fn(Lame, c_int) -> c_int,
-            >(sym(c"lame_set_num_channels")?),
-            set_brate: std::mem::transmute::<*mut c_void, unsafe extern "C" fn(Lame, c_int) -> c_int>(
-                sym(c"lame_set_brate")?,
-            ),
-            set_quality: std::mem::transmute::<
-                *mut c_void,
-                unsafe extern "C" fn(Lame, c_int) -> c_int,
-            >(sym(c"lame_set_quality")?),
-            set_write_vbr_tag: std::mem::transmute::<
-                *mut c_void,
-                unsafe extern "C" fn(Lame, c_int) -> c_int,
-            >(sym(c"lame_set_bWriteVbrTag")?),
-            init_params: std::mem::transmute::<*mut c_void, unsafe extern "C" fn(Lame) -> c_int>(
-                sym(c"lame_init_params")?,
-            ),
-            encode: std::mem::transmute::<
-                *mut c_void,
-                unsafe extern "C" fn(Lame, *const f32, c_int, *mut c_uchar, c_int) -> c_int,
-            >(sym(c"lame_encode_buffer_interleaved_ieee_float")?),
-            flush: std::mem::transmute::<
-                *mut c_void,
-                unsafe extern "C" fn(Lame, *mut c_uchar, c_int) -> c_int,
-            >(sym(c"lame_encode_flush")?),
-            close: std::mem::transmute::<*mut c_void, unsafe extern "C" fn(Lame) -> c_int>(sym(
-                c"lame_close",
-            )?),
-            lametag: std::mem::transmute::<
-                *mut c_void,
-                unsafe extern "C" fn(Lame, *mut c_uchar, usize) -> usize,
-            >(sym(c"lame_get_lametag_frame")?),
-        })
-    }
-}
-
-#[cfg(not(unix))]
-fn load() -> Result<Api, String> {
-    Err("MP3 export requires static LAME (scheduled for W1)".into())
-}
-
-/// LAME can be loaded (the export dialog greys MP3 out otherwise).
+/// LAME is statically linked into the binary, so MP3 export is always available.
 pub fn available() -> bool {
-    api().is_ok()
+    true
 }
 
 /// Encode stereo `frames` at `rate` as constant-bitrate MP3 (`kbps`), with
@@ -121,28 +22,28 @@ pub fn encode(
     kbps: u16,
     info: &ProjectInfo,
 ) -> Result<Vec<u8>, String> {
-    let api = api()?;
     let mut out = id3(info);
     let head = out.len();
+    // SAFETY: standard libmp3lame C API lifecycle on a freshly initialised handle.
     unsafe {
-        let gf = (api.init)();
+        let gf = mp3lame_sys::lame_init();
         if gf.is_null() {
             return Err("LAME did not start".into());
         }
-        let ok = (api.set_in_samplerate)(gf, rate as c_int) >= 0
-            && (api.set_num_channels)(gf, 2) >= 0
-            && (api.set_brate)(gf, kbps as c_int) >= 0
-            && (api.set_quality)(gf, 2) >= 0
-            && (api.set_write_vbr_tag)(gf, 1) >= 0
-            && (api.init_params)(gf) >= 0;
+        let ok = mp3lame_sys::lame_set_in_samplerate(gf, rate as c_int) >= 0
+            && mp3lame_sys::lame_set_num_channels(gf, 2) >= 0
+            && mp3lame_sys::lame_set_brate(gf, kbps as c_int) >= 0
+            && mp3lame_sys::lame_set_quality(gf, 2) >= 0
+            && mp3lame_sys::lame_set_bWriteVbrTag(gf, 1) >= 0
+            && mp3lame_sys::lame_init_params(gf) >= 0;
         if !ok {
-            (api.close)(gf);
+            mp3lame_sys::lame_close(gf);
             return Err(format!("LAME refused {kbps} kbps at {rate} Hz"));
         }
         const CHUNK: usize = 8192;
         let mut buf = vec![0u8; CHUNK * 5 / 4 + 7200];
         for part in frames.chunks(CHUNK) {
-            let n = (api.encode)(
+            let n = mp3lame_sys::lame_encode_buffer_interleaved_ieee_float(
                 gf,
                 part.as_ptr() as *const f32,
                 part.len() as c_int,
@@ -150,24 +51,24 @@ pub fn encode(
                 buf.len() as c_int,
             );
             if n < 0 {
-                (api.close)(gf);
+                mp3lame_sys::lame_close(gf);
                 return Err(format!("LAME failed ({n})"));
             }
             out.extend_from_slice(&buf[..n as usize]);
         }
-        let n = (api.flush)(gf, buf.as_mut_ptr(), buf.len() as c_int);
+        let n = mp3lame_sys::lame_encode_flush(gf, buf.as_mut_ptr(), buf.len() as c_int);
         if n < 0 {
-            (api.close)(gf);
+            mp3lame_sys::lame_close(gf);
             return Err(format!("LAME failed to finish ({n})"));
         }
         out.extend_from_slice(&buf[..n as usize]);
         // The first frame becomes LAME's info frame: encoder delay and
         // padding, so players trim the silence and loops stay gapless.
-        let t = (api.lametag)(gf, buf.as_mut_ptr(), buf.len());
+        let t = mp3lame_sys::lame_get_lametag_frame(gf, buf.as_mut_ptr(), buf.len());
         if t > 0 && t <= buf.len() && head + t <= out.len() {
             out[head..head + t].copy_from_slice(&buf[..t]);
         }
-        (api.close)(gf);
+        mp3lame_sys::lame_close(gf);
     }
     Ok(out)
 }

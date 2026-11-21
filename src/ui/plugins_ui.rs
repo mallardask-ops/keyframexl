@@ -2121,7 +2121,7 @@ impl App {
                             .parent()
                             .map(PathBuf::from)
                             .unwrap_or_else(|| p.path.clone());
-                        let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
+                        let _ = crate::platform::open_path(&dir);
                     }
                     if kit::tool_button(
                         ui,
@@ -2198,6 +2198,7 @@ impl App {
                 }
             });
         }
+        #[cfg(target_os = "linux")]
         card(ui, tr.plg_card_windows, |ui| {
             // Builds are found on disk once per opening of the page.
             let key = egui::Id::new("wine-builds");

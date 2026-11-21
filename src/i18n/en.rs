@@ -2207,6 +2207,8 @@ pub const EN: Strings = Strings {
     set_apply_note: "Changes apply and save at once.",
     set_all_notes_off: "All notes off.",
     set_card_output: "output",
+    set_driver: "Driver",
+    set_driver_hint: "WASAPI for everyday playback; ASIO for low-latency audio interfaces.",
     set_device: "Device",
     set_system_default: "System default",
     set_sample_rate: "Sample rate",

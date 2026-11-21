@@ -200,10 +200,9 @@ fn set_theme(theme: Theme) {
     );
 }
 
-/// The desktop's light/dark preference from xdg-desktop-portal
-/// (`org.freedesktop.appearance color-scheme`); winit does not report it on
-/// Linux. Asked in the background at most every 30 s; `None` until known or
-/// when the desktop has no preference.
+/// The desktop's light/dark preference (xdg-desktop-portal on Linux, Registry
+/// `AppsUseLightTheme` on Windows). Asked in the background at most every 30 s;
+/// `None` until known or when the desktop has no preference.
 pub fn system_theme() -> Option<Theme> {
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
@@ -212,34 +211,16 @@ pub fn system_theme() -> Option<Theme> {
     if st.0.is_none_or(|at| at.elapsed() > Duration::from_secs(30)) {
         st.0 = Some(Instant::now());
         std::thread::spawn(|| {
-            let found = portal_color_scheme();
+            let found = crate::platform::query_system_theme();
             STATE.lock().unwrap_or_else(|e| e.into_inner()).1 = found;
         });
     }
     st.1
 }
 
-fn portal_color_scheme() -> Option<Theme> {
-    let out = std::process::Command::new("gdbus")
-        .args([
-            "call",
-            "--session",
-            "--dest",
-            "org.freedesktop.portal.Desktop",
-            "--object-path",
-            "/org/freedesktop/portal/desktop",
-            "--method",
-            "org.freedesktop.portal.Settings.ReadOne",
-            "org.freedesktop.appearance",
-            "color-scheme",
-        ])
-        .output()
-        .ok()?;
-    parse_color_scheme(&String::from_utf8_lossy(&out.stdout))
-}
-
 /// gdbus prints `(<uint32 1>,)`: 1 dark, 2 light, 0 no preference.
-fn parse_color_scheme(s: &str) -> Option<Theme> {
+#[allow(dead_code)]
+pub(crate) fn parse_color_scheme(s: &str) -> Option<Theme> {
     match s.split("uint32 ").nth(1)?.chars().next()? {
         '1' => Some(Theme::Dark),
         '2' => Some(Theme::Light),
@@ -644,22 +625,10 @@ pub fn font_definitions(cjk: Option<(Vec<u8>, u32)>) -> egui::FontDefinitions {
     fonts
 }
 
-/// A system font that has kana, found through fontconfig (`fc-match`):
+/// A system font that has kana (fontconfig on Linux, `%WINDIR%\Fonts` on Windows):
 /// (file bytes, face index in a collection).
 pub fn find_cjk_font() -> Option<(Vec<u8>, u32)> {
-    let out = std::process::Command::new("fc-match")
-        .args(["-f", "%{file}\n%{index}", "sans:lang=ja"])
-        .output()
-        .ok()?;
-    let text = String::from_utf8(out.stdout).ok()?;
-    let mut lines = text.lines();
-    let file = lines.next()?.trim();
-    let index = lines
-        .next()
-        .and_then(|i| i.trim().parse().ok())
-        .unwrap_or(0);
-    let bytes = std::fs::read(file).ok()?;
-    (bytes.len() > 1000).then_some((bytes, index))
+    crate::platform::find_cjk_font()
 }
 
 pub fn setup(ctx: &egui::Context) {

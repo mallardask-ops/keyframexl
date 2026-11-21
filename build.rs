@@ -9,4 +9,16 @@ fn main() {
         .opt_level(3)
         .warnings(false)
         .compile("kfx_stretch");
+
+    #[cfg(target_os = "windows")]
+    {
+        println!("cargo:rerun-if-changed=assets/icon.ico");
+        let mut res = winresource::WindowsResource::new();
+        res.set_icon("assets/icon.ico");
+        res.set("ProductName", "KeyFrameXL");
+        res.set("FileDescription", "KeyFrameXL — Pattern Sequencer & DAW");
+        if let Err(e) = res.compile() {
+            println!("cargo:warning=winresource failed: {e}");
+        }
+    }
 }

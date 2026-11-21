@@ -15,9 +15,32 @@ pub struct Settings {
     pub general: GeneralSettings,
 }
 
+/// Audio driver API on Windows (`WASAPI` vs `ASIO`); ignored on Linux.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum AudioDriver {
+    #[default]
+    Wasapi,
+    Asio,
+}
+
+impl AudioDriver {
+    #[allow(dead_code)]
+    pub const ALL: [Self; 2] = [Self::Wasapi, Self::Asio];
+
+    #[allow(dead_code)]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Wasapi => "WASAPI",
+            Self::Asio => "ASIO",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AudioSettings {
+    /// Preferred audio driver API on Windows (`WASAPI` or `ASIO`).
+    pub driver: AudioDriver,
     /// Output device name; `None` = the system default.
     pub output: Option<String>,
     /// Input device for recording; `None` = the system default.
@@ -31,6 +54,7 @@ pub struct AudioSettings {
 impl Default for AudioSettings {
     fn default() -> Self {
         Self {
+            driver: AudioDriver::Wasapi,
             output: None,
             input: None,
             rate: 48_000,

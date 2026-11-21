@@ -52,10 +52,11 @@ pub type Recording = std::collections::HashMap<u8, (u64, Tick, u8)>;
 
 impl App {
     pub(crate) fn open_settings(&mut self, page: Page) {
+        let driver = self.settings.audio.driver;
         self.settings_ui = Some(SettingsUi {
             page,
-            outputs: crate::audio::output_devices(),
-            inputs: crate::audio::input_devices(),
+            outputs: crate::audio::output_devices_for(driver),
+            inputs: crate::audio::input_devices_for(driver),
         });
         self.win(Cmd::Show(Tab::Settings));
         if let Some(m) = &mut self.midi_in {
@@ -143,12 +144,13 @@ impl App {
             .as_ref()
             .and_then(|a| a.last_error.lock().ok().and_then(|e| e.clone()));
         let want = self.settings.audio.output.clone();
+        let driver = self.settings.audio.driver;
         let why = rec.observe(
             now,
             health,
             || last_error,
             || {
-                let devices = crate::audio::output_devices();
+                let devices = crate::audio::output_devices_for(driver);
                 match &want {
                     Some(w) => devices.contains(w),
                     None => !devices.is_empty(),
@@ -727,10 +729,34 @@ impl App {
             );
         }
         if s != self.settings {
+            let driver_changed = s.audio.driver != self.settings.audio.driver;
             let audio_changed = s.audio != self.settings.audio;
             let midi_out_changed = s.midi.out_enabled != self.settings.midi.out_enabled
                 || s.midi.out_disabled != self.settings.midi.out_disabled;
             self.settings = s;
+            if driver_changed && let Some(st) = &mut self.settings_ui {
+                let driver = self.settings.audio.driver;
+                st.outputs = crate::audio::output_devices_for(driver);
+                st.inputs = crate::audio::input_devices_for(driver);
+                if self
+                    .settings
+                    .audio
+                    .output
+                    .as_ref()
+                    .is_some_and(|d| !st.outputs.contains(d))
+                {
+                    self.settings.audio.output = None;
+                }
+                if self
+                    .settings
+                    .audio
+                    .input
+                    .as_ref()
+                    .is_some_and(|d| !st.inputs.contains(d))
+                {
+                    self.settings.audio.input = None;
+                }
+            }
             if let Some(m) = &self.midi_in {
                 m.set_prefs(&self.settings.midi);
             }
@@ -806,6 +832,19 @@ impl App {
         let tr = self.tr();
         let mut restart = false;
         card(ui, tr.set_card_output, |ui| {
+            #[cfg(target_os = "windows")]
+            row(ui, tr.set_driver, Some(tr.set_driver_hint), |ui| {
+                use crate::settings::AudioDriver;
+                let labels: Vec<&str> = AudioDriver::ALL.iter().map(|d| d.label()).collect();
+                let cur = AudioDriver::ALL
+                    .iter()
+                    .position(|d| *d == s.audio.driver)
+                    .unwrap_or(0);
+                let (pick, _) = kit::chips(ui, "audio-driver", &labels, cur, None);
+                if let Some(i) = pick {
+                    s.audio.driver = AudioDriver::ALL[i];
+                }
+            });
             row(ui, tr.set_device, None, |ui| {
                 let shown = s
                     .audio
@@ -1362,6 +1401,7 @@ fn general_page(ui: &mut egui::Ui, s: &mut Settings, checking_updates: bool) -> 
                 }
             },
         );
+        #[cfg(target_os = "linux")]
         row(ui, tr.set_x11, Some(tr.set_x11_hint), |ui| {
             kit_switch(ui, &mut s.general.x11);
         });

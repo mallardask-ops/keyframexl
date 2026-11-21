@@ -253,8 +253,7 @@ impl App {
             match chapter_of(chapters, &url) {
                 Some(i) => page = i,
                 None => {
-                    if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
-                        let err = e.to_string();
+                    if let Err(err) = crate::platform::open_url(&url) {
                         self.say(
                             super::Tone::Bad,
                             crate::i18n::fill(tr.manual_open_browser_err, &[("err", &err)]),

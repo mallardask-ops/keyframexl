@@ -1092,10 +1092,10 @@ impl App {
             self.song.game_style = next_style;
         }
         if let Some(url) = open_url {
-            if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
+            if let Err(e) = crate::platform::open_url(&url) {
                 self.say(
                     Tone::Bad,
-                    crate::i18n::fill(tr.info_url_open_err, &[("err", &e.to_string())]),
+                    crate::i18n::fill(tr.info_url_open_err, &[("err", &e)]),
                 );
             } else {
                 self.say(
