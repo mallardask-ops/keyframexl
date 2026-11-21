@@ -450,30 +450,27 @@ impl App {
         ui.menu_button(RichText::new(tr.pat_colour).font(t::sans(13.0)), |ui| {
             kit::menu_style(ui);
             let cur = self.pattern().color;
-            if ui
-                .selectable_label(cur.is_none(), tr.pat_colour_by_id)
-                .clicked()
-            {
-                self.checkpoint();
-                self.pattern_mut().color = None;
-                self.publish();
-                self.say(Tone::Quiet, tr.pat_colour_reset_status);
-                ui.close_menu();
-            }
-            ui.separator();
-            for col in crate::theme::color_palette() {
-                let hex = format!("{:02X}{:02X}{:02X}", col.r(), col.g(), col.b());
-                let on = cur == Some(crate::theme::u32_from_color(col));
-                if ui.selectable_label(on, format!("#{hex}")).clicked() {
+            let id_colour = crate::theme::pattern_color(self.pattern().id, None);
+            match kit::colour_swatches(ui, cur, tr.pat_colour_by_id, Some(id_colour)) {
+                Some(None) => {
                     self.checkpoint();
-                    self.pattern_mut().color = Some(crate::theme::u32_from_color(col));
+                    self.pattern_mut().color = None;
                     self.publish();
+                    self.say(Tone::Quiet, tr.pat_colour_reset_status);
+                    ui.close_menu();
+                }
+                Some(Some(rgb)) => {
+                    self.checkpoint();
+                    self.pattern_mut().color = Some(rgb);
+                    self.publish();
+                    let hex = format!("{rgb:06X}");
                     self.say(
                         Tone::Quiet,
                         crate::i18n::fill(tr.pat_colour_set_status, &[("hex", &hex)]),
                     );
                     ui.close_menu();
                 }
+                None => {}
             }
         });
         if item(ui, tr.pat_clone, "", true, "") {

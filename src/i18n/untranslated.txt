@@ -91,6 +91,7 @@ mod.rs: Pattern {id}
 mod.rs: Reverb
 mod.rs: SHA-256 checksum mismatch.
 mod.rs: Verse
+playlist.rs: pat-color-{rgb:06X}
 plugins_ui.rs: FL Studio
 plugins_ui.rs: FL Studio {v}
 plugins_ui.rs: Wine

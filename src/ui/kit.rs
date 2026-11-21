@@ -1782,3 +1782,95 @@ pub fn middle_pan(ui: &Ui, area: Rect, id: egui::Id) -> Option<Vec2> {
     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     (delta != Vec2::ZERO).then_some(delta)
 }
+
+/// The track/pattern palette as a grid of swatches under a "default" row.
+/// Returns the pick: `Some(None)` for the default, `Some(Some(rgb))` for a
+/// colour. `default_preview` paints the default swatch (hollow when unknown).
+pub fn colour_swatches(
+    ui: &mut Ui,
+    current: Option<u32>,
+    default_label: &str,
+    default_preview: Option<C>,
+) -> Option<Option<u32>> {
+    const S: f32 = 24.0;
+    const GAP: f32 = 6.0;
+    const COLS: usize = 5;
+    let grid_w = COLS as f32 * S + (COLS - 1) as f32 * GAP;
+    let mut pick = None;
+    ui.spacing_mut().item_spacing.y = GAP;
+
+    let (row, resp) = ui.allocate_exact_size(vec2(grid_w, 26.0), Sense::click());
+    let p = ui.painter();
+    if resp.hovered() {
+        p.rect_filled(row.expand2(vec2(4.0, 0.0)), 4.0, t::ctl_hover());
+    }
+    let sw = Rect::from_center_size(pos2(row.left() + 10.0, row.center().y), vec2(18.0, 18.0));
+    match default_preview {
+        Some(c) => {
+            p.rect_filled(sw, 4.0, c);
+        }
+        None => {
+            p.rect_stroke(
+                sw,
+                4.0,
+                Stroke::new(1.5_f32, t::muted()),
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
+    if current.is_none() {
+        p.rect_stroke(
+            sw.expand(2.5),
+            6.0,
+            Stroke::new(2.0_f32, t::text()),
+            egui::StrokeKind::Outside,
+        );
+    }
+    p.text(
+        pos2(row.left() + 28.0, row.center().y),
+        Align2::LEFT_CENTER,
+        default_label,
+        t::sans(13.0),
+        if current.is_none() {
+            t::text()
+        } else {
+            t::muted()
+        },
+    );
+    if resp.clicked() {
+        pick = Some(None);
+    }
+
+    for chunk in t::color_palette().chunks(COLS) {
+        let (r, _) = ui.allocate_exact_size(vec2(grid_w, S), Sense::hover());
+        for (k, &col) in chunk.iter().enumerate() {
+            let rgb = t::u32_from_color(col);
+            let cell = Rect::from_min_size(r.min + vec2(k as f32 * (S + GAP), 0.0), vec2(S, S));
+            let resp = ui
+                .interact(cell, ui.id().with(("swatch", rgb)), Sense::click())
+                .on_hover_text(format!("#{rgb:06X}"));
+            let p = ui.painter();
+            p.rect_filled(cell, 5.0, col);
+            if current == Some(rgb) {
+                p.rect_stroke(
+                    cell.expand(2.5),
+                    7.0,
+                    Stroke::new(2.0_f32, t::text()),
+                    egui::StrokeKind::Outside,
+                );
+            } else if resp.hovered() {
+                p.rect_stroke(
+                    cell.expand(1.5),
+                    6.0,
+                    Stroke::new(1.5_f32, t::muted()),
+                    egui::StrokeKind::Outside,
+                );
+            }
+            if resp.clicked() {
+                pick = Some(Some(rgb));
+            }
+        }
+    }
+    ui.add_space(2.0);
+    pick
+}

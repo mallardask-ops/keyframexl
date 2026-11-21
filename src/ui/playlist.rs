@@ -1037,44 +1037,22 @@ impl App {
                 ui.menu_button(tr.pat_colour, |ui| {
                     kit::menu_style(ui);
                     let tr = self.tr();
-                    if ui
-                        .selectable_label(cur_color.is_none(), tr.pl_track_default_colour)
-                        .clicked()
-                    {
-                        self.checkpoint();
-                        self.song.track_mut(t as u32).color = None;
-                        self.publish();
-                        self.say(
-                            Tone::Quiet,
-                            crate::i18n::fill(tr.pl_track_colour_reset, &[("n", &t_num)]),
-                        );
-                        ui.close_menu();
-                    }
-                    ui.separator();
-                    for col in t::color_palette() {
-                        let hex = format!("{:02X}{:02X}{:02X}", col.r(), col.g(), col.b());
-                        let on = cur_color == Some(t::u32_from_color(col));
-                        let (r, resp) =
-                            ui.allocate_exact_size(egui::vec2(160.0, 22.0), Sense::click());
-                        ui.painter().rect_filled(
-                            Rect::from_center_size(
-                                pos2(r.left() + 12.0, r.center().y),
-                                vec2(14.0, 10.0),
-                            ),
-                            3.0,
-                            col,
-                        );
-                        ui.painter().text(
-                            pos2(r.left() + 28.0, r.center().y),
-                            Align2::LEFT_CENTER,
-                            format!("#{hex}"),
-                            t::sans(13.0),
-                            if on { t::text() } else { t::muted() },
-                        );
-                        if resp.clicked() {
+                    match kit::colour_swatches(ui, cur_color, tr.pl_track_default_colour, None) {
+                        Some(None) => {
                             self.checkpoint();
-                            self.song.track_mut(t as u32).color = Some(t::u32_from_color(col));
+                            self.song.track_mut(t as u32).color = None;
                             self.publish();
+                            self.say(
+                                Tone::Quiet,
+                                crate::i18n::fill(tr.pl_track_colour_reset, &[("n", &t_num)]),
+                            );
+                            ui.close_menu();
+                        }
+                        Some(Some(rgb)) => {
+                            self.checkpoint();
+                            self.song.track_mut(t as u32).color = Some(rgb);
+                            self.publish();
+                            let hex = format!("{rgb:06X}");
                             self.say(
                                 Tone::Quiet,
                                 crate::i18n::fill(
@@ -1084,6 +1062,7 @@ impl App {
                             );
                             ui.close_menu();
                         }
+                        None => {}
                     }
                 });
                 let label = if self.song.track_muted(t as u32) {
@@ -1404,6 +1383,7 @@ impl App {
             }
             let mut menu_pick: Option<String> = None;
             let pat_color = pat.color;
+            let id_colour = t::pattern_color(pat.id, None);
             let tr = self.tr();
             kit::popup_menu(ui, popup_id, &marker_resp, 220.0, |ui| {
                 if ui.button(tr.pl_open_in_rack).clicked() {
@@ -1434,47 +1414,17 @@ impl App {
                 }
                 ui.menu_button(tr.pl_pattern_colour, |ui| {
                     kit::menu_style(ui);
-                    if ui
-                        .selectable_label(pat_color.is_none(), tr.pat_colour_by_id)
-                        .clicked()
+                    match kit::colour_swatches(ui, pat_color, tr.pat_colour_by_id, Some(id_colour))
                     {
-                        menu_pick = Some("pat-color-default".to_string());
-                        ui.close_menu();
-                    }
-                    ui.separator();
-                    for col in t::color_palette() {
-                        let hex = format!("{:02X}{:02X}{:02X}", col.r(), col.g(), col.b());
-                        let on = pat_color == Some(t::u32_from_color(col));
-                        let (r, resp) =
-                            ui.allocate_exact_size(egui::vec2(180.0, 22.0), Sense::click());
-                        ui.painter().rect_filled(
-                            Rect::from_center_size(
-                                pos2(r.left() + 12.0, r.center().y),
-                                vec2(14.0, 10.0),
-                            ),
-                            3.0,
-                            col,
-                        );
-                        ui.painter().text(
-                            pos2(r.left() + 28.0, r.center().y),
-                            Align2::LEFT_CENTER,
-                            format!("#{hex}"),
-                            t::sans(13.0),
-                            if on { t::text() } else { t::muted() },
-                        );
-                        if on {
-                            ui.painter().text(
-                                pos2(r.right() - 8.0, r.center().y),
-                                Align2::RIGHT_CENTER,
-                                "✓",
-                                t::sans(13.0),
-                                t::text(),
-                            );
-                        }
-                        if resp.clicked() {
-                            menu_pick = Some(format!("pat-color-{hex}"));
+                        Some(None) => {
+                            menu_pick = Some("pat-color-default".to_string());
                             ui.close_menu();
                         }
+                        Some(Some(rgb)) => {
+                            menu_pick = Some(format!("pat-color-{rgb:06X}"));
+                            ui.close_menu();
+                        }
+                        None => {}
                     }
                 });
                 if ui.button(tr.pl_delete).clicked() {
