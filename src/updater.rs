@@ -1040,6 +1040,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn install_from_archive_replaces_binary_and_checks_sha() {
         let dir = tempfile::tempdir().unwrap();
         let stage = dir.path().join("keyframexl-linux-x86_64");

@@ -5,11 +5,15 @@ edition = "2024"
 description = "Native Linux pattern sequencer prototype"
 license = "MIT"
 
+[features]
+# Optional Steinberg ASIO backend on Windows (requires LLVM/Clang; asio-sys fetches
+# the ASIO SDK automatically or reads CPAL_ASIO_DIR).
+asio = ["cpal/asio"]
+
 [dependencies]
-libc = "0.2"
 hound = "3.5"
-eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
-cpal = "0.15"
+eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow"] }
+cpal = "0.18.2"
 arc-swap = "1.7"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
@@ -25,15 +29,24 @@ rtrb = "0.3"
 midly = "0.5"
 flacenc = "0.5"
 vorbis_rs = "0.5"
-midir = "0.10"
-vst3-host = { version = "0.11.1", path = "vendor/vst3-host", default-features = false }
+midir = "0.11"
 base64 = "0.22"
-xcb = { version = "1", features = ["shape", "xtest"] }
 raw-window-handle = "0.6"
 rsworld-sys = "0.1.0"
 encoding_rs = "0.8"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 ureq = "2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+eframe = { version = "0.31", default-features = false, features = ["wayland", "x11"] }
+# PipeWire as its own host (a node in the graph), ALSA as the fallback;
+# realtime-dbus asks rtkit for the audio thread's priority.
+cpal = { version = "0.18.2", features = ["pipewire", "realtime-dbus"] }
+vst3-host = { version = "0.11.1", path = "vendor/vst3-host", default-features = false }
+xcb = { version = "1", features = ["shape", "xtest"] }
 
 [build-dependencies]
 cc = "1.2"
@@ -46,9 +59,6 @@ proc-macro2 = { version = "1", features = ["span-locations"] }
 # (yabridge, dragging a clip out of a Windows plugin) were silently lost.
 [patch.crates-io]
 winit = { path = "vendor/winit" }
-# cpal with one fix: an ALSA underrun reported as POLLERR (PipeWire) is
-# recovered, instead of an error repeated on every poll of a dead stream.
-cpal = { path = "vendor/cpal" }
 
 # Debug builds are what an IDE or launcher may run: an unoptimised audio
 # engine and DSP crackle and load the CPU many times over, so the program

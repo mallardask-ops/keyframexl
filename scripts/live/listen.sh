@@ -13,7 +13,7 @@ for i in $(seq 1 100); do
 import json,sys
 for o in json.load(sys.stdin):
     p=o.get("info",{}).get("props",{}) or {}
-    if o.get("type","").endswith("Node") and p.get("media.class")=="Stream/Output/Audio" and "keyframexl" in (str(p.get("application.process.binary",""))+str(p.get("application.name",""))).lower():
+    if o.get("type","").endswith("Node") and p.get("media.class")=="Stream/Output/Audio" and "keyframexl" in (str(p.get("application.process.binary",""))+str(p.get("application.name",""))+str(p.get("node.name",""))).lower():
         print(o["id"]); break')
   [ -n "$node" ] && break
   sleep 0.1

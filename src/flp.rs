@@ -3579,6 +3579,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn fl_paths_resolve_into_the_prefix() {
         let dir = tempfile::tempdir().unwrap();
         let pfx = dir.path();

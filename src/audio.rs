@@ -200,26 +200,129 @@ pub enum TapCmd {
     StopAll,
 }
 
+/// The audio host: PipeWire's own (a node in its graph) when its daemon
+/// runs on Linux, else ALSA; on other platforms, the system default host.
+/// Made once: on PipeWire every query is a round trip.
+pub fn host() -> &'static cpal::Host {
+    static HOST: OnceLock<cpal::Host> = OnceLock::new();
+    HOST.get_or_init(|| {
+        #[cfg(target_os = "linux")]
+        {
+            if pipewire_daemon_active()
+                && let Ok(h) = cpal::host_from_id(cpal::HostId::PipeWire)
+            {
+                return h;
+            }
+            cpal::host_from_id(cpal::HostId::Alsa).unwrap_or_else(|_| cpal::default_host())
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            cpal::default_host()
+        }
+    })
+}
+
+/// The sound server the host reaches.
+pub fn host_backend() -> AudioBackend {
+    #[allow(unreachable_patterns)]
+    match host().id() {
+        #[cfg(target_os = "linux")]
+        cpal::HostId::PipeWire => AudioBackend::PipeWire,
+        #[cfg(target_os = "linux")]
+        cpal::HostId::Alsa => AudioBackend::Alsa,
+        #[cfg(target_os = "windows")]
+        cpal::HostId::Wasapi => AudioBackend::Wasapi,
+        #[cfg(all(target_os = "windows", feature = "asio"))]
+        cpal::HostId::Asio => AudioBackend::Asio,
+        #[cfg(target_os = "macos")]
+        cpal::HostId::CoreAudio => AudioBackend::CoreAudio,
+        _ => AudioBackend::System,
+    }
+}
+
+/// A device's name as people know it (and as the settings store it).
+pub fn device_name(d: &cpal::Device) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    if d.id()
+        .is_ok_and(|i| i.host() == cpal::HostId::PipeWire && i.id().ends_with("put_default"))
+    {
+        // PipeWire's own default output/input: follows the desktop's choice.
+        return Some(SYSTEM_DEFAULT.into());
+    }
+    d.description().ok().map(|d| d.name().to_string())
+}
+
+/// A device name only cpal's ALSA host had (the PipeWire bridge, ALSA's
+/// defaults and plugs, hardware names).
+pub fn alsa_era_name(n: &str) -> bool {
+    matches!(n, "pipewire" | "pulse" | "default" | "jack")
+        || [
+            "sysdefault",
+            "hw:",
+            "plughw:",
+            "front:",
+            "dmix",
+            "surround",
+            "iec958",
+            "hdmi:",
+        ]
+        .iter()
+        .any(|p| n.starts_with(p))
+}
+
+/// The name PipeWire's default output and input are listed under.
+#[allow(dead_code)]
+pub const SYSTEM_DEFAULT: &str = "System default";
+
+/// Devices a person picks from: on PipeWire the hardware and Bluetooth nodes
+/// and the defaults, not other programs' streams, monitors or our own FL
+/// link sink.
+fn listed(d: &cpal::Device) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let Ok(id) = d.id() else {
+            return false;
+        };
+        if id.host() != cpal::HostId::PipeWire {
+            return true;
+        }
+        let id = id.id();
+        id.starts_with("alsa_")
+            || id.starts_with("bluez_")
+            || id == "output_default"
+            || id == "input_default"
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = d;
+        true
+    }
+}
+
+fn names(devs: impl Iterator<Item = cpal::Device>) -> Vec<String> {
+    let mut v: Vec<String> = devs
+        .filter(listed)
+        .filter_map(|d| device_name(&d))
+        .collect();
+    let mut seen = std::collections::HashSet::new();
+    v.retain(|n| seen.insert(n.clone()));
+    v
+}
+
 /// Output devices the host offers (names as `AudioSettings::output` stores them).
 pub fn output_devices() -> Vec<String> {
-    let host = cpal::default_host();
-    let mut v: Vec<String> = host
+    host()
         .output_devices()
-        .map(|ds| ds.filter_map(|d| d.name().ok()).collect())
-        .unwrap_or_default();
-    v.dedup();
-    v
+        .map(|ds| names(ds))
+        .unwrap_or_default()
 }
 
 /// Input devices (microphones, line in).
 pub fn input_devices() -> Vec<String> {
-    let host = cpal::default_host();
-    let mut v: Vec<String> = host
+    host()
         .input_devices()
-        .map(|ds| ds.filter_map(|d| d.name().ok()).collect())
-        .unwrap_or_default();
-    v.dedup();
-    v
+        .map(|ds| names(ds))
+        .unwrap_or_default()
 }
 
 /// Buffer frames to request: the user's pick when the device allows it, else
@@ -232,7 +335,11 @@ fn pick_buffer(want: Option<u32>, range: &cpal::SupportedBufferSize) -> Option<u
         cpal::SupportedBufferSize::Unknown => true,
     };
     if let Some(b) = want {
-        return allows(b).then_some(b);
+        // Out of the server's range (PipeWire: 32..2048 here): its nearest edge.
+        return Some(match range {
+            cpal::SupportedBufferSize::Range { min, max } => b.clamp(*min, (*max).max(*min)),
+            cpal::SupportedBufferSize::Unknown => b,
+        });
     }
     // Auto names a size only when the range is known: a Fixed request on an
     // Unknown range could fail the open and leave no audio at all.
@@ -248,38 +355,31 @@ fn pick_buffer(want: Option<u32>, range: &cpal::SupportedBufferSize) -> Option<u
 
 /// The sound server an output device reaches.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum AudioBackend {
     PipeWire,
-    PulseAudio,
     Alsa,
+    Wasapi,
+    Asio,
+    CoreAudio,
+    System,
 }
 
 impl AudioBackend {
     pub fn label(self) -> &'static str {
         match self {
             AudioBackend::PipeWire => "PipeWire",
-            AudioBackend::PulseAudio => "PulseAudio",
             AudioBackend::Alsa => "ALSA",
+            AudioBackend::Wasapi => "WASAPI",
+            AudioBackend::Asio => "ASIO",
+            AudioBackend::CoreAudio => "CoreAudio",
+            AudioBackend::System => "System",
         }
     }
 }
 
-/// Backend behind a cpal (ALSA host) device name. `default` and `sysdefault`
-/// reach PipeWire when its daemon runs; direct `hw:` / `plughw:` names stay ALSA.
-pub fn detect_backend(device_name: &str, pipewire_running: bool) -> AudioBackend {
-    let n = device_name.to_ascii_lowercase();
-    if n.contains("pipewire") {
-        AudioBackend::PipeWire
-    } else if n.contains("pulse") {
-        AudioBackend::PulseAudio
-    } else if pipewire_running && (n.is_empty() || n == "default" || n.starts_with("sysdefault")) {
-        AudioBackend::PipeWire
-    } else {
-        AudioBackend::Alsa
-    }
-}
-
 /// Is a PipeWire socket in one of `dirs`? (Pure, so tests need no daemon.)
+#[allow(dead_code)]
 fn pipewire_socket_in(dirs: impl IntoIterator<Item = std::path::PathBuf>) -> bool {
     dirs.into_iter().any(|d| {
         let sock = d.join("pipewire-0");
@@ -296,6 +396,7 @@ fn pipewire_socket_in(dirs: impl IntoIterator<Item = std::path::PathBuf>) -> boo
 }
 
 /// The PipeWire daemon's socket exists (a stat, never a connect: cannot block).
+#[allow(dead_code)]
 pub fn pipewire_daemon_active() -> bool {
     let dirs = ["PIPEWIRE_RUNTIME_DIR", "XDG_RUNTIME_DIR"]
         .into_iter()
@@ -304,39 +405,19 @@ pub fn pipewire_daemon_active() -> bool {
     pipewire_socket_in(dirs)
 }
 
-/// `PIPEWIRE_LATENCY` value (`frames/rate`) that asks PipeWire for exactly this quantum.
-pub fn pipewire_latency_hint(buffer: Option<u32>, rate: u32) -> Option<String> {
-    match buffer {
-        Some(b) if rate > 0 => Some(format!("{b}/{rate}")),
-        _ => None,
-    }
-}
-
-/// Did the user launch us with their own `PIPEWIRE_LATENCY`? Read once, before
-/// this module ever touches the variable; their value is never overridden.
-fn user_set_pipewire_latency() -> bool {
-    static USER: OnceLock<bool> = OnceLock::new();
-    *USER.get_or_init(|| std::env::var_os("PIPEWIRE_LATENCY").is_some())
-}
-
 /// Order in which `Audio::open` tries output devices.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Pick {
     Named,
-    PipeWire,
     Default,
 }
 
-fn pick_order(named_found: bool, pipewire_active: bool, pipewire_device: bool) -> Vec<Pick> {
-    let mut v = Vec::new();
+fn pick_order(named_found: bool) -> Vec<Pick> {
     if named_found {
-        v.push(Pick::Named);
+        vec![Pick::Named, Pick::Default]
+    } else {
+        vec![Pick::Default]
     }
-    if pipewire_active && pipewire_device {
-        v.push(Pick::PipeWire);
-    }
-    v.push(Pick::Default);
-    v
 }
 
 /// What the running stream actually got.
@@ -581,6 +662,8 @@ pub struct Audio {
     /// Callback time as a share of the buffer duration, in tenths of a percent.
     pub load: Arc<AtomicU32>,
     pub overruns: Arc<AtomicU32>,
+    /// Blocks the sound server reported late (PipeWire xruns).
+    pub xruns: Arc<AtomicU32>,
     /// Voices sounding after the last callback.
     pub voices: Arc<AtomicU32>,
     /// Post-fader peak per mixer track (f32 bits), 0 = Master.
@@ -680,32 +763,32 @@ impl Audio {
     /// Open the output from `cfg`; an unknown device falls back to the default,
     /// an unsupported rate to 48 kHz.
     pub fn open(song: Song, cfg: &crate::settings::AudioSettings) -> Result<Self, String> {
-        let host = cpal::default_host();
-        let pipewire = pipewire_daemon_active();
+        let host = host();
         let outputs: Vec<cpal::Device> = host
             .output_devices()
             .map(|d| d.collect())
             .unwrap_or_default();
-        let named_at = cfg.output.as_ref().and_then(|want| {
+        // Names saved for the old ALSA host ("pipewire", "default", "hw:…")
+        // mean the system's default here.
+        let wanted = cfg
+            .output
+            .as_ref()
+            .filter(|n| !(host_backend() == AudioBackend::PipeWire && alsa_era_name(n)));
+        let named_at = wanted.and_then(|want| {
             outputs
                 .iter()
-                .position(|d| d.name().ok().as_ref() == Some(want))
+                .position(|d| device_name(d).as_ref() == Some(want))
         });
-        let pipewire_at = outputs
-            .iter()
-            .position(|d| d.name().is_ok_and(|n| n == "pipewire"));
-        // The first candidate that offers stereo f32 wins; the named one first,
-        // then (with a PipeWire daemon) its own ALSA device, then the default.
+        // The first candidate that offers stereo f32 wins: the named one, then the default.
         let mut chosen = None;
         let mut last_err = String::from("No default audio output");
-        for pick_kind in pick_order(named_at.is_some(), pipewire, pipewire_at.is_some()) {
+        for pick_kind in pick_order(named_at.is_some()) {
             let device = match pick_kind {
                 Pick::Named => named_at.map(|i| outputs[i].clone()),
-                Pick::PipeWire => pipewire_at.map(|i| outputs[i].clone()),
                 Pick::Default => host.default_output_device(),
             };
             let Some(device) = device else { continue };
-            let name = device.name().unwrap_or_else(|_| "Default".into());
+            let name = device_name(&device).unwrap_or_else(|| "Default".into());
             match device.supported_output_configs() {
                 Ok(c) => {
                     let configs: Vec<_> = c.collect();
@@ -713,8 +796,8 @@ impl Audio {
                         configs.iter().any(|c| {
                             c.sample_format() == cpal::SampleFormat::F32
                                 && c.channels() == 2
-                                && c.min_sample_rate().0 <= rate
-                                && c.max_sample_rate().0 >= rate
+                                && c.min_sample_rate() <= rate
+                                && c.max_sample_rate() >= rate
                         })
                     };
                     if stereo(cfg.rate) || stereo(48_000) {
@@ -730,13 +813,13 @@ impl Audio {
         let Some((device, device_name, configs, substitute)) = chosen else {
             return Err(last_err);
         };
-        let fallback = cfg.output.is_some() && substitute;
+        let fallback = wanted.is_some() && substitute;
         let pick = |rate: u32| {
             configs.iter().find(|c| {
                 c.sample_format() == cpal::SampleFormat::F32
                     && c.channels() == 2
-                    && c.min_sample_rate().0 <= rate
-                    && c.max_sample_rate().0 >= rate
+                    && c.min_sample_rate() <= rate
+                    && c.max_sample_rate() >= rate
             })
         };
         let (range, rate) = match pick(cfg.rate) {
@@ -752,22 +835,12 @@ impl Audio {
             ),
         };
         let buffer = pick_buffer(cfg.buffer, range.buffer_size());
-        let mut config = range.with_sample_rate(cpal::SampleRate(rate)).config();
+        let mut config = range.with_sample_rate(rate).config();
         if let Some(b) = buffer {
             config.buffer_size = cpal::BufferSize::Fixed(b);
         }
-        let backend = detect_backend(&device_name, pipewire);
-        if backend == AudioBackend::PipeWire && !user_set_pipewire_latency() {
-            // SAFETY: `open` runs on the UI thread, before this stream's threads
-            // start; PipeWire's client library reads the variable when the stream
-            // connects, and the app sets it nowhere else.
-            unsafe {
-                match pipewire_latency_hint(buffer, rate) {
-                    Some(v) => std::env::set_var("PIPEWIRE_LATENCY", v),
-                    None => std::env::remove_var("PIPEWIRE_LATENCY"),
-                }
-            }
-        }
+        // On PipeWire a fixed buffer is the node's latency (its quantum).
+        let backend = host_backend();
         let running = Running {
             device: device_name,
             rate,
@@ -858,9 +931,12 @@ impl Audio {
         let tick = callbacks.clone();
         let last_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let err_slot = last_error.clone();
+        let xruns = Arc::new(AtomicU32::new(0));
+        let xrun_count = xruns.clone();
+        let rt_told = AtomicBool::new(false);
         let stream = device
             .build_output_stream(
-                &config,
+                config,
                 move |data: &mut [f32], _| {
                     tick.fetch_add(1, Ordering::Relaxed);
                     keyframexl::denormal::flush_to_zero();
@@ -1014,12 +1090,30 @@ impl Audio {
                         }
                     }
                 },
-                // Once: a broken ALSA stream reports on every poll, millions of times.
-                move |err| {
-                    if !fail.swap(true, Ordering::Relaxed) {
-                        eprintln!("Audio error: {err}");
-                        if let Ok(mut slot) = err_slot.lock() {
-                            *slot = Some(err.to_string());
+                move |err: cpal::Error| {
+                    use cpal::ErrorKind as K;
+                    match err.kind() {
+                        // The stream keeps running: a late block, the default
+                        // output rerouted, no realtime priority.
+                        K::Xrun => {
+                            xrun_count.fetch_add(1, Ordering::Relaxed);
+                        }
+                        K::DeviceChanged => {}
+                        K::RealtimeDenied => {
+                            if !rt_told.swap(true, Ordering::Relaxed) {
+                                eprintln!(
+                                    "Audio: no realtime priority for the audio thread ({err})"
+                                );
+                            }
+                        }
+                        // Once: a broken stream may report on every poll.
+                        _ => {
+                            if !fail.swap(true, Ordering::Relaxed) {
+                                eprintln!("Audio error: {err}");
+                                if let Ok(mut slot) = err_slot.lock() {
+                                    *slot = Some(err.to_string());
+                                }
+                            }
                         }
                     }
                 },
@@ -1041,6 +1135,7 @@ impl Audio {
             position,
             load,
             overruns,
+            xruns,
             voices,
             peaks,
             activity,
@@ -1081,42 +1176,55 @@ mod tests {
         assert_eq!(now[0], 1.0, "no latency: straight in");
     }
     #[test]
-    fn backend_follows_the_device_name() {
-        use AudioBackend::*;
-        assert_eq!(detect_backend("pipewire", false), PipeWire);
-        assert_eq!(detect_backend("pulse", true), PulseAudio);
-        assert_eq!(detect_backend("default", true), PipeWire);
-        assert_eq!(detect_backend("sysdefault:CARD=PCH", true), PipeWire);
-        assert_eq!(detect_backend("default", false), Alsa);
-        assert_eq!(detect_backend("hw:CARD=PCH,DEV=0", true), Alsa);
-        assert_eq!(detect_backend("plughw:CARD=USB", true), Alsa);
-        assert_eq!(PipeWire.label(), "PipeWire");
-        assert_eq!(PulseAudio.label(), "PulseAudio");
-        assert_eq!(Alsa.label(), "ALSA");
+    fn alsa_era_names_are_known() {
+        for n in [
+            "pipewire",
+            "default",
+            "sysdefault:CARD=PCH",
+            "hw:CARD=PCH,DEV=0",
+            "plughw:1,0",
+        ] {
+            assert!(alsa_era_name(n), "{n}");
+        }
+        for n in ["System default", "REDMI Buds 8 Active", "Built-in Audio"] {
+            assert!(!alsa_era_name(n), "{n}");
+        }
     }
 
     #[test]
-    fn latency_hint_needs_a_buffer_and_a_rate() {
-        assert_eq!(
-            pipewire_latency_hint(Some(256), 48_000).as_deref(),
-            Some("256/48000")
-        );
-        assert_eq!(
-            pipewire_latency_hint(Some(64), 44_100).as_deref(),
-            Some("64/44100")
-        );
-        assert_eq!(pipewire_latency_hint(None, 48_000), None);
-        assert_eq!(pipewire_latency_hint(Some(256), 0), None);
-    }
-
-    #[test]
-    fn device_order_prefers_pipewire_and_always_ends_at_default() {
+    fn labels_and_device_order() {
+        assert_eq!(AudioBackend::PipeWire.label(), "PipeWire");
+        assert_eq!(AudioBackend::Alsa.label(), "ALSA");
         use Pick::*;
-        assert_eq!(pick_order(true, true, true), [Named, PipeWire, Default]);
-        assert_eq!(pick_order(false, true, true), [PipeWire, Default]);
-        assert_eq!(pick_order(false, true, false), [Default]);
-        assert_eq!(pick_order(false, false, true), [Default]);
-        assert_eq!(pick_order(true, false, false), [Named, Default]);
+        assert_eq!(pick_order(true), [Named, Default]);
+        assert_eq!(pick_order(false), [Default]);
+    }
+
+    #[test]
+    fn a_buffer_out_of_the_servers_range_takes_its_edge() {
+        let r = cpal::SupportedBufferSize::Range { min: 32, max: 2048 };
+        assert_eq!(pick_buffer(Some(8192), &r), Some(2048));
+        assert_eq!(pick_buffer(Some(16), &r), Some(32));
+        assert_eq!(pick_buffer(Some(256), &r), Some(256));
+        assert_eq!(pick_buffer(None, &r), Some(256));
+        assert_eq!(pick_buffer(None, &cpal::SupportedBufferSize::Unknown), None);
+    }
+
+    /// `cargo test -- --ignored --nocapture audio_devices`: what the host lists.
+    #[test]
+    #[ignore]
+    fn audio_devices() {
+        println!("host {:?}", host().id());
+        for d in host().output_devices().unwrap() {
+            println!(
+                "out {:?} {:?} listed {}",
+                d.id().map(|i| i.to_string()),
+                device_name(&d),
+                listed(&d)
+            );
+        }
+        println!("outputs {:?}", output_devices());
+        println!("inputs {:?}", input_devices());
     }
 
     #[cfg(unix)]
@@ -1346,7 +1454,11 @@ mod live_tests {
         assert_eq!(pick_buffer(None, &range(64, 128)), None);
         assert_eq!(pick_buffer(None, &B::Unknown), None);
         assert_eq!(pick_buffer(Some(1024), &range(64, 8192)), Some(1024));
-        assert_eq!(pick_buffer(Some(64), &range(512, 8192)), None);
+        assert_eq!(
+            pick_buffer(Some(64), &range(512, 8192)),
+            Some(512),
+            "the edge of the range"
+        );
     }
 
     /// Real output device: a song sent over the rtrb link after start plays

@@ -415,6 +415,7 @@ impl MidiIn {
             .filter_map(|p| probe.port_name(p).ok())
             .filter(|n| !skip(n))
             .collect();
+        #[allow(clippy::drop_non_drop)]
         drop(probe);
         self.conns
             .retain(|(n, _)| names.contains(n) && prefs.is_on(port_key(n)));

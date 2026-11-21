@@ -7,11 +7,17 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use midly::{
-    Format, Header, MetaMessage, MidiMessage, Smf, Timing, TrackEvent, TrackEventKind,
-    num::{u4, u7, u15, u24, u28},
+    Format, Header, MetaMessage, MidiMessage, PitchBend, Smf, Timing, TrackEvent, TrackEventKind,
+    num::{u4, u7, u14, u15, u24, u28},
 };
 
-use crate::sequence::{BAR, InstrumentKind, Note, PPQ, STEP, STEP_PITCH, Song, Tick};
+use crate::automation::{self, Target, ValueAt};
+use crate::sequence::{
+    BAR, Instrument, InstrumentKind, Note, PPQ, Pattern, STEP, STEP_PITCH, Song, Tick,
+};
+
+/// Sampling step (ticks) for continuous MIDI CC automation and pitch-bend slides (1/64 note).
+const CC_STEP: u64 = (STEP / 4) as u64;
 
 /// GM drum pitch per [`InstrumentKind::Drum`] voice (kick, snare, hat).
 const DRUM_GM: [u8; 3] = [36, 38, 42];
@@ -112,12 +118,27 @@ struct OutNote {
     end: u64,
     pitch: u8,
     vel: u8,
+    pan: f32,
+    fine: f32,
+    mod_x: f32,
+    mod_y: f32,
+}
+
+/// One flattened pitch slide on an instrument.
+struct OutSlide {
+    inst: usize,
+    start: u64,
+    end: u64,
+    semitones: f64,
 }
 
 fn midi_channel(song: &Song, inst: usize) -> u8 {
     match song.instruments[inst].kind {
         InstrumentKind::Drum { .. } => DRUM_CHANNEL,
-        _ => (inst % 16) as u8,
+        _ => {
+            let c = (inst % 15) as u8;
+            if c >= DRUM_CHANNEL { c + 1 } else { c }
+        }
     }
 }
 
@@ -126,6 +147,117 @@ fn export_pitch(song: &Song, inst: usize, pitch: u8) -> u8 {
         InstrumentKind::Drum { voice } => DRUM_GM.get(voice as usize).copied().unwrap_or(42),
         _ => pitch.min(127),
     }
+}
+
+/// Balance-law stereo gain pair `[L, R]` from linear gain and pan (`-1..=1`).
+fn balance_gains(vol: f32, pan: f32) -> [f32; 2] {
+    let v = vol.max(0.0);
+    let p = pan.clamp(-1.0, 1.0);
+    [v * (1.0 - p.max(0.0)), v * (1.0 + p.min(0.0))]
+}
+
+/// Collapse a stereo gain pair back into `(volume, pan)` under the balance law.
+fn gains_to_vol_pan(g: [f32; 2]) -> (f32, f32) {
+    let vol = g[0].max(g[1]);
+    if vol <= 1e-6 {
+        (0.0, 0.0)
+    } else {
+        (vol, ((g[1] - g[0]) / vol).clamp(-1.0, 1.0))
+    }
+}
+
+/// General MIDI volume law: `gain = (cc7 / 127)²`.
+fn cc7_to_gain(cc7: u8) -> f32 {
+    (cc7 as f32 / 127.0).powi(2)
+}
+
+/// Linear gain -> General MIDI CC 7 volume (inverse of `cc7_to_gain`).
+fn gain_to_cc7(gain: f32) -> u8 {
+    (gain.clamp(0.0, 1.0).sqrt() * 127.0)
+        .round()
+        .clamp(0.0, 127.0) as u8
+}
+
+/// MIDI CC 10 pan (`0` left, `64` centre, `127` right) -> `-1..=1`.
+fn cc10_to_pan(cc10: u8) -> f32 {
+    if cc10 < 64 {
+        ((cc10 as f32 - 64.0) / 64.0).clamp(-1.0, 0.0)
+    } else {
+        ((cc10 as f32 - 64.0) / 63.0).clamp(0.0, 1.0)
+    }
+}
+
+/// Pan `-1..=1` -> MIDI CC 10 (`0` left, `64` centre, `127` right).
+fn pan_to_cc10(pan: f32) -> u8 {
+    let p = pan.clamp(-1.0, 1.0);
+    if p < 0.0 {
+        (64.0 + p * 64.0).round().clamp(0.0, 64.0) as u8
+    } else {
+        (64.0 + p * 63.0).round().clamp(64.0, 127.0) as u8
+    }
+}
+
+/// Effective `(volume, pan)` of `inst` through its channel strip, mixer insert,
+/// Master, and an optional per-note pan offset. Computing pan on unit gains keeps
+/// pan intact even when a volume fader or fade-in/out reaches zero.
+fn effective_mix(song: &Song, inst: &Instrument, auto: &[ValueAt], note_pan: f32) -> (f32, f32) {
+    let c_vol =
+        automation::find(auto, Target::ChannelVolume { inst: inst.id }).unwrap_or(inst.volume);
+    let c_pan = automation::find(auto, Target::ChannelPan { inst: inst.id }).unwrap_or(inst.pan);
+    let mut vol = c_vol.max(0.0);
+    let mut pan_g = balance_gains(1.0, c_pan);
+    if inst.mixer > 0
+        && let Some(track) = song.mixer.get(inst.mixer as usize)
+    {
+        let m_vol = automation::find(auto, Target::MixerVolume { track: inst.mixer })
+            .unwrap_or(track.volume);
+        let m_pan =
+            automation::find(auto, Target::MixerPan { track: inst.mixer }).unwrap_or(track.pan);
+        vol *= m_vol.max(0.0);
+        let mg = balance_gains(1.0, m_pan);
+        pan_g = [pan_g[0] * mg[0], pan_g[1] * mg[1]];
+    }
+    if let Some(master) = song.mixer.first() {
+        let m_vol =
+            automation::find(auto, Target::MixerVolume { track: 0 }).unwrap_or(master.volume);
+        let m_pan = automation::find(auto, Target::MixerPan { track: 0 }).unwrap_or(master.pan);
+        vol *= m_vol.max(0.0);
+        let mg = balance_gains(1.0, m_pan);
+        pan_g = [pan_g[0] * mg[0], pan_g[1] * mg[1]];
+    }
+    if note_pan.abs() > 1e-4 {
+        let np = balance_gains(1.0, note_pan);
+        pan_g = [pan_g[0] * np[0], pan_g[1] * np[1]];
+    }
+    let (attenuation, pan) = gains_to_vol_pan(pan_g);
+    (vol * attenuation, pan)
+}
+
+fn target_affects_inst_mix(target: Target, inst: &Instrument) -> bool {
+    match target {
+        Target::ChannelVolume { inst: id } | Target::ChannelPan { inst: id } => id == inst.id,
+        Target::MixerVolume { track } | Target::MixerPan { track } => {
+            track == 0 || (inst.mixer > 0 && track == inst.mixer)
+        }
+        _ => false,
+    }
+}
+
+/// Highest sounding note pitch in `p` on the slide's instrument and group at `slide.start`.
+fn slide_semitones(p: &Pattern, slide: &crate::sequence::Glide) -> Option<f64> {
+    let highest = p
+        .notes
+        .iter()
+        .filter(|n| {
+            !n.muted
+                && n.instrument == slide.instrument
+                && n.group == slide.group
+                && n.start <= slide.start
+                && n.end() > slide.start
+        })
+        .map(|n| n.pitch)
+        .max()?;
+    Some(slide.target as f64 - highest as f64)
 }
 
 /// Notes of one pattern, filtered the way the engine plays them.
@@ -152,8 +284,43 @@ fn pattern_notes(song: &Song, pattern: u64) -> Vec<OutNote> {
                 end: (n.start + n.length) as u64,
                 pitch: export_pitch(song, inst, n.pitch),
                 vel: n.velocity.clamp(1, 127),
+                pan: n.pan,
+                fine: n.fine,
+                mod_x: n.mod_x,
+                mod_y: n.mod_y,
             });
         }
+    }
+    out
+}
+
+/// Slides of one pattern, filtered the way the engine plays them.
+fn pattern_slides(song: &Song, pattern: u64) -> Vec<OutSlide> {
+    let Some(p) = song.pattern(pattern) else {
+        return vec![];
+    };
+    let mut out = vec![];
+    for s in &p.slides {
+        if s.start < 0 {
+            continue;
+        }
+        let Some(inst) = song.instruments.iter().position(|i| i.id == s.instrument) else {
+            continue;
+        };
+        if song.instruments[inst].muted
+            || matches!(song.instruments[inst].kind, InstrumentKind::Drum { .. })
+        {
+            continue;
+        }
+        let Some(semitones) = slide_semitones(p, s) else {
+            continue;
+        };
+        out.push(OutSlide {
+            inst,
+            start: s.start as u64,
+            end: (s.start + s.length.max(0)) as u64,
+            semitones,
+        });
     }
     out
 }
@@ -203,8 +370,68 @@ fn song_notes(song: &Song) -> Vec<OutNote> {
                         end: (abs + n.length) as u64,
                         pitch: export_pitch(song, inst, n.pitch),
                         vel: n.velocity.clamp(1, 127),
+                        pan: n.pan,
+                        fine: n.fine,
+                        mod_x: n.mod_x,
+                        mod_y: n.mod_y,
                     });
                 }
+            }
+        }
+    }
+    out
+}
+
+/// Pattern slides flattened through every sounding clip, matching `song_notes`.
+fn song_slides(song: &Song) -> Vec<OutSlide> {
+    let mut out = vec![];
+    for c in &song.clips {
+        if c.muted || song.track_muted(c.track) {
+            continue;
+        }
+        let Some(p) = song.pattern(c.pattern) else {
+            continue;
+        };
+        if p.slides.is_empty() {
+            continue;
+        }
+        let plen = p.length.max(1);
+        let window = (c.offset, c.offset + song.clip_len(c));
+        if window.1 <= window.0 {
+            continue;
+        }
+        let first = window.0.div_euclid(plen);
+        let last = (window.1 - 1).div_euclid(plen);
+        for s in &p.slides {
+            if s.start < 0 {
+                continue;
+            }
+            let Some(inst) = song.instruments.iter().position(|i| i.id == s.instrument) else {
+                continue;
+            };
+            if song.instruments[inst].muted
+                || matches!(song.instruments[inst].kind, InstrumentKind::Drum { .. })
+            {
+                continue;
+            }
+            let Some(semitones) = slide_semitones(p, s) else {
+                continue;
+            };
+            for k in first..=last {
+                let t = s.start + k * plen;
+                if t < window.0 || t >= window.1 {
+                    continue;
+                }
+                let abs = c.start + (t - window.0);
+                if abs < 0 {
+                    continue;
+                }
+                out.push(OutSlide {
+                    inst,
+                    start: abs as u64,
+                    end: (abs + s.length.max(0)) as u64,
+                    semitones,
+                });
             }
         }
     }
@@ -320,12 +547,272 @@ fn push_conductor_tempo_meters<'a>(conductor: &mut Vec<(u64, TrackEventKind<'a>)
     }
 }
 
+fn cc_ev<'a>(channel: u4, cc: u8, val: u8) -> TrackEventKind<'a> {
+    TrackEventKind::Midi {
+        channel,
+        message: MidiMessage::Controller {
+            controller: u7::new(cc),
+            value: u7::new(val.min(127)),
+        },
+    }
+}
+
+/// Emit CC 7 (volume) and CC 10 (pan) for `inst`, including song-mode automation
+/// clips (channel, mixer insert, Master) and per-note pan offsets.
+fn push_mix_controllers<'a>(
+    evs: &mut Vec<(u64, TrackEventKind<'a>)>,
+    song: &Song,
+    inst: &Instrument,
+    channel: u4,
+    track_notes: &[&OutNote],
+    song_mode: bool,
+) {
+    let track_end = track_notes.iter().map(|n| n.end).max().unwrap_or(0);
+    let has_note_pan = track_notes.iter().any(|n| n.pan.abs() > 1e-4);
+
+    let mut sample_ticks: Vec<u64> = vec![0];
+    let mut has_mix_auto = false;
+
+    if song_mode {
+        for clip in song
+            .clips
+            .iter()
+            .filter(|c| !c.muted && !song.track_muted(c.track))
+        {
+            let Some(p) = song.pattern(clip.pattern) else {
+                continue;
+            };
+            let Some(env) = &p.automation else { continue };
+            if !target_affects_inst_mix(env.target, inst) {
+                continue;
+            }
+            let len = clip.length.unwrap_or(p.length - clip.offset).max(1);
+            let start = clip.start.max(0) as u64;
+            if start > track_end {
+                continue;
+            }
+            has_mix_auto = true;
+            let end = (clip.start + len).max(0).min(track_end as Tick) as u64;
+            sample_ticks.push(start);
+            sample_ticks.push(end);
+            let mut t = start + CC_STEP;
+            while t < end {
+                sample_ticks.push(t);
+                t += CC_STEP;
+            }
+            // Exact envelope vertices inside the clip window preserve sharp corners and Events steps.
+            let plen = p.length.max(1);
+            let window = (clip.offset, clip.offset + len);
+            let first = window.0.div_euclid(plen);
+            let last = (window.1 - 1).div_euclid(plen);
+            for pt in &env.points {
+                for k in first..=last {
+                    let local = pt.tick + k * plen;
+                    if local < window.0 || local >= window.1 {
+                        continue;
+                    }
+                    let abs = clip.start + (local - window.0);
+                    if abs >= 0 && (abs as u64) <= track_end {
+                        sample_ticks.push(abs as u64);
+                    }
+                }
+            }
+        }
+    }
+
+    if has_note_pan {
+        for n in track_notes {
+            sample_ticks.push(n.start);
+        }
+    }
+
+    sample_ticks.sort_unstable();
+    sample_ticks.dedup();
+
+    let mut note_idx = 0usize;
+    let mut active_note_pan = 0.0f32;
+    let mut auto_vals: Vec<ValueAt> = Vec::new();
+    let mut last_cc7: Option<u8> = None;
+    let mut last_cc10: Option<u8> = None;
+
+    for t in sample_ticks {
+        if has_note_pan {
+            while note_idx < track_notes.len() && track_notes[note_idx].start <= t {
+                active_note_pan = track_notes[note_idx].pan;
+                note_idx += 1;
+            }
+        }
+        if has_mix_auto {
+            automation::values_at(song, t as Tick, &mut auto_vals);
+        }
+        let note_pan = if has_note_pan { active_note_pan } else { 0.0 };
+        let (vol, pan) = effective_mix(song, inst, &auto_vals, note_pan);
+        let cc7 = gain_to_cc7(vol);
+        let cc10 = pan_to_cc10(pan);
+        if t == 0 || last_cc7 != Some(cc7) {
+            evs.push((t, cc_ev(channel, 7, cc7)));
+            last_cc7 = Some(cc7);
+        }
+        if t == 0 || last_cc10 != Some(cc10) {
+            evs.push((t, cc_ev(channel, 10, cc10)));
+            last_cc10 = Some(cc10);
+        }
+    }
+}
+
+/// Emit per-note Mod X (CC 74 Brightness) and Mod Y (CC 71 Resonance) when non-default.
+fn push_note_mod_controllers<'a>(
+    evs: &mut Vec<(u64, TrackEventKind<'a>)>,
+    channel: u4,
+    track_notes: &[&OutNote],
+) {
+    let has_mod_x = track_notes.iter().any(|n| (n.mod_x - 0.5).abs() > 1e-4);
+    let has_mod_y = track_notes.iter().any(|n| (n.mod_y - 0.5).abs() > 1e-4);
+    if !has_mod_x && !has_mod_y {
+        return;
+    }
+    let mut last_x: Option<u8> = None;
+    let mut last_y: Option<u8> = None;
+    for n in track_notes {
+        if has_mod_x {
+            let v = (n.mod_x.clamp(0.0, 1.0) * 127.0).round().clamp(0.0, 127.0) as u8;
+            if last_x != Some(v) {
+                evs.push((n.start, cc_ev(channel, 74, v)));
+                last_x = Some(v);
+            }
+        }
+        if has_mod_y {
+            let v = (n.mod_y.clamp(0.0, 1.0) * 127.0).round().clamp(0.0, 127.0) as u8;
+            if last_y != Some(v) {
+                evs.push((n.start, cc_ev(channel, 71, v)));
+                last_y = Some(v);
+            }
+        }
+    }
+}
+
+/// Emit PitchBend events (and RPN 0,0 Pitch Bend Sensitivity when > 2 semitones)
+/// for piano-roll slides and per-note fine pitch.
+fn push_pitch_bends<'a>(
+    evs: &mut Vec<(u64, TrackEventKind<'a>)>,
+    channel: u4,
+    track_notes: &[&OutNote],
+    track_slides: &[&OutSlide],
+) {
+    let has_fine = track_notes.iter().any(|n| n.fine.abs() > 1e-3);
+    if track_slides.is_empty() && !has_fine {
+        return;
+    }
+
+    // Group notes by start tick so chords share one pitch window.
+    let mut starts: Vec<(u64, u64, f64)> = Vec::new();
+    for n in track_notes {
+        let fine_semi = n.fine as f64 / 100.0;
+        if let Some(last) = starts.last_mut()
+            && last.0 == n.start
+        {
+            last.1 = last.1.max(n.end);
+            if fine_semi.abs() > last.2.abs() {
+                last.2 = fine_semi;
+            }
+        } else {
+            starts.push((n.start, n.end, fine_semi));
+        }
+    }
+
+    let mut points: Vec<(u64, f64)> = Vec::new();
+    let mut active_end = 0u64;
+    for (idx, &(t_on, t_off, fine_semi)) in starts.iter().enumerate() {
+        active_end = active_end.max(t_off);
+        let next_on = starts.get(idx + 1).map_or(u64::MAX, |s| s.0);
+        let window_end = active_end.min(next_on);
+        let mut cur = fine_semi;
+        points.push((t_on, cur));
+
+        let active_slides: Vec<&OutSlide> = track_slides
+            .iter()
+            .copied()
+            .filter(|s| s.start >= t_on && s.start < window_end)
+            .collect();
+
+        for (si, s) in active_slides.iter().enumerate() {
+            let next_slide = active_slides.get(si + 1).map_or(u64::MAX, |n| n.start);
+            let s_end = s.end.min(next_slide).min(window_end);
+            if s.end <= s.start {
+                cur = s.semitones;
+                points.push((s.start, cur));
+                continue;
+            }
+            let from = cur;
+            let span = (s.end - s.start) as f64;
+            let mut t = s.start;
+            while t < s_end {
+                let frac = ((t - s.start) as f64 / span).clamp(0.0, 1.0);
+                points.push((t, from + (s.semitones - from) * frac));
+                t = t.saturating_add(CC_STEP);
+            }
+            let end_frac = ((s_end - s.start) as f64 / span).clamp(0.0, 1.0);
+            cur = from + (s.semitones - from) * end_frac;
+            points.push((s_end, cur));
+        }
+    }
+
+    let max_semi = points.iter().map(|(_, s)| s.abs()).fold(0.0f64, f64::max);
+    if max_semi <= 1e-4 {
+        return;
+    }
+    let range: u8 = if max_semi <= 2.0 {
+        2
+    } else {
+        max_semi.ceil().clamp(2.0, 127.0) as u8
+    };
+    if range != 2 {
+        // RPN 0,0: Pitch Bend Sensitivity in semitones, then RPN Null.
+        evs.push((0, cc_ev(channel, 101, 0)));
+        evs.push((0, cc_ev(channel, 100, 0)));
+        evs.push((0, cc_ev(channel, 6, range)));
+        evs.push((0, cc_ev(channel, 38, 0)));
+        evs.push((0, cc_ev(channel, 101, 127)));
+        evs.push((0, cc_ev(channel, 100, 127)));
+    }
+
+    let mut last_raw: u16 = 8192;
+    for (t, semi) in points {
+        let norm = (semi / range as f64).clamp(-1.0, 1.0);
+        let raw = if norm >= 0.0 {
+            8192.0 + norm * 8191.0
+        } else {
+            8192.0 + norm * 8192.0
+        }
+        .round()
+        .clamp(0.0, 16383.0) as u16;
+        if raw != last_raw {
+            evs.push((
+                t,
+                TrackEventKind::Midi {
+                    channel,
+                    message: MidiMessage::PitchBend {
+                        bend: PitchBend(u14::new(raw)),
+                    },
+                },
+            ));
+            last_raw = raw;
+        }
+    }
+}
+
 pub fn export_smf(song: &Song, source: &MidiSource, opts: &ExportOptions) -> Vec<u8> {
+    let song_mode = matches!(source, MidiSource::Song);
     let mut notes = match source {
         MidiSource::Pattern(id) => pattern_notes(song, *id),
         MidiSource::Song => song_notes(song),
     };
+    let mut slides = match source {
+        MidiSource::Pattern(id) => pattern_slides(song, *id),
+        MidiSource::Song => song_slides(song),
+    };
     repair_overlaps(&mut notes);
+    slides.sort_by_key(|s| (s.start, s.end));
 
     // Owned text must outlive the Smf that borrows it.
     let mut owned: Vec<Vec<u8>> = vec![CONDUCTOR_NAME.as_bytes().to_vec()];
@@ -339,42 +826,94 @@ pub fn export_smf(song: &Song, source: &MidiSource, opts: &ExportOptions) -> Vec
         owned.push(CONDUCTOR_NAME.as_bytes().to_vec());
     }
     let merged_name = owned.len() - 1;
+    let mut marker_entries: Vec<(u64, usize)> = vec![];
+    if song_mode {
+        let mut markers = song.markers.clone();
+        markers.sort_by_key(|m| m.tick);
+        for m in markers {
+            if m.tick < 0 || m.name.is_empty() {
+                continue;
+            }
+            let idx = owned.len();
+            owned.push(m.name.into_bytes());
+            marker_entries.push((m.tick as u64, idx));
+        }
+    }
 
     // Per-track event lists as (absolute tick, event), delta-encoded later.
     let mut conductor: Vec<(u64, TrackEventKind)> = vec![];
     push_track_name(&mut conductor, &owned[0]);
     push_conductor_tempo_meters(&mut conductor, song);
+    for (tick, idx) in marker_entries {
+        conductor.push((tick, TrackEventKind::Meta(MetaMessage::Marker(&owned[idx]))));
+    }
 
     // Track per instrument that has notes, in instrument order.
     let mut per_track: Vec<Vec<(u64, TrackEventKind)>> = vec![Vec::new(); song.instruments.len()];
-    let mut has_notes = vec![false; song.instruments.len()];
+    let mut notes_by_inst: Vec<Vec<&OutNote>> = vec![Vec::new(); song.instruments.len()];
+    let mut slides_by_inst: Vec<Vec<&OutSlide>> = vec![Vec::new(); song.instruments.len()];
+    for n in &notes {
+        notes_by_inst[n.inst].push(n);
+    }
+    for list in &mut notes_by_inst {
+        list.sort_by_key(|n| (n.start, n.end));
+    }
+    for s in &slides {
+        slides_by_inst[s.inst].push(s);
+    }
+
     let mut merged: Vec<(u64, TrackEventKind)> = vec![];
+    let mut merged_channels_setup = [false; 16];
     if !opts.one_track_per_channel {
         push_track_name(&mut merged, &owned[merged_name]);
     }
-    for n in &notes {
-        let channel = u4::new(n.channel);
-        let on = TrackEventKind::Midi {
-            channel,
-            message: MidiMessage::NoteOn {
-                key: u7::new(n.pitch),
-                vel: u7::new(n.vel),
-            },
-        };
-        let off = TrackEventKind::Midi {
-            channel,
-            message: MidiMessage::NoteOff {
-                key: u7::new(n.pitch),
-                vel: u7::new(64),
-            },
-        };
-        if opts.one_track_per_channel {
-            per_track[n.inst].push((n.start, on));
-            per_track[n.inst].push((n.end, off));
-            has_notes[n.inst] = true;
+
+    for (i, inst) in song.instruments.iter().enumerate() {
+        let inst_notes = &notes_by_inst[i];
+        if inst_notes.is_empty() {
+            continue;
+        }
+        let ch_num = midi_channel(song, i);
+        let channel = u4::new(ch_num);
+        let target_evs = if opts.one_track_per_channel {
+            &mut per_track[i]
         } else {
-            merged.push((n.start, on));
-            merged.push((n.end, off));
+            &mut merged
+        };
+        let emit_channel_setup = if opts.one_track_per_channel {
+            true
+        } else if !merged_channels_setup[ch_num as usize] {
+            merged_channels_setup[ch_num as usize] = true;
+            true
+        } else {
+            false
+        };
+        if emit_channel_setup {
+            push_mix_controllers(target_evs, song, inst, channel, inst_notes, song_mode);
+            push_note_mod_controllers(target_evs, channel, inst_notes);
+            push_pitch_bends(target_evs, channel, inst_notes, &slides_by_inst[i]);
+        }
+        for n in inst_notes {
+            target_evs.push((
+                n.start,
+                TrackEventKind::Midi {
+                    channel,
+                    message: MidiMessage::NoteOn {
+                        key: u7::new(n.pitch),
+                        vel: u7::new(n.vel),
+                    },
+                },
+            ));
+            target_evs.push((
+                n.end,
+                TrackEventKind::Midi {
+                    channel,
+                    message: MidiMessage::NoteOff {
+                        key: u7::new(n.pitch),
+                        vel: u7::new(64),
+                    },
+                },
+            ));
         }
     }
 
@@ -384,16 +923,27 @@ pub fn export_smf(song: &Song, source: &MidiSource, opts: &ExportOptions) -> Vec
     ));
     fn finish<'a>(evs: &mut Vec<(u64, TrackEventKind<'a>)>) -> midly::Track<'a> {
         evs.sort_by_key(|(t, k)| {
-            (
-                *t,
-                matches!(
-                    k,
-                    TrackEventKind::Midi {
-                        message: MidiMessage::NoteOn { .. },
-                        ..
-                    }
-                ) as u8,
-            )
+            let order: u8 = match k {
+                TrackEventKind::Meta(_) => 0,
+                TrackEventKind::Midi {
+                    message: MidiMessage::NoteOff { .. },
+                    ..
+                } => 1,
+                TrackEventKind::Midi {
+                    message: MidiMessage::ProgramChange { .. } | MidiMessage::Controller { .. },
+                    ..
+                } => 2,
+                TrackEventKind::Midi {
+                    message: MidiMessage::PitchBend { .. },
+                    ..
+                } => 3,
+                TrackEventKind::Midi {
+                    message: MidiMessage::NoteOn { .. },
+                    ..
+                } => 4,
+                _ => 2,
+            };
+            (*t, order)
         });
         let mut track = midly::Track::new();
         let mut prev = 0u64;
@@ -417,7 +967,7 @@ pub fn export_smf(song: &Song, source: &MidiSource, opts: &ExportOptions) -> Vec
         }
     } else {
         for (i, evs) in per_track.iter_mut().enumerate() {
-            if !has_notes[i] {
+            if notes_by_inst[i].is_empty() {
                 continue;
             }
             let mut evs2: Vec<(u64, TrackEventKind)> = vec![];
@@ -643,6 +1193,7 @@ pub fn import_smf(
         let mut iname: Option<String> = None;
         let mut programs: BTreeMap<u8, u8> = BTreeMap::new();
         let mut mix: BTreeMap<u8, (Option<u8>, Option<u8>)> = BTreeMap::new();
+        let mut rpn: BTreeMap<u8, (u8, u8)> = BTreeMap::new();
         let mut done: Vec<(usize, u8, DoneNote)> = vec![];
         // Pop the oldest open note on a key and end it at `end`.
         // Returns the finished note plus whether it needed a repair.
@@ -705,7 +1256,8 @@ pub fn import_smf(
                         }
                         MidiMessage::PitchBend { .. } => pitch_bends += 1,
                         // CC7 volume and CC10 pan set the channel's mix (first value
-                        // wins, FL does the same); other controllers are counted.
+                        // wins, FL does the same); RPN 0,0 (pitch bend range) is
+                        // recognised as setup; other controllers are counted.
                         MidiMessage::Controller { controller, value }
                             if controller.as_int() == 7 =>
                         {
@@ -716,6 +1268,19 @@ pub fn import_smf(
                         {
                             mix.entry(ch).or_default().1.get_or_insert(value.as_int());
                         }
+                        MidiMessage::Controller { controller, value }
+                            if controller.as_int() == 101 =>
+                        {
+                            rpn.entry(ch).or_insert((127, 127)).0 = value.as_int();
+                        }
+                        MidiMessage::Controller { controller, value }
+                            if controller.as_int() == 100 =>
+                        {
+                            rpn.entry(ch).or_insert((127, 127)).1 = value.as_int();
+                        }
+                        MidiMessage::Controller { controller, .. }
+                            if matches!(controller.as_int(), 6 | 38)
+                                && rpn.get(&ch) == Some(&(0, 0)) => {}
                         MidiMessage::Controller { .. } => controllers += 1,
                         MidiMessage::ProgramChange { program } => {
                             programs.entry(ch).or_insert(program.as_int());
@@ -942,11 +1507,8 @@ pub fn import_smf(
                 let name = format!("{DRUM_KIT_PREFIX}{}", gm_kit_name(g.program));
                 let id = work.add_sampler(&name);
                 if let Some(inst) = work.instruments.iter_mut().find(|i| i.id == id) {
-                    inst.volume = (g.volume.unwrap_or(100) as f32 / 127.0).powi(2);
-                    inst.pan = g
-                        .pan
-                        .map(|p| ((p as f32 - 64.0) / 63.0).clamp(-1.0, 1.0))
-                        .unwrap_or(0.0);
+                    inst.volume = cc7_to_gain(g.volume.unwrap_or(100));
+                    inst.pan = g.pan.map(cc10_to_pan).unwrap_or(0.0);
                 }
                 report.channels.push(id);
                 report.names.push(name);
@@ -964,6 +1526,10 @@ pub fn import_smf(
                         DRUM_NAMES[voice],
                         InstrumentKind::Drum { voice: voice as u8 },
                     );
+                    if let Some(inst) = work.instruments.iter_mut().find(|i| i.id == id) {
+                        inst.volume = cc7_to_gain(g.volume.unwrap_or(100));
+                        inst.pan = g.pan.map(cc10_to_pan).unwrap_or(0.0);
+                    }
                     for dn in &mut notes {
                         dn.pitch = STEP_PITCH;
                     }
@@ -977,11 +1543,8 @@ pub fn import_smf(
                 if let Some(inst) = work.instruments.iter_mut().find(|i| i.id == id) {
                     // General MIDI volume law: gain = (CC7 / 127)², so 100
                     // (the value when a file sends none) is −4.2 dB.
-                    inst.volume = (g.volume.unwrap_or(100) as f32 / 127.0).powi(2);
-                    inst.pan = g
-                        .pan
-                        .map(|p| ((p as f32 - 64.0) / 63.0).clamp(-1.0, 1.0))
-                        .unwrap_or(0.0);
+                    inst.volume = cc7_to_gain(g.volume.unwrap_or(100));
+                    inst.pan = g.pan.map(cc10_to_pan).unwrap_or(0.0);
                 }
                 report.channels.push(id);
                 report.names.push(name);
@@ -1270,10 +1833,318 @@ mod tests {
                 assert_eq!(n.pitch, STEP_PITCH);
             }
         }
+        assert_eq!(rep.ignored_controllers, 0);
+        assert!(
+            rep.ignored_pitch_bends > 0,
+            "demo Bass slide exports as pitch bends"
+        );
         assert_eq!(
             summary(&rep),
-            "Imported 15 notes on 4 new channels into Pattern 2 at 120 BPM; 1 tempo change read, 1 meter change read, 0 pitch bends ignored."
+            format!(
+                "Imported 15 notes on 4 new channels into Pattern 2 at 120 BPM; 1 tempo change read, 1 meter change read, {} pitch bends ignored.",
+                rep.ignored_pitch_bends
+            )
         );
+    }
+
+    #[test]
+    fn channel_and_mixer_volume_pan_export_and_round_trip() {
+        let mut song = Song::default();
+        // Kick (drum): channel volume 0.5, pan -0.5.
+        song.instruments[0].volume = 0.5;
+        song.instruments[0].pan = -0.5;
+        // Bass (melodic) routed to Insert 1: channel vol 0.8, pan 0.0; insert vol 0.5, pan +0.5.
+        // Combined balance gains: L = 0.8 * 0.5 * 0.5 = 0.2, R = 0.8 * 0.5 * 1.0 = 0.4
+        // -> effective vol = 0.4, pan = +0.5.
+        song.instruments[3].volume = 0.8;
+        song.instruments[3].pan = 0.0;
+        song.instruments[3].mixer = 1;
+        song.mixer[1].volume = 0.5;
+        song.mixer[1].pan = 0.5;
+        song.add_note(1, Note::new(1, 0, STEP, STEP_PITCH, 100));
+        song.add_note(1, Note::new(4, 0, BAR, 48, 100));
+
+        let bytes = export_smf(&song, &MidiSource::Pattern(1), &ExportOptions::default());
+        let smf = Smf::parse(&bytes).unwrap();
+
+        // Check CC 7 / CC 10 arrive before NoteOn at tick 0 on every track.
+        for track in &smf.tracks[1..] {
+            let mut seen_note = false;
+            let mut seen_cc7 = false;
+            let mut seen_cc10 = false;
+            for ev in track {
+                if let TrackEventKind::Midi { message, .. } = ev.kind {
+                    match message {
+                        MidiMessage::Controller { controller, .. } if controller.as_int() == 7 => {
+                            assert!(!seen_note, "CC 7 must precede NoteOn");
+                            seen_cc7 = true;
+                        }
+                        MidiMessage::Controller { controller, .. } if controller.as_int() == 10 => {
+                            assert!(!seen_note, "CC 10 must precede NoteOn");
+                            seen_cc10 = true;
+                        }
+                        MidiMessage::NoteOn { .. } => seen_note = true,
+                        _ => {}
+                    }
+                }
+            }
+            assert!(seen_cc7 && seen_cc10, "each track writes CC 7 and CC 10");
+        }
+
+        // Round-trip through import_smf recovers both drum and melodic mix levels.
+        let mut into = Song::default();
+        let rep = import_smf(&bytes, &mut into, &ImportOptions::default()).unwrap();
+        assert_eq!(rep.ignored_controllers, 0);
+        assert_eq!(rep.ignored_pitch_bends, 0);
+        assert_eq!(
+            summary(&rep),
+            "Imported 2 notes on 2 new channels into Pattern 2 at 120 BPM; 1 tempo change read, 1 meter change read, 0 pitch bends ignored."
+        );
+        let kick = into.instrument(rep.channels[0]).unwrap();
+        let bass = into.instrument(rep.channels[1]).unwrap();
+        assert!((kick.volume - 0.5).abs() < 0.02, "kick vol {}", kick.volume);
+        assert!((kick.pan - (-0.5)).abs() < 0.02, "kick pan {}", kick.pan);
+        assert!((bass.volume - 0.4).abs() < 0.02, "bass vol {}", bass.volume);
+        assert!((bass.pan - 0.5).abs() < 0.02, "bass pan {}", bass.pan);
+    }
+
+    #[test]
+    fn volume_and_pan_automation_export_as_cc_streams() {
+        use crate::automation::{Envelope, Playback, Point, Target};
+        let mut song = Song::default();
+        song.instruments[3].mixer = 1;
+        song.add_note(1, Note::new(4, 0, 2 * BAR, 48, 100));
+        song.clips.push(Clip {
+            length: Some(2 * BAR),
+            ..Clip::new(1, 0, 0)
+        });
+
+        // Mixer insert 1 volume fades 1.0 -> 0.0 over bar 1 and holds.
+        let mut vol_pat = Pattern::new(2, "Vol");
+        vol_pat.length = BAR;
+        vol_pat.automation = Some(Envelope {
+            target: Target::MixerVolume { track: 1 },
+            playback: Playback::Hold,
+            points: vec![
+                Point {
+                    tick: 0,
+                    value: 1.0,
+                    tension: 0.0,
+                },
+                Point {
+                    tick: BAR,
+                    value: 0.0,
+                    tension: 0.0,
+                },
+            ],
+        });
+        song.patterns.push(vol_pat.into());
+        song.clips.push(Clip::new(2, 0, 1));
+
+        // Channel pan sweeps -1.0 -> +1.0 over bar 1..2.
+        let mut pan_pat = Pattern::new(3, "Pan");
+        pan_pat.length = BAR;
+        pan_pat.automation = Some(Envelope {
+            target: Target::ChannelPan { inst: 4 },
+            playback: Playback::Clip,
+            points: vec![
+                Point {
+                    tick: 0,
+                    value: -1.0,
+                    tension: 0.0,
+                },
+                Point {
+                    tick: BAR,
+                    value: 1.0,
+                    tension: 0.0,
+                },
+            ],
+        });
+        song.patterns.push(pan_pat.into());
+        song.clips.push(Clip::new(3, BAR, 2));
+
+        let bytes = export_smf(&song, &MidiSource::Song, &ExportOptions::default());
+        let smf = Smf::parse(&bytes).unwrap();
+        let mut cc7s: Vec<(u64, u8)> = vec![];
+        let mut cc10s: Vec<(u64, u8)> = vec![];
+        let mut abs = 0u64;
+        for ev in &smf.tracks[1] {
+            abs += ev.delta.as_int() as u64;
+            if let TrackEventKind::Midi {
+                message: MidiMessage::Controller { controller, value },
+                ..
+            } = ev.kind
+            {
+                match controller.as_int() {
+                    7 => cc7s.push((abs, value.as_int())),
+                    10 => cc10s.push((abs, value.as_int())),
+                    _ => {}
+                }
+            }
+        }
+        assert!(cc7s.len() > 10, "volume fade sampled smoothly: {cc7s:?}");
+        assert_eq!(cc7s.first(), Some(&(0, 127)));
+        assert_eq!(cc7s.last().map(|&(_, v)| v), Some(0));
+        assert!(cc7s.last().unwrap().0 <= BAR as u64);
+        assert!(
+            cc7s.windows(2).all(|w| w[0].1 > w[1].1),
+            "monotonic deduplicated fade"
+        );
+        assert!(cc10s.len() > 10, "pan sweep sampled smoothly: {cc10s:?}");
+        assert_eq!(cc10s.first(), Some(&(0, 64)));
+        assert!(cc10s.iter().any(|&(t, v)| t == BAR as u64 && v == 0));
+        assert!(cc10s.iter().any(|&(_, v)| v >= 124));
+    }
+
+    #[test]
+    fn slides_and_fine_pitch_export_with_rpn_and_reset_on_next_note() {
+        let mut song = Song::default();
+        song.add_note(1, Note::new(4, 0, BAR, 60, 100));
+        song.add_note(1, Note::new(4, BAR, BAR, 60, 100));
+        std::sync::Arc::make_mut(&mut song.patterns[0]).length = 2 * BAR;
+        std::sync::Arc::make_mut(&mut song.patterns[0]).slides = vec![
+            crate::sequence::Glide {
+                start: 0,
+                length: 4 * STEP,
+                target: 72, // +12 semitones
+                group: 0,
+                instrument: 4,
+            },
+            crate::sequence::Glide {
+                start: 8 * STEP,
+                length: 4 * STEP,
+                target: 65, // down to +5 semitones
+                group: 0,
+                instrument: 4,
+            },
+        ];
+
+        let bytes = export_smf(&song, &MidiSource::Pattern(1), &ExportOptions::default());
+        let smf = Smf::parse(&bytes).unwrap();
+        let mut rpn_range = None;
+        let mut bends: Vec<(u64, u16)> = vec![];
+        let mut abs = 0u64;
+        for ev in &smf.tracks[1] {
+            abs += ev.delta.as_int() as u64;
+            if let TrackEventKind::Midi { message, .. } = ev.kind {
+                match message {
+                    MidiMessage::Controller { controller, value } if controller.as_int() == 6 => {
+                        rpn_range = Some(value.as_int());
+                    }
+                    MidiMessage::PitchBend { bend } => bends.push((abs, bend.0.as_int())),
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(rpn_range, Some(12), "RPN 0,0 declares 12-semitone range");
+        assert!(
+            bends
+                .iter()
+                .any(|&(t, v)| t == (4 * STEP) as u64 && v == 16383)
+        );
+        // Second slide finishes at +5/12 of range.
+        let expect_5 = (8192.0_f64 + (5.0 / 12.0) * 8191.0).round() as u16;
+        assert!(
+            bends
+                .iter()
+                .any(|&(t, v)| t == (12 * STEP) as u64 && (v as i32 - expect_5 as i32).abs() <= 1),
+            "second slide hits +5 st: {bends:?}"
+        );
+        // Next note at BAR resets pitch bend to centre (8192).
+        assert_eq!(bends.last(), Some(&(BAR as u64, 8192)));
+    }
+
+    #[test]
+    fn per_note_pan_mod_markers_and_channel_10_skip() {
+        let mut song = Song::default();
+        // Add enough melodic instruments so index 9 is melodic (must skip GM drum channel 9).
+        for n in 0..7 {
+            song.add_sampler(&format!("Lead {n}"));
+        }
+        let tenth_id = song.instruments[9].id;
+        let mut n1 = Note::new(tenth_id, 0, STEP, 60, 100);
+        n1.pan = -0.5;
+        n1.mod_x = 1.0;
+        n1.mod_y = 0.0;
+        let n2 = Note::new(tenth_id, STEP, STEP, 64, 100);
+        song.add_note(1, n1);
+        song.add_note(1, n2);
+        song.clips.push(Clip::new(1, 0, 0));
+        song.markers.push(crate::sequence::Marker {
+            tick: 0,
+            name: "Intro".into(),
+        });
+        song.markers.push(crate::sequence::Marker {
+            tick: BAR,
+            name: "Drop".into(),
+        });
+
+        let bytes = export_smf(&song, &MidiSource::Song, &ExportOptions::default());
+        let smf = Smf::parse(&bytes).unwrap();
+        // Conductor markers.
+        let mut markers = vec![];
+        let mut abs = 0u64;
+        for ev in &smf.tracks[0] {
+            abs += ev.delta.as_int() as u64;
+            if let TrackEventKind::Meta(MetaMessage::Marker(b)) = ev.kind {
+                markers.push((abs, String::from_utf8_lossy(b).into_owned()));
+            }
+        }
+        assert_eq!(
+            markers,
+            vec![(0, "Intro".to_string()), (BAR as u64, "Drop".to_string())]
+        );
+
+        // Melodic instrument at index 9 must NOT use MIDI channel 9 (drums).
+        let mut chs = vec![];
+        let mut cc74 = vec![];
+        let mut cc71 = vec![];
+        let mut cc10 = vec![];
+        let mut abs = 0u64;
+        for ev in &smf.tracks[1] {
+            abs += ev.delta.as_int() as u64;
+            if let TrackEventKind::Midi { channel, message } = ev.kind {
+                chs.push(channel.as_int());
+                if let MidiMessage::Controller { controller, value } = message {
+                    match controller.as_int() {
+                        10 => cc10.push((abs, value.as_int())),
+                        71 => cc71.push((abs, value.as_int())),
+                        74 => cc74.push((abs, value.as_int())),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        assert!(chs.iter().all(|&c| c == 10), "index 9 maps to MIDI ch 10");
+        assert_eq!(cc10, vec![(0, 32), (STEP as u64, 64)]);
+        assert_eq!(cc74, vec![(0, 127), (STEP as u64, 64)]);
+        assert_eq!(cc71, vec![(0, 0), (STEP as u64, 64)]);
+    }
+
+    #[test]
+    fn showcase_demo_song_exports_valid_smf_with_mix_and_markers() {
+        let song = crate::demo::build(None);
+        let bytes = export_smf(&song, &MidiSource::Song, &ExportOptions::default());
+        let smf = Smf::parse(&bytes).unwrap();
+        assert!(smf.tracks.len() > 2);
+        let has_markers = smf.tracks[0]
+            .iter()
+            .any(|e| matches!(e.kind, TrackEventKind::Meta(MetaMessage::Marker(_))));
+        assert!(has_markers, "demo song markers exported");
+        let cc7_count: usize = smf.tracks[1..]
+            .iter()
+            .flat_map(|t| t.iter())
+            .filter(|e| {
+                matches!(
+                    e.kind,
+                    TrackEventKind::Midi {
+                        message: MidiMessage::Controller { controller, .. },
+                        ..
+                    } if controller.as_int() == 7
+                )
+            })
+            .count();
+        assert!(cc7_count >= smf.tracks.len() - 1);
     }
 
     #[test]

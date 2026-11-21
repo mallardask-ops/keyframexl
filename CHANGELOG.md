@@ -4,6 +4,19 @@ Every push to `main` ships a nightly prerelease (`v<version>-nightly.<date>` or 
 versions below are the stable tags. The 0.2.0 plan with its tasks is in
 [docs/v0.2.0.md](docs/v0.2.0.md).
 
+## Unreleased (0.2.1)
+
+See [docs/v0.2.1.md](docs/v0.2.1.md) for the Windows port and 0.2.1 plan.
+
+### Engine and internals
+- **MIDI export with mix, automation, slides and markers**: `File → Export → MIDI` now writes channel + mixer volume (CC 7) and pan (CC 10), song-mode volume/pan automation clips, piano-roll slides and fine pitch as `PitchBend` (with RPN 0,0 bend sensitivity when over ±2 semitones), per-note pan and Mod X / Mod Y (CC 74 / CC 71), and playlist section markers; melodic tracks skip GM drum channel 10, and MIDI import now also restores volume/pan on split drum channels and recognises RPN 0,0.
+- **Native PipeWire output**: the program is a PipeWire node of its own
+  (cpal 0.18), with ALSA as the fallback; the buffer setting is the node's
+  quantum, xruns are counted, and the device list shows hardware outputs
+  and *System default* instead of ALSA plug names.
+- **Windows foundation (W0)**: platform-gated dependencies and stubs so the
+  library and application build and pass tests on `windows-latest` in CI.
+
 ## 0.2.0 — 2026-11-21
 
 Everything since 0.1.2, gathered from the nightlies and release

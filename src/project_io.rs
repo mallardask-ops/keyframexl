@@ -86,6 +86,9 @@ pub fn save(song: &Song, path: &Path) -> Result<(), String> {
         .and_then(|_| temp.as_file().sync_all())
         .map_err(|e| e.to_string())?;
     temp.persist(path).map_err(|e| e.to_string())?;
+    // On Unix, fsyncing the parent directory commits the rename entry.
+    // On Windows, opening a directory with File::open fails with ERROR_ACCESS_DENIED.
+    #[cfg(unix)]
     std::fs::File::open(parent)
         .and_then(|dir| dir.sync_all())
         .map_err(|e| e.to_string())?;

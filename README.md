@@ -51,7 +51,7 @@ The Mixer (`F9`) ships with **32 native DSP effects** with custom visual faces a
 - **FL Studio Interop** — imports `.flp` projects (`src/flp.rs`, `src/flp_fx.rs`), plus optional FL Link / channel freezing workflows.
 
 ### Audio, MIDI, Export & Updates
-- **Shared Real-Time Engine** — real-time playback (PipeWire/ALSA via `cpal` with low-latency PipeWire tuning, automatic hot-reconnect, and a lock-free `rtrb` live parameter queue) and offline rendering share one voice engine (`src/engine.rs`).
+- **Shared Real-Time Engine** — real-time playback (a native PipeWire node, ALSA as the fallback, via `cpal` 0.18; automatic hot-reconnect, and a lock-free `rtrb` live parameter queue) and offline rendering share one voice engine (`src/engine.rs`).
 - **MIDI & Recording** — live MIDI input (`midir`), MIDI Clock Master/Slave & MIDI Out, MIDI file import/export, and in-app audio recording.
 - **Portable Projects, Bundles & Export** — saves self-contained `.kfxl` projects and shareable `.zip` **Project Bundles** (*Collect all & save*), exports to **WAV** (16/24-bit, 32-bit float), **FLAC** (16/24-bit), and **MP3** (128/192/320 kbps), plus WAV/OGG batch export in Forge.
 - **Self-Updater** — non-blocking GitHub Releases check (`HELP → Check for updates…`) that downloads, SHA-256-verifies and installs the new build in place, then restarts. Follows **Nightly builds** (a prerelease for every push to `main`) or stable releases only (*Settings → General*). Builds run from a cargo `target/` directory are updated from source instead.
@@ -79,9 +79,9 @@ Download `keyframexl-linux-x86_64.tar.gz` from [Releases](https://github.com/mal
   - **Rust** toolchain (Edition 2024 / recent stable `rustc` + `cargo`)
   - **C/C++ compiler** (`gcc` or `clang`) and `pkg-config` (for native dependencies like `rsworld-sys`)
   - **ALSA, X11/XCB & Fontconfig dev libraries:**
-    - Debian / Ubuntu: `sudo apt install build-essential pkg-config libasound2-dev libxcb1-dev libx11-dev fontconfig`
-    - Arch Linux: `sudo pacman -S base-devel pkgconf alsa-lib libxcb libx11 fontconfig`
-    - Fedora: `sudo dnf install gcc gcc-c++ pkgconf-pkg-config alsa-lib-devel libxcb-devel libX11-devel fontconfig`
+    - Debian / Ubuntu: `sudo apt install build-essential pkg-config libasound2-dev libpipewire-0.3-dev libclang-dev libdbus-1-dev libxcb1-dev libx11-dev fontconfig`
+    - Arch Linux: `sudo pacman -S base-devel pkgconf alsa-lib pipewire clang dbus libxcb libx11 fontconfig`
+    - Fedora: `sudo dnf install gcc gcc-c++ pkgconf-pkg-config alsa-lib-devel pipewire-devel clang-devel dbus-devel libxcb-devel libX11-devel fontconfig`
   - **File dialogs:** XDG desktop portal (`xdg-desktop-portal`) or GTK3/zenity/kdialog for `rfd` open/save dialogs
 
 ### Build & Run
@@ -156,7 +156,7 @@ src/
   synth.rs       KeyFrame Tide synthesizer
   updater.rs     GitHub Releases update checker and in-place self-installer
 tests/           Integration tests and audio fixtures
-vendor/          Patched local dependencies (cpal, egui_dock, vst3-host, winit)
+vendor/          Patched or vendored dependencies (egui_dock, vst3-host, winit, Signalsmith Stretch)
 ```
 
 ## Documentation

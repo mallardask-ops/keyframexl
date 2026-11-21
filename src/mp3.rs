@@ -5,7 +5,9 @@
 //! padding) leads the audio, so players play exactly the rendered length.
 
 use crate::sequence::ProjectInfo;
-use std::ffi::{CStr, c_char, c_int, c_uchar, c_void};
+#[cfg(unix)]
+use std::ffi::{CStr, c_char};
+use std::ffi::{c_int, c_uchar, c_void};
 use std::io::Write;
 use std::path::Path;
 use std::sync::OnceLock;
@@ -36,6 +38,7 @@ fn api() -> Result<&'static Api, String> {
     API.get_or_init(load).as_ref().map_err(Clone::clone)
 }
 
+#[cfg(unix)]
 fn load() -> Result<Api, String> {
     let names: [&CStr; 2] = [c"libmp3lame.so.0", c"libmp3lame.so"];
     let lib = names
@@ -98,6 +101,11 @@ fn load() -> Result<Api, String> {
             >(sym(c"lame_get_lametag_frame")?),
         })
     }
+}
+
+#[cfg(not(unix))]
+fn load() -> Result<Api, String> {
+    Err("MP3 export requires static LAME (scheduled for W1)".into())
 }
 
 /// LAME can be loaded (the export dialog greys MP3 out otherwise).

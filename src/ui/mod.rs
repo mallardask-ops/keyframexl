@@ -3567,11 +3567,14 @@ impl eframe::App for App {
         // On X11 plugin editors are placed inside our window (FL's wrapper).
         if self.plugins.parent.is_none() {
             use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-            self.plugins.parent = match frame.window_handle().map(|h| h.as_raw()) {
-                Ok(RawWindowHandle::Xlib(h)) => Some(h.window as u32),
-                Ok(RawWindowHandle::Xcb(h)) => Some(h.window.get()),
-                _ => None,
-            };
+            #[allow(clippy::unnecessary_cast)]
+            {
+                self.plugins.parent = match frame.window_handle().map(|h| h.as_raw()) {
+                    Ok(RawWindowHandle::Xlib(h)) => Some(h.window as u32),
+                    Ok(RawWindowHandle::Xcb(h)) => Some(h.window.get()),
+                    _ => None,
+                };
+            }
         }
         kit::track_keyboard_nav(ctx);
         let was = self.focus.take();

@@ -1,24 +1,35 @@
 mod audio;
+#[cfg(target_os = "linux")]
 mod bridge;
+#[cfg(target_os = "linux")]
 mod clap;
 mod dwp;
+#[cfg(target_os = "linux")]
 mod fl_link;
+#[cfg(target_os = "linux")]
 mod fl_native;
+#[cfg(target_os = "linux")]
 mod flp_freeze;
 mod i18n;
 mod import;
 mod midi_in;
 mod midi_out;
+mod platform;
+#[cfg(target_os = "linux")]
 mod plugins;
 mod settings;
 mod theme;
 mod ui;
 mod updater;
+#[cfg(target_os = "linux")]
 mod vst2;
 
+#[cfg(not(target_os = "linux"))]
+use platform::stubs::{bridge, fl_link, fl_native, flp_freeze, plugins};
+
+use std::{env, error::Error};
+#[cfg(target_os = "linux")]
 use std::{
-    env,
-    error::Error,
     io::Write,
     process::{Command, Stdio},
 };
@@ -26,6 +37,7 @@ use std::{
 /// Started from the desktop (no terminal): what the program and its plugin
 /// processes print (errors, yabridge and Wine messages) goes to
 /// ~/.local/state/keyframexl/keyframexl.log, the previous run's to .log.1.
+#[cfg(unix)]
 fn log_to_file() {
     use std::os::fd::AsRawFd;
     // SAFETY: isatty only reads the descriptor's state.
@@ -59,6 +71,9 @@ fn log_to_file() {
         keyframexl::version::display()
     );
 }
+
+#[cfg(not(unix))]
+fn log_to_file() {}
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().collect();
@@ -97,6 +112,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             println!("{ok} loaded, {bad} failed, {} total", files.len());
         }
+        #[cfg(target_os = "linux")]
         Some("vst2-probe") if args.len() == 3 => {
             if std::env::var_os("KFXL_PROBE_WINE_SET").is_none() {
                 // Run under the Wine chosen in Settings, as plugins do.
@@ -112,6 +128,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         // Live check of the FL Studio link: start FL (with an optional project),
         // play a note a second in real time, print what comes back.
+        #[cfg(target_os = "linux")]
         Some("fl-link-test") if args.len() <= 3 => {
             let prefs = settings::Settings::load();
             plugins::set_dxvk(prefs.plugins.dxvk);
@@ -119,6 +136,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             fl_link::fl_link_test(args.get(2).map(std::path::Path::new))
                 .map_err(std::io::Error::other)?;
         }
+        #[cfg(target_os = "linux")]
         Some("fl-native-test") if args.len() >= 4 => {
             let channels = args[3..]
                 .iter()
@@ -136,6 +154,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             std::fs::write(&args[4], [keyframexl::flp::FL_VSTI_HEADER, &flp].concat())?;
         }
         // FL Studio renders FL project channels alone (FLEX): flp-freeze x.flp 3 5
+        #[cfg(target_os = "linux")]
         Some("flp-freeze") if args.len() >= 4 => {
             let channels: Vec<u32> = args[3..].iter().filter_map(|a| a.parse().ok()).collect();
             flp_freeze::freeze_main(std::path::Path::new(&args[2]), &channels)
@@ -164,6 +183,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
         // Live checks: screenshot the whole X11 display (plugin editors are X11 windows).
+        #[cfg(target_os = "linux")]
         Some("x11-shot") if args.len() == 3 => {
             let (conn, screen) = xcb::Connection::connect(None)?;
             let root = conn
@@ -244,6 +264,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             keyframexl::write_wav(&args[2], &keyframexl::demo())?;
             println!("Wrote {}", args[2]);
         }
+        #[cfg(target_os = "linux")]
         Some("play-demo") if args.len() == 2 => {
             let mut child = Command::new("pw-cat")
                 .args([
@@ -336,8 +357,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             use std::io::Write;
             let _ = std::io::stdout().flush();
             let _ = std::io::stderr().flush();
+            #[cfg(unix)]
             // SAFETY: nothing is left to run; `_exit` only skips atexit handlers.
-            unsafe { libc::_exit(0) };
+            unsafe {
+                libc::_exit(0)
+            };
+            #[cfg(not(unix))]
+            std::process::exit(0);
         }
         _ => eprintln!(
             "Usage: keyframexl [project.kfxl | --demo | render-demo <file.wav> | play-demo]"
