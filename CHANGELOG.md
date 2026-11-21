@@ -4,11 +4,11 @@ Every push to `main` ships a nightly prerelease (`v<version>-nightly.<date>` or 
 versions below are the stable tags. The 0.2.0 plan with its tasks is in
 [docs/v0.2.0.md](docs/v0.2.0.md).
 
-## Unreleased (0.2.0)
+## 0.2.0 — 2026-11-21
 
-Everything since 0.1.2, gathered from the nightlies up to
-`v0.2.0-nightly.rc.4`. Native PipeWire output (E1) is still in review and
-not part of this list.
+Everything since 0.1.2, gathered from the nightlies and release
+candidates up to `v0.2.0-nightly.rc.4`. Native PipeWire output (E1) is
+still in review and not part of this release.
 
 ### New features
 - **Ukrainian interface.** Every window, menu, tooltip, dialog and status
@@ -92,6 +92,10 @@ not part of this list.
 - **Colours** of tracks and patterns are picked from a grid of swatches
   (they were a list of hex codes).
 - **Pattern list** on the deck: larger rows in each pattern's colour.
+- **Opening panels**: a closed Playlist, Channel rack, Piano roll or Mixer
+  opens as a tab in the window that has the focus (it went to the first
+  pane that happened to be open), or in a window of its own:
+  *Settings → General → Open panels*.
 - **Knobs, faders and number fields** capture the mouse, so a long drag
   does not stop at the screen edge.
 - **Docked panels**: dragging a shared edge resizes both panels. Embedded

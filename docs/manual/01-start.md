@@ -31,7 +31,9 @@ embedded; `KFXL_X11=0` runs it on pure Wayland without plugin embedding.
   spectrum (*View → Deck monitor*).
 - **Workspace** below: the editors. `F5` Playlist, `F6` Channel rack,
   `F7` Piano roll, `F9` Mixer, `Alt+F8` Browser. Pressing the key again
-  closes the window.
+  closes the window. A closed window opens as a tab in the window that has
+  the focus, or in a window of its own: *Settings → General → Open
+  panels*.
 - **Status bar** at the bottom: what just happened, and hints. Most
   messages that change the project end with "Ctrl+Z undoes".
 

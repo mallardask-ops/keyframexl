@@ -1322,6 +1322,24 @@ fn general_page(ui: &mut egui::Ui, s: &mut Settings, checking_updates: bool) -> 
                 }
             },
         );
+        row(ui, tr.set_panel_open, Some(tr.set_panel_open_hint), |ui| {
+            use crate::settings::PanelOpen;
+            let labels: Vec<&str> = PanelOpen::ALL
+                .iter()
+                .map(|m| match m {
+                    PanelOpen::Focused => tr.set_panel_focused,
+                    PanelOpen::Window => tr.set_panel_window,
+                })
+                .collect();
+            let cur = PanelOpen::ALL
+                .iter()
+                .position(|m| *m == s.general.panel_open)
+                .unwrap_or(0);
+            let (pick, _) = kit::chips(ui, "gen-panel-open", &labels, cur, None);
+            if let Some(i) = pick {
+                s.general.panel_open = PanelOpen::ALL[i];
+            }
+        });
         row(
             ui,
             tr.set_deck_monitor,

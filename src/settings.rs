@@ -274,6 +274,20 @@ impl ThemeMode {
     pub const ALL: [Self; 3] = [Self::Dark, Self::Light, Self::System];
 }
 
+/// Where a closed panel (Playlist, Channel rack, Piano roll, Mixer) opens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum PanelOpen {
+    /// As a tab in the window that has the focus.
+    #[default]
+    Focused,
+    /// In its own floating window.
+    Window,
+}
+
+impl PanelOpen {
+    pub const ALL: [Self; 2] = [Self::Focused, Self::Window];
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GeneralSettings {
@@ -322,6 +336,8 @@ pub struct GeneralSettings {
     pub window_size: Option<[f32; 2]>,
     /// Whether the main OS window was maximized when last used.
     pub window_maximized: bool,
+    /// Where a closed panel opens: a tab in the focused window, or its own window.
+    pub panel_open: PanelOpen,
 }
 
 /// Interface sizes offered in Settings and stepped through by VIEW → Interface size.
@@ -395,6 +411,7 @@ impl Default for GeneralSettings {
             language: crate::i18n::Language::English,
             window_size: None,
             window_maximized: false,
+            panel_open: PanelOpen::Focused,
         }
     }
 }

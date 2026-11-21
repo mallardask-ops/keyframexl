@@ -5,7 +5,7 @@
 use super::App;
 use crate::theme as t;
 use eframe::egui::{self, CornerRadius, Margin, Stroke};
-use egui_dock::{DockState, NodeIndex, SurfaceIndex, TabIndex};
+use egui_dock::{DockState, Node, NodeIndex, SurfaceIndex, TabIndex};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -210,6 +210,32 @@ fn focus(d: &mut DockState<Tab>, at: (SurfaceIndex, NodeIndex, TabIndex)) {
     d.set_focused_node_and_surface((at.0, at.1));
 }
 
+/// The focused leaf when a panel may join it: not a tool window (an
+/// instrument, the Riff Machine, Settings), which keeps to itself.
+fn focused_panel_leaf(d: &mut DockState<Tab>) -> Option<(SurfaceIndex, NodeIndex)> {
+    let (s, n) = d.focused_leaf()?;
+    let Node::Leaf { tabs, .. } = &d[s][n] else {
+        return None;
+    };
+    tabs.iter()
+        .all(|t| !matches!(t.kind(), Kind::Instrument | Kind::Riff | Kind::Settings))
+        .then_some((s, n))
+}
+
+/// A closed panel opens as a tab in the focused window; without one, where
+/// [`place`] puts it.
+fn place_in_focus(d: &mut DockState<Tab>, tab: Tab) {
+    match focused_panel_leaf(d) {
+        Some((s, n)) => {
+            d[s][n].append_tab(tab.clone());
+            if let Some(at) = find(d, &tab) {
+                focus(d, at);
+            }
+        }
+        None => place(d, tab),
+    }
+}
+
 /// Put a tab where a user expects it: next to its relatives, else a sensible split.
 fn place(d: &mut DockState<Tab>, tab: Tab) {
     let sibling = match tab.kind() {
@@ -266,7 +292,7 @@ impl App {
                         {
                             self.win_cmds_float(tab, area)
                         }
-                        None => place(d, tab),
+                        None => self.open_panel(tab, area),
                     }
                 }
                 Cmd::Toggle(tab) => {
@@ -277,7 +303,7 @@ impl App {
                             d.remove_tab(at);
                         }
                         Some(at) => focus(d, at),
-                        None => place(d, tab),
+                        None => self.open_panel(tab, area),
                     }
                 }
                 Cmd::Float(tab) => self.win_cmds_float(tab, area),
@@ -370,6 +396,14 @@ impl App {
             } else {
                 self.settings_ui = None;
             }
+        }
+    }
+
+    /// A closed panel, opened as *Settings → General → Open panels* says.
+    fn open_panel(&mut self, tab: Tab, area: egui::Rect) {
+        match self.settings.general.panel_open {
+            crate::settings::PanelOpen::Focused => place_in_focus(self.ws.dock(), tab),
+            crate::settings::PanelOpen::Window => self.win_cmds_float(tab, area),
         }
     }
 

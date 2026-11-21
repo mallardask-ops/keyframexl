@@ -2108,3 +2108,30 @@ fn midi_notes_tap_on_the_device_clock_and_set_the_tempo() {
     app.undo();
     assert_ne!(app.edited_tempo(), 125.0);
 }
+
+#[test]
+fn a_closed_panel_opens_in_the_focused_window_or_its_own() {
+    let mut app = app();
+    let area = Rect::from_min_size(Pos2::ZERO, Vec2::new(1100.0, 640.0));
+    // Arrange: Playlist above, Channel rack below. Close the rack and work
+    // in the playlist.
+    app.win(Cmd::Close(Tab::Rack));
+    app.win(Cmd::Show(Tab::Playlist));
+    app.apply_win_cmds(area);
+    let playlist = app.ws.dock().find_tab(&Tab::Playlist).unwrap();
+    // F6 brings the rack back as a tab beside the focused playlist, not
+    // into the first pane that happens to be open.
+    app.win(Cmd::Toggle(Tab::Rack));
+    app.apply_win_cmds(area);
+    let rack = app.ws.dock().find_tab(&Tab::Rack).expect("rack opened");
+    assert_eq!((rack.0, rack.1), (playlist.0, playlist.1));
+    assert_eq!(workspace::focused(app.ws.dock()), Some(Tab::Rack));
+    // With "In a new window" it gets a window of its own.
+    app.settings.general.panel_open = crate::settings::PanelOpen::Window;
+    app.win(Cmd::Close(Tab::Rack));
+    app.apply_win_cmds(area);
+    app.win(Cmd::Toggle(Tab::Rack));
+    app.apply_win_cmds(area);
+    let (s, _, _) = app.ws.dock().find_tab(&Tab::Rack).expect("rack opened");
+    assert!(!s.is_main(), "a floating window");
+}
