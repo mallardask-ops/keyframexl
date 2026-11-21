@@ -45,6 +45,13 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
   Renders are deterministic, so playback and export match.
 
 ### Interface
+- **Ukrainian interface.** Every window, menu, tooltip, dialog and status
+  message is in English and Ukrainian, with proper plural forms. The
+  language follows the system locale; change it in *Settings → General* or
+  run with `KFXL_LANG=en|uk`. Effect, preset and recipe names stay as they
+  are.
+- **Ukrainian manual** in `docs/manual/uk/`; *Help → Manual* opens it when
+  the interface is in Ukrainian.
 - **Light theme** (*Settings → General → Theme*, *View → Theme*): Dark,
   Light, or System (follows the desktop through xdg-desktop-portal). All
   text keeps at least 4.5:1 contrast; Tide and the Sampler stay dark, like
