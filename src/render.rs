@@ -16,6 +16,10 @@ pub const MAX_TAIL_SECONDS: f64 = 30.0;
 const SILENCE: f32 = 1e-4;
 /// … for this long, with no voice sounding.
 const SILENT_RUN_SECONDS: f64 = 0.5;
+/// A tail is over once it stays this far under the loudest sample of the
+/// song (RT60): amp simulators and other plugins hiss steadily above
+/// [`SILENCE`], which ran every such export to [`MAX_TAIL_SECONDS`].
+const TAIL_FLOOR_DB: f32 = -60.0;
 const BLOCK: usize = 512;
 
 /// What happens to sound that rings past the end (FL: Tail).
@@ -334,6 +338,7 @@ pub fn render_range(
     };
     let cap = length + (MAX_TAIL_SECONDS * rate as f64) as u64;
     let silent_needed = (SILENT_RUN_SECONDS * rate as f64) as u64;
+    let mut main_peak = 0.0f32;
     let mut out: Vec<f32> = Vec::with_capacity(length as usize * 2);
     let mut buf = vec![0.0f32; BLOCK * 2];
     let (mut pos, mut silent_run, mut blocks) = (0u64, 0u64, 0u32);
@@ -354,9 +359,17 @@ pub fn render_range(
         pace(pos);
         let slice = &mut buf[..n * 2];
         engine.process(song, pattern, song_mode, first + pos, slice, false);
-        if !in_main {
-            let loud = slice.iter().any(|s| s.abs() > SILENCE);
-            silent_run = if loud { 0 } else { silent_run + n as u64 };
+        if in_main {
+            main_peak = slice.iter().fold(main_peak, |m, s| m.max(s.abs()));
+        } else {
+            // A block's level (RMS) against the floor under the song's peak.
+            let floor = (main_peak * 10f32.powf(TAIL_FLOOR_DB / 20.0)).max(SILENCE);
+            let rms = (slice.iter().map(|s| s * s).sum::<f32>() / slice.len() as f32).sqrt();
+            silent_run = if rms > floor {
+                0
+            } else {
+                silent_run + n as u64
+            };
         }
         out.extend_from_slice(slice);
         pos += n as u64;
@@ -896,6 +909,57 @@ mod tests {
             "every sample made it through FLAC"
         );
         assert!(events.iter().any(|e| matches!(e, Progress::Rendering(_))));
+    }
+
+    /// A plugin that hisses forever at −70 dBFS RMS, like an amp simulator.
+    struct Hiss(u32);
+    impl crate::plugin::Processor for Hiss {
+        fn process(
+            &mut self,
+            _: &[crate::plugin::PluginEvent],
+            io: &mut [f32],
+            _: &crate::plugin::Transport,
+        ) {
+            let a = 10f32.powf(-70.0 / 20.0) * 3f32.sqrt();
+            for s in io.iter_mut() {
+                self.0 = self.0.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                *s = (self.0 as f32 / u32::MAX as f32 * 2.0 - 1.0) * a;
+            }
+        }
+    }
+
+    #[test]
+    fn a_tail_ends_under_a_plugins_steady_hiss() {
+        let mut song = Song::demo();
+        let pat = song.patterns[0].id;
+        let r = crate::sequence::PluginRef {
+            id: 7,
+            format: "vst3".into(),
+            path: "/amp.vst3".into(),
+            name: "Amp".into(),
+            vendor: String::new(),
+            state: String::new(),
+            outs: vec![],
+        };
+        song.add_channel("Amp", crate::sequence::InstrumentKind::Plugin { plugin: r });
+        let plugins = Plugins(vec![(7, crate::plugin::share(Hiss(1)))]);
+        let length = main_frames(&song, pat, false) as usize;
+        let frames = render_with(
+            &song,
+            pat,
+            false,
+            Tail::Leave,
+            RATE,
+            &plugins,
+            &AtomicBool::new(false),
+            &mut |_| {},
+        )
+        .unwrap();
+        let extra = (frames.len() - length) as f64 / RATE as f64;
+        assert!(
+            extra < 5.0,
+            "the tail ran {extra:.1} s of hiss past the end"
+        );
     }
 
     #[test]

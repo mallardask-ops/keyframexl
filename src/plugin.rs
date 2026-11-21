@@ -190,7 +190,10 @@ struct NativePitch {
     next: Option<u64>,
     off: u64,
     cents: f64,
-    sent: i32,
+    /// The last pitch sent, `None` when the plugin's pitch is unknown: an
+    /// export renders through another `Instance` on the same FL process, so
+    /// a cached value may no longer be what FL plays.
+    sent: Option<i32>,
 }
 
 impl Instance {
@@ -206,7 +209,7 @@ impl Instance {
                 next: None,
                 off: 0,
                 cents: 0.0,
-                sent: 0,
+                sent: None,
             },
             pdc: Pdc::default(),
             pdc_extra: (0..MAX_EXTRA_PAIRS).map(|_| Pdc::default()).collect(),
@@ -234,6 +237,9 @@ impl Instance {
         let pitch = &mut self.native_pitch;
         pitch.pending.clear();
         pitch.active = None;
+        // Every note states its pitch: the channel may have been left bent
+        // by an export or by another engine on the same FL process.
+        pitch.sent = None;
         pitch.off = off;
         pitch.cents = cents;
         let limit = pitch.pending.capacity();
@@ -281,6 +287,7 @@ impl Instance {
         pitch.active = None;
         pitch.pending.clear();
         pitch.cents = 0.0;
+        pitch.sent = None;
         if let Some(event) = pitch.event(0) {
             self.push(event);
         }
@@ -290,10 +297,10 @@ impl Instance {
 impl NativePitch {
     fn event(&mut self, at: u32) -> Option<PluginEvent> {
         let cents = (self.cents.round() as i32).clamp(-FL_PITCH_CENTER, FL_PITCH_CENTER - 1);
-        if cents == self.sent {
+        if self.sent == Some(cents) {
             return None;
         }
-        self.sent = cents;
+        self.sent = Some(cents);
         let value = cents + FL_PITCH_CENTER;
         Some(PluginEvent::Midi {
             at,
@@ -355,5 +362,41 @@ impl Processor for TestGain {
         for s in io.iter_mut() {
             *s *= self.0;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pitches(i: &Instance) -> Vec<i32> {
+        i.events
+            .iter()
+            .filter_map(|e| match e {
+                PluginEvent::Midi { bytes, .. } if bytes[0] == FL_PITCH => {
+                    Some(i32::from(bytes[1]) | (i32::from(bytes[2]) << 7))
+                }
+                _ => None,
+            })
+            .map(|v| v - FL_PITCH_CENTER)
+            .collect()
+    }
+
+    #[test]
+    fn every_fl_note_states_its_pitch_even_after_another_instance_bent_it() {
+        let proc = share(TestSynth::default());
+        // An export's instance leaves the shared FL channel bent by +300 cents.
+        let mut export = Instance::new(1, proc.clone());
+        export.start_fl_pitch(0, 0, 1000, 300.0, 10, std::iter::empty());
+        assert_eq!(pitches(&export), vec![300]);
+        // The live instance plays an unbent note: it must say 0, although it
+        // never sent anything else.
+        let mut live = Instance::new(1, proc);
+        live.start_fl_pitch(0, 0, 1000, 0.0, 10, std::iter::empty());
+        assert_eq!(pitches(&live), vec![0]);
+        // And again on its next note, in case the export ran in between.
+        live.events.clear();
+        live.start_fl_pitch(1000, 1000, 2000, 0.0, 10, std::iter::empty());
+        assert_eq!(pitches(&live), vec![0]);
     }
 }

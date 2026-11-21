@@ -112,6 +112,13 @@ not part of this list.
 ### Fixes
 - **Crash** when a tab group or a floating window was dragged by its grip
   over another panel (since 0.1.1).
+- **Export and FL Studio channels' pitch.** An export started with the pitch
+  the live engine had left on FL Studio channels, and afterwards the
+  project played with the pitch the export ended on, so slides came out
+  wrong, mostly at the start. Every FL note now sends its pitch.
+- **Export tail** ran 30 s past the end when a plugin (an amp simulator)
+  hissed above −80 dBFS: the tail now ends 60 dB under the song's peak, so
+  the file is as long as the estimate.
 - **Window height creep**: Export audio and Project info lost a few pixels
   of height on every drag of a side edge.
 - **Maximised start on X11** was ignored: the request was sent before the
