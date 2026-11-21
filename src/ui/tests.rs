@@ -1939,3 +1939,92 @@ fn window_geometry_recording_handles_wayland_fullscreen_and_startup_maximize() {
     assert!(!dirty);
     assert_eq!(app.settings.general.window_size, Some([1600.0, 900.0]));
 }
+
+/// Drags the right edge of window `id`, then its bottom edge, and checks the
+/// other axis never moves (the height used to creep on width drags).
+fn edge_drag_keeps_other_axis(id: &str, mut show: impl FnMut(&egui::Context)) {
+    let ctx = egui::Context::default();
+    ctx.set_fonts(t::font_definitions(None));
+    t::apply(&ctx, t::Theme::Dark);
+    let win = egui::Id::new(id);
+    let mut time = 0.0;
+    let mut step = |events: Vec<Event>| {
+        time += 1.0 / 60.0;
+        let raw = egui::RawInput {
+            time: Some(time),
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1366.0, 768.0))),
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run(raw, &mut show);
+        ctx.memory(|m| m.area_rect(win)).expect("window shown")
+    };
+    let mut rect = Rect::NOTHING;
+    for _ in 0..4 {
+        rect = step(vec![]);
+    }
+    let h = rect.height();
+    let a = pos2(rect.right(), rect.center().y);
+    step(vec![Event::PointerMoved(a)]);
+    step(vec![button(a, true, true)]);
+    for i in 1..=12 {
+        rect = step(vec![Event::PointerMoved(a + vec2(i as f32 * 10.0, 0.0))]);
+        assert!(
+            (rect.height() - h).abs() <= 0.5,
+            "height {h} → {}",
+            rect.height()
+        );
+    }
+    step(vec![button(a + vec2(120.0, 0.0), true, false)]);
+    for _ in 0..3 {
+        rect = step(vec![]);
+    }
+    assert!(
+        (rect.height() - h).abs() <= 0.5,
+        "height {h} → {}",
+        rect.height()
+    );
+    let w = rect.width();
+    let b = pos2(rect.center().x, rect.bottom());
+    step(vec![Event::PointerMoved(b)]);
+    step(vec![button(b, true, true)]);
+    for i in 1..=10 {
+        rect = step(vec![Event::PointerMoved(b - vec2(0.0, i as f32 * 8.0))]);
+        assert!(
+            (rect.width() - w).abs() <= 0.5,
+            "width {w} → {}",
+            rect.width()
+        );
+    }
+    assert!(rect.height() < h - 40.0, "bottom drag shortens the window");
+}
+
+#[test]
+fn export_window_edge_drag_keeps_other_axis() {
+    let mut app = App::with_song(keyframexl::demo::build(None), None);
+    app.open_export(std::path::PathBuf::from("/tmp/mix.wav"), true);
+    edge_drag_keeps_other_axis("export-window", |ctx| app.export_window(ctx));
+    assert!(app.export.is_some(), "the drag does not close the dialog");
+}
+
+#[test]
+fn export_file_name_edit_keeps_folder_and_extension() {
+    use std::path::Path;
+    let p = Path::new("/music/beats/loop.wav");
+    assert_eq!(
+        super::export::renamed(p, "night drive"),
+        Path::new("/music/beats/night drive.wav")
+    );
+    assert_eq!(
+        super::export::renamed(p, "a/b"),
+        Path::new("/music/beats/ab.wav")
+    );
+    assert_eq!(super::export::renamed(p, "  "), p);
+}
+
+#[test]
+fn manual_window_edge_drag_keeps_other_axis() {
+    let mut app = App::with_song(Song::default(), None);
+    app.show_manual = true;
+    edge_drag_keeps_other_axis("kfxl-manual-window", |ctx| app.manual_window(ctx));
+}
