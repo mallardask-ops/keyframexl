@@ -31,8 +31,10 @@ opens on another computer. *File → Import → Import bundle…* unpacks one.
 - *Normalize to −1 dB peak*, *Dither 16-bit output*.
 - *Split mixer tracks* writes one file (stem) per mixer insert.
 
-*File → Export → MIDI* (`Ctrl+Shift+M`) writes the notes as a MIDI file;
-*File → Import → MIDI* reads one.
+*File → Export → MIDI* (`Ctrl+Shift+M`) writes the notes, channel and mixer
+volume/pan (CC 7 / CC 10) with their automation, slides (`PitchBend`),
+tempo/meter maps and playlist markers as a MIDI file; *File → Import → MIDI*
+reads one.
 
 ## Settings
 
