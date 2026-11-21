@@ -48,25 +48,12 @@ fn children(dir: &Path) -> Vec<PathBuf> {
     v
 }
 
-/// Look in the usual places: Wine prefixes in home, mounted disks, the music folder.
+/// Look in the usual places: Image-Line install roots (Wine on Linux, Program
+/// Files on Windows), mounted disks, and the music folder.
 pub fn find(home: &Path, mounts: &[PathBuf]) -> Libraries {
     let mut libs = Libraries::default();
     let mut packs: Vec<PathBuf> = Vec::new();
-    // Wine prefixes are hidden folders (.wine, .wine-fl …), so read home directly.
-    let prefixes: Vec<PathBuf> = std::fs::read_dir(home)
-        .map(|rd| {
-            rd.flatten()
-                .map(|e| e.path())
-                .filter(|p| {
-                    p.is_dir()
-                        && p.file_name()
-                            .is_some_and(|n| n.to_string_lossy().starts_with(".wine"))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    for prefix in prefixes {
-        let il = prefix.join("drive_c/Program Files/Image-Line");
+    for il in crate::platform::fl_image_line_roots(home) {
         for fl in children(&il).into_iter().filter(|p| {
             p.file_name()
                 .is_some_and(|n| n.to_string_lossy().starts_with("FL Studio"))
@@ -100,16 +87,9 @@ pub fn find(home: &Path, mounts: &[PathBuf]) -> Libraries {
     libs
 }
 
-/// Mount points worth a look: /mnt/*, /media/$USER/*, /run/media/$USER/*, the music folder.
+/// Mount points / library folders worth a look on this OS.
 pub fn default_mounts(home: &Path) -> Vec<PathBuf> {
-    let user = std::env::var("USER").unwrap_or_default();
-    let mut v = children(Path::new("/mnt"));
-    v.extend(children(&Path::new("/media").join(&user)));
-    v.extend(children(&Path::new("/run/media").join(&user)));
-    v.extend(dirs::audio_dir());
-    v.push(home.join("Music"));
-    v.dedup();
-    v
+    crate::platform::default_mounts(home)
 }
 
 /// What a new project loads from the user's libraries: (channel name,
