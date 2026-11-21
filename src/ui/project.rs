@@ -201,102 +201,137 @@ impl App {
             .default_pos(default_pos)
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-                let win_w = ui.available_width().max(320.0);
 
-                // Compact project header: elided title + optional filename + live stats.
-                let heading = if self.song.info.title.trim().is_empty() {
-                    project_stem.as_str()
-                } else {
-                    self.song.info.title.trim()
-                };
-                ui.allocate_ui_with_layout(
-                    vec2(win_w, 22.0),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        let file_shown = file_label.as_deref().map(|f| {
-                            kit::elide(ui.painter(), f, t::mono(12.0), (win_w * 0.38).max(80.0))
-                        });
-                        let file_w = file_shown.as_deref().map_or(0.0, |f| {
-                            kit::text_width(ui.painter(), f, t::mono(12.0)) + 12.0
-                        });
-                        let title_shown = kit::elide(
-                            ui.painter(),
-                            heading,
-                            t::semibold(16.0),
-                            (win_w - file_w).max(120.0),
-                        );
-                        ui.label(
-                            RichText::new(title_shown)
-                                .font(t::semibold(16.0))
-                                .color(t::text()),
-                        );
-                        if let Some(file) = file_shown {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.label(
-                                        RichText::new(file).font(t::mono(12.0)).color(t::faint()),
+                // Pinned header: elided title + optional filename + live stats + tabs.
+                egui::TopBottomPanel::top("project-info-header")
+                    .frame(egui::Frame::NONE)
+                    .show_separator_line(false)
+                    .show_inside(ui, |ui| {
+                        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                        let win_w = ui.available_width().max(320.0);
+
+                        let heading = if self.song.info.title.trim().is_empty() {
+                            project_stem.as_str()
+                        } else {
+                            self.song.info.title.trim()
+                        };
+                        ui.allocate_ui_with_layout(
+                            vec2(win_w, 22.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                let file_shown = file_label.as_deref().map(|f| {
+                                    kit::elide(
+                                        ui.painter(),
+                                        f,
+                                        t::mono(12.0),
+                                        (win_w * 0.38).max(80.0),
+                                    )
+                                });
+                                let file_w = file_shown.as_deref().map_or(0.0, |f| {
+                                    kit::text_width(ui.painter(), f, t::mono(12.0)) + 12.0
+                                });
+                                let title_shown = kit::elide(
+                                    ui.painter(),
+                                    heading,
+                                    t::semibold(16.0),
+                                    (win_w - file_w).max(120.0),
+                                );
+                                ui.label(
+                                    RichText::new(title_shown)
+                                        .font(t::semibold(16.0))
+                                        .color(t::text()),
+                                );
+                                if let Some(file) = file_shown {
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new(file)
+                                                    .font(t::mono(12.0))
+                                                    .color(t::faint()),
+                                            );
+                                        },
                                     );
-                                },
-                            );
+                                }
+                            },
+                        );
+
+                        ui.allocate_ui_with_layout(
+                            vec2(win_w, 0.0),
+                            egui::Layout::top_down(egui::Align::LEFT),
+                            |ui| {
+                                ui.set_max_width(win_w);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.spacing_mut().item_spacing = vec2(6.0, 2.0);
+                                    let summary = format!(
+                                        "{} · {} · {} · {} · {}",
+                                        tr.info_stat_channels.fmt(tr.lang, stats.channels),
+                                        tr.info_stat_patterns.fmt(tr.lang, stats.patterns),
+                                        tr.info_stat_clips.fmt(tr.lang, stats.clips),
+                                        tr.info_stat_bars.fmt(tr.lang, stats.bars as usize),
+                                        format_duration(stats.seconds),
+                                    );
+                                    ui.label(
+                                        RichText::new(summary).font(t::sans(12.0)).color(t::muted()),
+                                    );
+                                    if stats.plugins > 0 {
+                                        let p_text = if stats.missing_plugins > 0 {
+                                            format!(
+                                                "· {} ({})",
+                                                tr.info_stat_plugins.fmt(tr.lang, stats.plugins),
+                                                tr.info_stat_missing_plugins
+                                                    .fmt(tr.lang, stats.missing_plugins),
+                                            )
+                                        } else {
+                                            format!(
+                                                "· {}",
+                                                tr.info_stat_plugins.fmt(tr.lang, stats.plugins)
+                                            )
+                                        };
+                                        ui.label(
+                                            RichText::new(p_text).font(t::sans(12.0)).color(
+                                                if stats.missing_plugins > 0 {
+                                                    t::wait()
+                                                } else {
+                                                    t::muted()
+                                                },
+                                            ),
+                                        );
+                                    }
+                                });
+                            },
+                        );
+
+                        ui.add_space(2.0);
+                        let tabs = [tr.info_tab_details, tr.info_tab_notes, tr.info_tab_settings];
+                        let (picked, _) = kit::chips(ui, "project-info-tabs", &tabs, tab, None);
+                        if let Some(i) = picked {
+                            tab = i;
                         }
-                    },
-                );
+                        ui.separator();
+                    });
 
-                ui.allocate_ui_with_layout(
-                    vec2(win_w, 0.0),
-                    egui::Layout::top_down(egui::Align::LEFT),
-                    |ui| {
-                        ui.set_max_width(win_w);
-                        ui.horizontal_wrapped(|ui| {
-                            ui.spacing_mut().item_spacing = vec2(6.0, 2.0);
-                            let summary = format!(
-                                "{} · {} · {} · {} · {}",
-                                tr.info_stat_channels.fmt(tr.lang, stats.channels),
-                                tr.info_stat_patterns.fmt(tr.lang, stats.patterns),
-                                tr.info_stat_clips.fmt(tr.lang, stats.clips),
-                                tr.info_stat_bars.fmt(tr.lang, stats.bars as usize),
-                                format_duration(stats.seconds),
-                            );
-                            ui.label(RichText::new(summary).font(t::sans(12.0)).color(t::muted()));
-                            if stats.plugins > 0 {
-                                let p_text = if stats.missing_plugins > 0 {
-                                    format!(
-                                        "· {} ({})",
-                                        tr.info_stat_plugins.fmt(tr.lang, stats.plugins),
-                                        tr.info_stat_missing_plugins
-                                            .fmt(tr.lang, stats.missing_plugins),
-                                    )
-                                } else {
-                                    format!(
-                                        "· {}",
-                                        tr.info_stat_plugins.fmt(tr.lang, stats.plugins)
-                                    )
-                                };
-                                ui.label(RichText::new(p_text).font(t::sans(12.0)).color(
-                                    if stats.missing_plugins > 0 {
-                                        t::wait()
-                                    } else {
-                                        t::muted()
-                                    },
-                                ));
-                            }
-                        });
-                    },
-                );
-
-                ui.add_space(2.0);
-                let tabs = [tr.info_tab_details, tr.info_tab_notes, tr.info_tab_settings];
-                let (picked, _) = kit::chips(ui, "project-info-tabs", &tabs, tab, None);
-                if let Some(i) = picked {
-                    tab = i;
-                }
-                ui.separator();
-
-                // Reserve exact footer height (separator + spacing + 26px Close button)
-                // so the ScrollArea never pushes the resizable window taller.
-                const FOOTER_RESERVE: f32 = 46.0;
-                let body_h = (ui.available_height() - FOOTER_RESERVE).max(120.0);
+                // Pinned footer: Close button stays anchored at the bottom without
+                // guessing a reserve height (which caused height drift on width drag).
+                egui::TopBottomPanel::bottom("project-info-footer")
+                    .frame(egui::Frame::NONE)
+                    .show_separator_line(false)
+                    .show_inside(ui, |ui| {
+                        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                        let win_w = ui.available_width().max(320.0);
+                        ui.separator();
+                        ui.allocate_ui_with_layout(
+                            vec2(win_w, kit::TOOL_H),
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                if kit::tool_button(ui, tr.info_close, kit::Kind::Normal, true)
+                                    .clicked()
+                                {
+                                    close_now = true;
+                                }
+                            },
+                        );
+                    });
 
                 let mut info = self.song.info.clone();
                 let mut info_text_changed = false;
@@ -304,13 +339,14 @@ impl App {
                 let mut info_discrete_changed = false;
                 let mut edit_responses: Vec<egui::Response> = Vec::new();
 
-                ui.allocate_ui_with_layout(
-                    vec2(win_w, body_h),
-                    egui::Layout::top_down(egui::Align::LEFT),
-                    |ui| {
+                // Body fills the exact remaining rect between header and footer.
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show_inside(ui, |ui| {
+                        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                        let body_h = ui.available_height();
                         egui::ScrollArea::vertical()
                             .id_salt(("project-info-scroll", tab))
-                            .max_height(body_h)
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
                                 let w = (ui.available_width() - 8.0).max(240.0);
@@ -1024,8 +1060,7 @@ impl App {
                                     }
                                 }
                             });
-                    },
-                );
+                    });
 
                 if info_text_changed || info_discrete_changed {
                     if info_discrete_changed || info_first_edit {
@@ -1036,16 +1071,6 @@ impl App {
                 for r in &edit_responses {
                     kit::end_edit(ui, r);
                 }
-                ui.separator();
-                ui.allocate_ui_with_layout(
-                    vec2(win_w, kit::TOOL_H),
-                    egui::Layout::right_to_left(egui::Align::Center),
-                    |ui| {
-                        if kit::tool_button(ui, tr.info_close, kit::Kind::Normal, true).clicked() {
-                            close_now = true;
-                        }
-                    },
-                );
             });
 
         if !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -1725,5 +1750,129 @@ mod tests {
                 end
             );
         }
+    }
+
+    #[test]
+    fn project_info_window_edge_drag_keeps_other_axis_constant() {
+        let song = keyframexl::demo::build(None);
+        let mut app = App::with_song(song, None);
+        let ctx = egui::Context::default();
+        ctx.set_fonts(t::font_definitions(None));
+        t::apply(&ctx, t::Theme::Dark);
+        app.open_info(&ctx);
+
+        let win_id = egui::Id::new("project-info-window");
+        let mut time = 0.0;
+        let mut step = |events: Vec<egui::Event>| -> egui::Rect {
+            time += 1.0 / 60.0;
+            let raw = egui::RawInput {
+                time: Some(time),
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::pos2(0.0, 0.0),
+                    vec2(1366.0, 768.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run(raw, |ctx| {
+                app.info_window(ctx);
+            });
+            ctx.memory(|m| m.area_rect(win_id))
+                .expect("project-info-window rect should exist")
+        };
+
+        // Settle initial layout.
+        let mut rect = egui::Rect::NOTHING;
+        for _ in 0..4 {
+            rect = step(vec![]);
+        }
+        let init_h = rect.height();
+        let init_w = rect.width();
+
+        // Drag the right edge wider, then narrower: height must stay constant.
+        let start = egui::pos2(rect.right(), rect.center().y);
+        step(vec![egui::Event::PointerMoved(start)]);
+        step(vec![egui::Event::PointerButton {
+            pos: start,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        for i in 1..=12 {
+            let p = egui::pos2(start.x + i as f32 * 10.0, start.y);
+            rect = step(vec![egui::Event::PointerMoved(p)]);
+            assert!(
+                (rect.height() - init_h).abs() <= 0.5,
+                "height drifted during right-edge widen step {i}: init={init_h}, now={}",
+                rect.height()
+            );
+        }
+        let widened_w = rect.width();
+        assert!(
+            widened_w > init_w + 80.0,
+            "right-edge drag should widen window: init={init_w}, widened={widened_w}"
+        );
+        for i in 1..=8 {
+            let p = egui::pos2(start.x + 120.0 - i as f32 * 10.0, start.y);
+            rect = step(vec![egui::Event::PointerMoved(p)]);
+            assert!(
+                (rect.height() - init_h).abs() <= 0.5,
+                "height drifted during right-edge narrow step {i}: init={init_h}, now={}",
+                rect.height()
+            );
+        }
+        let release_p = egui::pos2(start.x + 40.0, start.y);
+        rect = step(vec![egui::Event::PointerButton {
+            pos: release_p,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        for _ in 0..3 {
+            rect = step(vec![]);
+        }
+        assert!(
+            (rect.height() - init_h).abs() <= 0.5,
+            "height drifted after right-edge drag release: init={init_h}, now={}",
+            rect.height()
+        );
+
+        // Drag the bottom edge shorter: width must stay constant.
+        let pre_v_w = rect.width();
+        let pre_v_h = rect.height();
+        let b_start = egui::pos2(rect.center().x, rect.bottom());
+        step(vec![egui::Event::PointerMoved(b_start)]);
+        step(vec![egui::Event::PointerButton {
+            pos: b_start,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        for i in 1..=10 {
+            let p = egui::pos2(b_start.x, b_start.y - i as f32 * 8.0);
+            rect = step(vec![egui::Event::PointerMoved(p)]);
+            assert!(
+                (rect.width() - pre_v_w).abs() <= 0.5,
+                "width drifted during bottom-edge drag step {i}: pre={pre_v_w}, now={}",
+                rect.width()
+            );
+        }
+        assert!(
+            rect.height() < pre_v_h - 40.0,
+            "bottom-edge drag should shorten window: pre={pre_v_h}, now={}",
+            rect.height()
+        );
+        let b_end = egui::pos2(b_start.x, b_start.y - 80.0);
+        rect = step(vec![egui::Event::PointerButton {
+            pos: b_end,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        assert!(
+            (rect.width() - pre_v_w).abs() <= 0.5,
+            "width drifted after bottom-edge release: pre={pre_v_w}, now={}",
+            rect.width()
+        );
     }
 }
