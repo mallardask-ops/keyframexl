@@ -247,6 +247,9 @@ pub fn export_bundle(
     zip.finish().map_err(|e| e.to_string())?;
     temp.as_file().sync_all().map_err(|e| e.to_string())?;
     temp.persist(dest_zip).map_err(|e| e.to_string())?;
+    // On Unix, fsyncing the parent directory commits the rename entry.
+    // On Windows, opening a directory with File::open fails with ERROR_ACCESS_DENIED.
+    #[cfg(unix)]
     std::fs::File::open(parent)
         .and_then(|dir| dir.sync_all())
         .map_err(|e| e.to_string())?;
