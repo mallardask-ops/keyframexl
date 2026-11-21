@@ -332,16 +332,10 @@ pub const UK: Strings = Strings {
 
     // Settings
     settings_title: "Налаштування",
-    tab_audio: "Аудіо",
-    tab_midi: "MIDI",
-    tab_plugins: "Плагіни",
-    tab_general: "Загальні",
     setting_language: "Мова",
     setting_language_hint: "Мова інтерфейсу. Застосовується одразу.",
     setting_show_welcome: "Показувати екран вітання під час запуску",
     setting_show_welcome_hint: "Відкривати екран вітання з останніми проєктами та шаблонами під час запуску KeyFrameXL.",
-    setting_check_updates: "Перевіряти оновлення під час запуску",
-    setting_check_updates_hint: "Шукати новішу версію на GitHub під час запуску KeyFrameXL.",
 
     // Welcome screen
     welcome_window_title: "Ласкаво просимо до KeyFrameXL",
@@ -416,7 +410,6 @@ pub const UK: Strings = Strings {
     update_open_release: "Відкрити сторінку релізу",
     update_skip_version: "Пропустити цю версію",
     update_check_again: "Перевірити ще раз",
-    update_close: "Закрити",
     update_later: "Пізніше",
     update_source_build: "Ця копія зібрана з вихідного коду, тому оновлюється через git:",
     update_copy_command: "Скопіювати команду оновлення",
@@ -2596,4 +2589,12 @@ pub const UK: Strings = Strings {
     upd_browser_err: "Не вдалося відкрити браузер: {err}",
     upd_copied: "Скопійовано: {cmd}",
     upd_skipped: "Оновлення v{ver} пропущено.",
+
+    // File browser placeholders and audio input errors
+    fb_reading: "Читання…",
+    rec_no_input: "Немає аудіовходу",
+
+    //
+    fb_unreadable: "Не читається: {err}",
+    rec_no_float: "{dev} не дає вхід із плаваючою комою",
 };

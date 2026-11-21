@@ -361,7 +361,11 @@ impl Files {
     /// Visible rows: (depth, entry, open). A filter shows matching files
     /// under every root, flat, in sort order; the first search starts a
     /// background scan of all subfolders.
-    pub(crate) fn rows(&mut self, filter: &str) -> Vec<(usize, Entry, bool)> {
+    pub(crate) fn rows(
+        &mut self,
+        filter: &str,
+        tr: &crate::i18n::Strings,
+    ) -> Vec<(usize, Entry, bool)> {
         let mut out = Vec::new();
         let roots = self.roots.clone();
         if !filter.is_empty() {
@@ -392,13 +396,19 @@ impl Files {
             let open = self.open.contains(&r);
             out.push((0, Entry::bare(r.clone(), name, true), open));
             if open {
-                self.walk(&r, 1, &mut out);
+                self.walk(&r, 1, &mut out, tr);
             }
         }
         out
     }
 
-    fn walk(&mut self, dir: &Path, depth: usize, out: &mut Vec<(usize, Entry, bool)>) {
+    fn walk(
+        &mut self,
+        dir: &Path,
+        depth: usize,
+        out: &mut Vec<(usize, Entry, bool)>,
+        tr: &crate::i18n::Strings,
+    ) {
         let entries = match self.listing(dir) {
             Some(Ok(v)) => v.clone(),
             Some(Err(e)) => {
@@ -406,7 +416,7 @@ impl Files {
                     depth,
                     Entry::placeholder(
                         dir.join("?"),
-                        format!("Unreadable: {e}"),
+                        crate::i18n::fill(tr.fb_unreadable, &[("err", e)]),
                         EntryKind::Unreadable,
                     ),
                     false,
@@ -416,7 +426,7 @@ impl Files {
             None => {
                 out.push((
                     depth,
-                    Entry::placeholder(dir.join("…"), "Reading…".into(), EntryKind::Reading),
+                    Entry::placeholder(dir.join("…"), tr.fb_reading.into(), EntryKind::Reading),
                     false,
                 ));
                 return;
@@ -426,7 +436,7 @@ impl Files {
             let open = e.dir && self.open.contains(&e.path);
             out.push((depth, e.clone(), open));
             if open && depth < 24 {
-                self.walk(&e.path, depth + 1, out);
+                self.walk(&e.path, depth + 1, out, tr);
             }
         }
     }
@@ -483,7 +493,7 @@ impl App {
             }
         });
         ui.add_space(4.0);
-        let rows = self.files.rows(filter);
+        let rows = self.files.rows(filter, tr);
         if !filter.is_empty() {
             let (dirs, done) = self.files.index_state();
             let text = if done {
@@ -898,11 +908,15 @@ mod tests {
         files.roots = vec![dir.path().to_path_buf()];
         files.open.clear();
         assert!(
-            files.rows("kick").is_empty() || !files.index_state().1,
+            files.rows("kick", &crate::i18n::EN).is_empty() || !files.index_state().1,
             "the first search starts a scan"
         );
         files.wait_index();
-        let hits: Vec<String> = files.rows("kick").into_iter().map(|r| r.1.name).collect();
+        let hits: Vec<String> = files
+            .rows("kick", &crate::i18n::EN)
+            .into_iter()
+            .map(|r| r.1.name)
+            .collect();
         assert_eq!(hits, ["Kick Punchy.wav", "kick top.wav"]);
         assert_eq!(files.index_state(), (4, true), "every folder read once");
     }

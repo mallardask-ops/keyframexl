@@ -332,16 +332,10 @@ pub const EN: Strings = Strings {
 
     // Settings
     settings_title: "Settings",
-    tab_audio: "Audio",
-    tab_midi: "MIDI",
-    tab_plugins: "Plugins",
-    tab_general: "General",
     setting_language: "Language",
     setting_language_hint: "Interface language. Applies immediately.",
     setting_show_welcome: "Show welcome screen on startup",
     setting_show_welcome_hint: "Open the welcome screen with recent projects and templates when KeyFrameXL starts.",
-    setting_check_updates: "Check for updates on startup",
-    setting_check_updates_hint: "Look for a newer release on GitHub when KeyFrameXL starts.",
 
     // Welcome screen
     welcome_window_title: "Welcome to KeyFrameXL",
@@ -416,7 +410,6 @@ pub const EN: Strings = Strings {
     update_open_release: "Open release page",
     update_skip_version: "Skip this version",
     update_check_again: "Check again",
-    update_close: "Close",
     update_later: "Later",
     update_source_build: "This copy is built from source, so it updates with git:",
     update_copy_command: "Copy update command",
@@ -2447,4 +2440,12 @@ pub const EN: Strings = Strings {
     upd_browser_err: "Could not open browser: {err}",
     upd_copied: "Copied: {cmd}",
     upd_skipped: "Skipped update v{ver}.",
+
+    // File browser placeholders and audio input errors
+    fb_reading: "Reading…",
+    rec_no_input: "No audio input",
+
+    //
+    fb_unreadable: "Unreadable: {err}",
+    rec_no_float: "{dev} offers no float input",
 };

@@ -5,6 +5,8 @@
 
 mod en;
 mod plural;
+#[cfg(test)]
+mod scan_tests;
 mod uk;
 
 pub use en::EN;
@@ -221,10 +223,9 @@ define_strings! {
         drop_dwp_into, drop_sample_into, drop_open_project, drop_import_flp,
         drop_midi_notes, drop_any_file,
         // Settings
-        settings_title, tab_audio, tab_midi, tab_plugins, tab_general, setting_language,
+        settings_title, setting_language,
         setting_language_hint, setting_show_welcome, setting_show_welcome_hint,
-        setting_check_updates, setting_check_updates_hint,
-        // Welcome screen
+                // Welcome screen
         welcome_window_title, welcome_subtitle, welcome_close_hint,
         welcome_update_badge, welcome_update_hint,
         welcome_recent_heading, welcome_recent_empty, welcome_recent_missing,
@@ -248,7 +249,7 @@ define_strings! {
         update_title, update_checking, update_up_to_date, update_available, update_install_now,
         update_downloading, update_verifying, update_installing, update_ready_restart,
         update_restart_now, update_restart_save_hint, update_download_linux, update_open_release,
-        update_skip_version, update_check_again, update_close, update_later, update_source_build,
+        update_skip_version, update_check_again, update_later, update_source_build,
         update_copy_command, update_failed, update_nightly, update_nightly_hint,
         // Channel rack
         rack_add_channel, rack_add_channel_tip, rack_unmute_all, rack_clear_pattern,
@@ -609,6 +610,10 @@ define_strings! {
         midi_no_notes,
         // Updater window
         upd_idle, upd_check_daily, upd_opened_page, upd_install_tip, upd_browser_err, upd_copied, upd_skipped,
+        // File browser placeholders and audio input errors
+        fb_reading, rec_no_input,
+        //
+        fb_unreadable, rec_no_float,
     },
     plurals: {
         clips_deleted,

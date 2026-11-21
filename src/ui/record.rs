@@ -57,6 +57,7 @@ impl Default for Recorder {
 /// Open the input device for recording: frames go into the returned ring.
 fn open_input(
     name: Option<&str>,
+    tr: &'static crate::i18n::Strings,
 ) -> Result<(cpal::Stream, rtrb::Consumer<[f32; 2]>, u32, String), String> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     let host = cpal::default_host();
@@ -67,7 +68,7 @@ fn open_input(
     });
     let device = match named {
         Some(d) => d,
-        None => host.default_input_device().ok_or("No audio input")?,
+        None => host.default_input_device().ok_or(tr.rec_no_input)?,
     };
     let dev_name = device.name().unwrap_or_else(|_| "Input".into());
     let def = device.default_input_config().map_err(|e| e.to_string())?;
@@ -82,7 +83,7 @@ fn open_input(
                 && c.max_sample_rate().0 >= rate
         })
         .max_by_key(|c| c.channels())
-        .ok_or_else(|| format!("{dev_name} offers no float input"))?;
+        .ok_or_else(|| crate::i18n::fill(tr.rec_no_float, &[("dev", &dev_name)]))?;
     let config = range.with_sample_rate(cpal::SampleRate(rate)).config();
     let ch = config.channels as usize;
     let (mut tx, rx) = rtrb::RingBuffer::<[f32; 2]>::new(rate as usize * 8);
@@ -241,7 +242,7 @@ impl App {
             }
             drop(taps);
             if self.rec.input {
-                match open_input(self.settings.audio.input.as_deref()) {
+                match open_input(self.settings.audio.input.as_deref(), self.tr()) {
                     Ok((stream, rx, rate, _)) => {
                         self.rec.input_stream = Some(stream);
                         self.rec.parts.push(TakePart {
