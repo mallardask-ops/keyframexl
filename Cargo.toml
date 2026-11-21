@@ -30,7 +30,6 @@ midly = "0.5"
 flacenc = "0.5"
 vorbis_rs = "0.5"
 midir = "0.11"
-vst3-host = { version = "0.11.1", path = "vendor/vst3-host", default-features = false }
 base64 = "0.22"
 raw-window-handle = "0.6"
 rsworld-sys = "0.1.0"
@@ -46,6 +45,7 @@ eframe = { version = "0.31", default-features = false, features = ["wayland", "x
 # PipeWire as its own host (a node in the graph), ALSA as the fallback;
 # realtime-dbus asks rtkit for the audio thread's priority.
 cpal = { version = "0.18.2", features = ["pipewire", "realtime-dbus"] }
+vst3-host = { version = "0.11.1", path = "vendor/vst3-host", default-features = false }
 xcb = { version = "1", features = ["shape", "xtest"] }
 
 [build-dependencies]

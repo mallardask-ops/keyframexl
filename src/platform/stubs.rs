@@ -154,8 +154,8 @@ pub mod flp_freeze {
     pub fn freeze(
         _bytes: &[u8],
         _name: &str,
-        _channels: &[u32],
-        _say: &impl Fn(String),
+        _channels: &[(u32, String)],
+        _say: &dyn Fn(String),
     ) -> Result<Vec<(u32, PathBuf)>, String> {
         Err("FL freeze via Wine is only available on Linux".into())
     }
