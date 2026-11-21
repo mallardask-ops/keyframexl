@@ -465,13 +465,13 @@ impl App {
         });
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            let (r, _) = ui.allocate_exact_size(vec2(36.0, kit::TOOL_H), Sense::hover());
-            kit::caps(
-                ui.painter(),
-                pos2(r.left() + 2.0, r.center().y),
-                Align2::LEFT_CENTER,
-                tr.fb_sort_caps,
-                11.0,
+            // The caption is as wide as its translation ("sort" / "сортування").
+            let g = kit::caps_galley(ui.painter(), tr.fb_sort_caps, 11.0, t::faint());
+            let (r, _) =
+                ui.allocate_exact_size(vec2(g.size().x + 6.0, kit::TOOL_H), Sense::hover());
+            ui.painter().galley(
+                pos2(r.left() + 2.0, r.center().y - g.size().y / 2.0),
+                g,
                 t::faint(),
             );
             let mut pick = None;
