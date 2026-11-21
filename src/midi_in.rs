@@ -47,10 +47,13 @@ pub enum Event {
     ClockTempo(f64),
 }
 
-/// One message from a port.
+/// One message from a port, with its driver microsecond timestamp and callback
+/// arrival instant for low-jitter timing (e.g. MIDI tap tempo).
 #[derive(Clone, Debug)]
 pub struct Incoming {
     pub port: String,
+    pub stamp_us: u64,
+    pub received_at: std::time::Instant,
     pub event: Event,
 }
 
@@ -462,9 +465,12 @@ impl MidiIn {
                 &port,
                 "KeyFrameXL input",
                 move |stamp, bytes, _| {
+                    let received_at = std::time::Instant::now();
                     if let Some(event) = shared.handle_at(stamp, bytes) {
                         let _ = tx.send(Incoming {
                             port: port_name.clone(),
+                            stamp_us: stamp,
+                            received_at,
                             event,
                         });
                         if let Ok(r) = shared.route.lock()

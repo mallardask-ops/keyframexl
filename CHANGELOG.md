@@ -30,6 +30,11 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
   dedicated Notes tab, and project musical settings (tempo, swing, time
   signature, musical key synced with the Piano roll, and Forge sound style).
 
+- Tap tempo is a window (*Tools → Tap tempo*, **Tap** on the deck): tap
+  with the mouse, `Space`/`Enter`/`T`, or any MIDI note or sustain pedal,
+  timed by the device clock. Shows the tempo and the spread of recent taps,
+  averages 4/8/16 taps, and sets the project tempo as one undo step.
+
 ### Content
 - **Built-in drum kits.** KFX Core (17 808/909-style sounds) and KFX Chip
   (8 console sounds), synthesised by Forge from recipes: no sample files,

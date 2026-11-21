@@ -223,6 +223,7 @@ pub mod step_ops;
 pub mod stretch;
 pub mod synth;
 mod synth_presets;
+pub mod tap_tempo;
 pub mod tempo;
 pub mod version;
 pub mod vocal;

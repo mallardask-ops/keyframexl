@@ -202,7 +202,7 @@ define_strings! {
         status_tempo_set, status_tempo_range_err, status_tempo_event_set,
         status_playhead_at, status_start_cancelled, status_waiting_input,
         status_count_in_rec, status_count_in_play, status_rec_from_first_note,
-        status_tap_progress, status_tempo_from_taps,
+        status_tempo_from_taps,
         dlg_filter_kfxl, status_saved, status_not_saved, status_new_project,
         dlg_filter_bundle, status_bundled, status_bundle_export_failed,
         status_bundle_unpacked, status_bundle_open_failed,
@@ -642,6 +642,8 @@ define_strings! {
         imp_dest_flp, imp_dest_bundle, imp_dest_midi, imp_dest_new_sampler,
         imp_dest_selected_sampler, imp_file_unavailable, imp_supported_hint,
         imp_action, imp_filter_all, imp_filter_audio, imp_filter_project, imp_unsupported_err,
+        // Tap tempo window
+        tap_pad_hint, tap_pad_empty, tap_taps, tap_inputs, tap_average, tap_average_tip, tap_rounding, tap_round_whole, tap_auto_apply, tap_keys, tap_keys_tip, tap_midi, tap_midi_tip, tap_apply, tap_reset, tap_project_tempo,
     },
     plurals: {
         clips_deleted,
