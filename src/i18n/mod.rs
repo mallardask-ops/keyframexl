@@ -577,6 +577,20 @@ define_strings! {
         forge_flt_off, forge_flt_lp, forge_flt_hp, forge_flt_bp,
         // Plugin wrapper and plugin settings
         plg_opening_fl, plg_fl_output_taken, plg_fl_output_invalid, plg_fl_no_state, plg_page_plugin, plg_page_params, plg_page_settings, plg_crashed, plg_failed, plg_reload, plg_save_fx_preset, plg_load_fx_preset, plg_piano_roll_f7, plg_close_separate, plg_editor_separate, plg_outputs_hint, plg_outputs, plg_map_to_inserts, plg_map_to_inserts_tip, plg_unroute, plg_unroute_tip, plg_with_1_2, plg_route_each_pair, plg_card_channel, plg_mixer_insert, plg_mixer_insert_hint, plg_vol_pan, plg_k_volume, plg_k_volume_hint, plg_k_pan, plg_k_pan_hint, plg_stuck_notes, plg_stuck_notes_hint, plg_notes_off, plg_card_mixer_slot, plg_place, plg_on, plg_on_hint, plg_mix, plg_mix_hint, plg_mix_knob_hint, plg_card_processing, plg_process, plg_process_bridged, plg_process_inside, plg_latency, plg_latency_none, plg_change_in_settings, plg_card_state, plg_file, plg_saved_state, plg_saved_state_hint, plg_none_yet, plg_reload_tip, plg_reset_defaults, plg_reset_defaults_tip, plg_not_loaded_dot, plg_flex_standalone, plg_no_editor, plg_wayland_note, plg_hide_editor, plg_show_editor, plg_filter_params, plg_off, plg_st_not_loaded, plg_st_loading, plg_st_editor_open, plg_st_ready, plg_card_safety, plg_bridged, plg_bridged_hint, plg_search, plg_kind_all, plg_kind_instruments, plg_kind_effects, plg_kind_problems, plg_scanning, plg_rescan_all, plg_col_name, plg_col_type, plg_col_vendor, plg_col_status, plg_list_empty, plg_nothing_matches, plg_st_hidden, plg_st_hangs, plg_st_crashes, plg_instrument, plg_effect, plg_card_selected, plg_unknown_vendor, plg_via_yabridge, plg_no_own_editor, plg_add_to_rack, plg_show_in_folder, plg_probing, plg_rescan_this, plg_rescan_this_tip, plg_show_in_lists, plg_hide_from_lists, plg_hide_tip, plg_failed_test, plg_try_rack, plg_missing_hint, plg_card_windows, plg_system_wine, plg_wine_hint, plg_wine_from_path, plg_other, plg_other_tip, plg_no_wine, plg_dxvk_hint, plg_stop_it, plg_stop_it_tip, plg_wine_stopped, plg_card_folders, plg_missing, plg_add_folder, plg_paths_note, plg_no_presets, plg_preset, plg_fl_live_link, plg_link_not_running, plg_link_starting, plg_link_connected, plg_link_check, plg_link_error, plg_link_about, plg_link_not_measured, plg_link_chan_off, plg_link_no_sound, plg_link_sound_in, plg_link_running, plg_link_not_running_lc, plg_link_notes, plg_link_port_ready, plg_link_port_missing, plg_link_fl_listens, plg_link_input_open, plg_link_restart_fl, plg_link_sound, plg_link_plays_here, plg_link_no_sink, plg_link_flow, plg_link_delay, plg_link_gaps, plg_open_fl, plg_starting_fl, plg_reconnect, plg_reconnect_tip, plg_reconnecting, plg_flex_ready, plg_flex_needs, plg_yes, plg_no, plg_fl_not_found, plg_system_wine_missing, plg_fl_cert_note, plg_flex_not_vsti, plg_link_howto, plg_link_no_export, plg_reloading, plg_checking, plg_scan_done, plg_fl_connected, plg_audio_busy, plg_reload_err_tip, plg_outputs_summary, plg_mapped, plg_place_slot, plg_latency_buffer, plg_state_bytes, plg_reset_done, plg_n_params, plg_no_editor_window, plg_link_exists, plg_loading_name, plg_counts, plg_add_to, plg_try_add_to, plg_other_wine, plg_stop_wine_err, plg_no_saved_presets, plg_saved_presets, plg_link_delay_val, plg_link_last_sound, plg_link_gaps_val, plg_flex_facts,
+        // Project info, unsaved changes, autosave
+        proj_recovered, proj_info_title, proj_title, proj_author, proj_author_hint, proj_genre, proj_genre_hint, proj_comments, proj_comments_hint, proj_mp3_tags, proj_before_new, proj_before_open, proj_before_quit, proj_unsaved_title, proj_dont_save, proj_not_saved, proj_just_now, proj_recover_autosave, proj_save_before, proj_recover_autosave_when,
+        // Audio export
+        exp_audio_filter, exp_waiting_fl, exp_rendering, exp_clipped, exp_cancelled, exp_title, exp_sec_file, exp_change, exp_sec_source, exp_empty_playlist, exp_sec_tail, exp_sec_formats, exp_off, exp_needs_lame, exp_tags_none, exp_tag_title, exp_tag_author, exp_tag_genre, exp_sec_options, exp_normalize, exp_dither, exp_dither_only16, exp_split_tip, exp_start, exp_choose_format, exp_tail_leave, exp_tail_cut, exp_tail_wrap, exp_tail_leave_hint, exp_tail_cut_hint, exp_tail_wrap_hint, exp_rendering_pct, exp_writing, exp_done, exp_in_folder, exp_src_pattern, exp_src_song, exp_src_selection, exp_tags, exp_size,
+        // Automation labels and Multilink
+        auto_effect, auto_parameter, auto_plugin, auto_ml_armed, auto_ml_cancelled, auto_ml_tweak_first, auto_switch_song, auto_l_volume, auto_l_pan, auto_l_fx_mix, auto_l_fx_on, auto_l_send, auto_l_fx_param, auto_l_plugin_param, auto_copied, auto_pasted, auto_reset, auto_ml_complete, auto_ml_linked_next, auto_ml_queued, auto_rec_one, auto_rec_done, auto_clip_created,
+        // MIDI import and export
+        midi_limiter_added, midi_cannot_read, midi_cannot_import, midi_exported_song, midi_exported_pattern, midi_not_written,
+        // Recording
+        rec_press_play, rec_turn_on, rec_midi_note, rec_auto_note, rec_auto_on, rec_auto_off, rec_default_input, rec_input_disarmed, rec_nothing, rec_disarmed, rec_max_taps, rec_armed, rec_off, rec_on_none, rec_input_armed, rec_input_err, rec_saved, rec_take_err,
+        // Tempo lane
+        tl_open, tl_fold, tl_caps, tl_moved, tl_ramps, tl_jumps, tl_between, tl_first_stays, tl_deleted, tl_reset, tl_half, tl_double, tl_scaled, tl_at, tl_point_at, tl_cleared,
+        // Presets
+        pk_channel, pk_mixer, pk_fx, pk_synth, pre_saved, pre_save_err, pre_insert_n, pre_synth_on, pre_synth_added, pre_not_preset, pre_ch_loaded, pre_ch_added, pre_mixer_on, pre_fx_on,
     },
     plurals: {
         clips_deleted,
@@ -636,6 +650,18 @@ define_strings! {
         vocal_lyrics_set,
         tide_unison_voices,
         forge_exported_files,
+        proj_min_ago,
+        proj_h_ago,
+        proj_days_ago,
+        exp_stem_files,
+        exp_split,
+        auto_ml_finished,
+        auto_rec_many,
+        midi_loading_sounds,
+        rec_on_n,
+        rec_frames_lost,
+        rec_takes,
+        lib_kit_added,
     },
 }
 
@@ -1235,6 +1261,34 @@ impl Strings {
             F::LowPass => self.forge_flt_lp,
             F::HighPass => self.forge_flt_hp,
             F::BandPass => self.forge_flt_bp,
+        }
+    }
+
+    pub fn export_tail(&self, t: keyframexl::render::Tail) -> &'static str {
+        use keyframexl::render::Tail as T;
+        match t {
+            T::Leave => self.exp_tail_leave,
+            T::Cut => self.exp_tail_cut,
+            T::Wrap => self.exp_tail_wrap,
+        }
+    }
+
+    pub fn export_tail_hint(&self, t: keyframexl::render::Tail) -> &'static str {
+        use keyframexl::render::Tail as T;
+        match t {
+            T::Leave => self.exp_tail_leave_hint,
+            T::Cut => self.exp_tail_cut_hint,
+            T::Wrap => self.exp_tail_wrap_hint,
+        }
+    }
+
+    pub fn preset_kind(&self, k: keyframexl::preset::Kind) -> &'static str {
+        use keyframexl::preset::Kind as K;
+        match k {
+            K::Channel => self.pk_channel,
+            K::Mixer => self.pk_mixer,
+            K::Fx => self.pk_fx,
+            K::Synth => self.pk_synth,
         }
     }
 }

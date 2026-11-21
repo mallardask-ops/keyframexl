@@ -3,6 +3,7 @@
 //! title on the project name.
 
 use super::{App, Tone, kit};
+use crate::i18n::fill;
 use crate::theme as t;
 use eframe::egui::{self, RichText, vec2};
 use std::path::{Path, PathBuf};
@@ -48,6 +49,7 @@ impl App {
     }
 
     fn perform(&mut self, cmd: Pending) {
+        let tr = self.tr();
         match cmd {
             Pending::New => self.new_project(),
             Pending::Open(None) => self.open(),
@@ -59,7 +61,7 @@ impl App {
                     self.saved_edits = self.edits.wrapping_sub(1);
                     self.recent.retain(|p| p != &path);
                     self.save_recent();
-                    self.say(Tone::Done, "Recovered the autosave. Save it to keep it.");
+                    self.say(Tone::Done, tr.proj_recovered);
                 }
             }
             Pending::Quit => self.quit_ok = true,
@@ -71,7 +73,7 @@ impl App {
             .as_ref()
             .and_then(|p| p.file_stem())
             .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "Untitled".into())
+            .unwrap_or_else(|| self.tr().untitled.into())
     }
 
     /// Move `path` to the top of Open recent.
@@ -140,12 +142,13 @@ impl App {
     /// Title, author, genre and comments (FL: Project info). One undo step
     /// per field edit; the export writes them into MP3 tags.
     fn info_window(&mut self, ctx: &egui::Context) {
+        let tr = self.tr();
         let id = egui::Id::new("kfxl-project-info");
         let mut open = ctx.data(|d| d.get_temp(id).unwrap_or(false));
         if !open {
             return;
         }
-        egui::Window::new("Project info")
+        egui::Window::new(tr.proj_info_title)
             .id(egui::Id::new("project-info-window"))
             .open(&mut open)
             .collapsible(false)
@@ -165,18 +168,18 @@ impl App {
                     r
                 };
                 let rs = [
-                    row(ui, "Title", &mut info.title, &self.project_name()),
-                    row(ui, "Author", &mut info.author, "Your name"),
-                    row(ui, "Genre", &mut info.genre, "House, Ambient, …"),
+                    row(ui, tr.proj_title, &mut info.title, &self.project_name()),
+                    row(ui, tr.proj_author, &mut info.author, tr.proj_author_hint),
+                    row(ui, tr.proj_genre, &mut info.genre, tr.proj_genre_hint),
                 ];
                 ui.label(
-                    RichText::new("Comments")
+                    RichText::new(tr.proj_comments)
                         .font(t::sans(12.0))
                         .color(t::faint()),
                 );
                 let c = ui.add(
                     egui::TextEdit::multiline(&mut info.comments)
-                        .hint_text("Notes for later: samples used, ideas, credits")
+                        .hint_text(tr.proj_comments_hint)
                         .char_limit(20_000)
                         .desired_rows(6)
                         .desired_width(f32::INFINITY),
@@ -197,11 +200,9 @@ impl App {
                 }
                 ui.add_space(4.0);
                 ui.label(
-                    RichText::new(
-                        "MP3 exports carry the title, author, genre and comments as tags.",
-                    )
-                    .font(t::sans(11.5))
-                    .color(t::faint()),
+                    RichText::new(tr.proj_mp3_tags)
+                        .font(t::sans(11.5))
+                        .color(t::faint()),
                 );
             });
         ctx.data_mut(|d| d.insert_temp(id, open));
@@ -247,24 +248,26 @@ impl App {
 
     /// "Save changes?" for the pending command: Save / Don't save / Cancel.
     pub(crate) fn unsaved_window(&mut self, ctx: &egui::Context) {
+        let tr = self.tr();
         let Some(cmd) = self.pending.clone() else {
             return;
         };
         let mut answer = None;
         let what = match &cmd {
-            Pending::New => "starting a new project",
-            Pending::Open(_) => "opening another project",
-            Pending::Quit => "closing",
+            Pending::New => tr.proj_before_new,
+            Pending::Open(_) => tr.proj_before_open,
+            Pending::Quit => tr.proj_before_quit,
         };
-        egui::Window::new("Unsaved changes")
+        egui::Window::new(tr.proj_unsaved_title)
+            .id(egui::Id::new("unsaved-changes-window"))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_TOP, vec2(0.0, 140.0))
             .show(ctx, |ui| {
                 ui.label(
-                    RichText::new(format!(
-                        "Save changes to {} before {what}?",
-                        self.project_name()
+                    RichText::new(fill(
+                        tr.proj_save_before,
+                        &[("name", &self.project_name()), ("what", what)],
                     ))
                     .font(t::sans(14.0))
                     .color(t::text()),
@@ -277,13 +280,13 @@ impl App {
                     )
                 });
                 ui.horizontal(|ui| {
-                    if kit::button(ui, "Save", kit::Kind::Primary, true).clicked() || enter {
+                    if kit::button(ui, tr.file_save, kit::Kind::Primary, true).clicked() || enter {
                         answer = Some(true);
                     }
-                    if kit::button(ui, "Don't save", kit::Kind::Normal, true).clicked() {
+                    if kit::button(ui, tr.proj_dont_save, kit::Kind::Normal, true).clicked() {
                         answer = Some(false);
                     }
-                    if kit::button(ui, "Cancel", kit::Kind::Normal, true).clicked() || esc {
+                    if kit::button(ui, tr.common_cancel, kit::Kind::Normal, true).clicked() || esc {
                         self.pending = None;
                         // A cancelled close is not a restart into the update either.
                         self.relaunch = None;
@@ -296,7 +299,7 @@ impl App {
                 self.save();
                 if self.dirty() {
                     // Save as… was cancelled or failed: keep the work open.
-                    self.say(Tone::Bad, "Not saved, so nothing was replaced.");
+                    self.say(Tone::Bad, tr.proj_not_saved);
                 } else {
                     self.perform(cmd);
                 }
@@ -310,19 +313,20 @@ impl App {
     }
 
     pub(crate) fn recover_item(&mut self, ui: &mut egui::Ui) {
+        let tr = self.tr();
         let path = autosave_path().filter(|p| p.exists());
         let when = path
             .as_ref()
             .and_then(|p| p.metadata().ok()?.modified().ok()?.elapsed().ok())
             .map(|d| match d.as_secs() {
-                s if s < 120 => "just now".to_string(),
-                s if s < 7200 => format!("{} min ago", s / 60),
-                s if s < 172800 => format!("{} h ago", s / 3600),
-                s => format!("{} days ago", s / 86400),
+                s if s < 120 => tr.proj_just_now.to_string(),
+                s if s < 7200 => tr.proj_min_ago.fmt(tr.lang, (s / 60) as usize),
+                s if s < 172800 => tr.proj_h_ago.fmt(tr.lang, (s / 3600) as usize),
+                s => tr.proj_days_ago.fmt(tr.lang, (s / 86400) as usize),
             });
         let label = match &when {
-            Some(w) => format!("Recover autosave ({w})"),
-            None => "Recover autosave".into(),
+            Some(w) => fill(tr.proj_recover_autosave_when, &[("when", w)]),
+            None => tr.proj_recover_autosave.into(),
         };
         let r = ui.add_enabled(
             path.is_some(),

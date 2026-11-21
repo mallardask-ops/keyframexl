@@ -4,6 +4,7 @@
 //! for melodic tracks, the default kit's samples for drums.
 
 use super::{App, Tab, Tone, library};
+use crate::i18n::fill;
 use keyframexl::midi::{self, ExportOptions, ImportOptions, MidiSource};
 use keyframexl::sequence::InstrumentKind;
 use std::path::{Path, PathBuf};
@@ -132,9 +133,21 @@ impl App {
 
     /// One undo step; sounds load in the background without extra steps.
     pub(crate) fn import_midi(&mut self, path: &Path) {
+        let tr = self.tr();
         let bytes = match std::fs::read(path) {
             Ok(b) => b,
-            Err(e) => return self.say(Tone::Bad, format!("Cannot read {}: {e}", path.display())),
+            Err(e) => {
+                return self.say(
+                    Tone::Bad,
+                    fill(
+                        self.tr().midi_cannot_read,
+                        &[
+                            ("path", &path.display().to_string()),
+                            ("err", &e.to_string()),
+                        ],
+                    ),
+                );
+            }
         };
         self.checkpoint();
         // With a drum kit on disk, channel 10 comes in as one kit channel.
@@ -147,7 +160,7 @@ impl App {
             Ok(report) => {
                 self.selected = report.pattern;
                 let limiter = if stage_import(&mut self.song, &report.channels) {
-                    " Limiter added on Master."
+                    tr.midi_limiter_added
                 } else {
                     ""
                 };
@@ -161,7 +174,16 @@ impl App {
             }
             Err(e) => {
                 self.history.pop();
-                self.say(Tone::Bad, format!("Cannot import {}: {e}", path.display()));
+                self.say(
+                    Tone::Bad,
+                    fill(
+                        tr.midi_cannot_import,
+                        &[
+                            ("path", &path.display().to_string()),
+                            ("err", &e.to_string()),
+                        ],
+                    ),
+                );
             }
         }
     }
@@ -203,7 +225,7 @@ impl App {
         }
         match n {
             0 => String::new(),
-            n => format!(" Loading sounds for {n} channel(s)…"),
+            n => self.tr().midi_loading_sounds.fmt(self.tr().lang, n),
         }
     }
 
@@ -226,6 +248,7 @@ impl App {
     }
 
     pub(crate) fn export_midi_to(&mut self, path: &Path, song_mode: bool) {
+        let tr = self.tr();
         let source = if song_mode {
             MidiSource::Song
         } else {
@@ -235,13 +258,19 @@ impl App {
         match std::fs::write(path, bytes) {
             Ok(()) => self.say(
                 Tone::Done,
-                format!(
-                    "Exported {} ({}).",
-                    path.display(),
-                    if song_mode { "song" } else { "pattern" }
+                fill(
+                    if song_mode {
+                        tr.midi_exported_song
+                    } else {
+                        tr.midi_exported_pattern
+                    },
+                    &[("path", &path.display().to_string())],
                 ),
             ),
-            Err(e) => self.say(Tone::Bad, format!("MIDI not written: {e}")),
+            Err(e) => self.say(
+                Tone::Bad,
+                fill(tr.midi_not_written, &[("err", &e.to_string())]),
+            ),
         }
     }
 }

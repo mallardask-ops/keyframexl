@@ -2,6 +2,7 @@
 //! presets): save and load dialogs, and opening a preset from the browser.
 
 use super::{App, Tone};
+use crate::i18n::fill;
 use keyframexl::preset::{self, ChannelPreset, FxPreset, Kind, MixerPreset};
 use std::path::{Path, PathBuf};
 
@@ -117,14 +118,27 @@ impl App {
     }
 
     fn report_save(&mut self, kind: Kind, path: &Path, r: Result<(), String>) {
+        let tr = self.tr();
         match r {
             Ok(()) => self.say(
                 Tone::Done,
-                format!("{} saved: {}", kind.label(), path.display()),
+                fill(
+                    tr.pre_saved,
+                    &[
+                        ("kind", tr.preset_kind(kind)),
+                        ("path", &path.display().to_string()),
+                    ],
+                ),
             ),
             Err(e) => self.say(
                 Tone::Bad,
-                format!("Could not save the {}: {e}", kind.label().to_lowercase()),
+                fill(
+                    tr.pre_save_err,
+                    &[
+                        ("kind", &tr.preset_kind(kind).to_lowercase()),
+                        ("err", &e.to_string()),
+                    ],
+                ),
             ),
         }
     }
@@ -150,7 +164,7 @@ impl App {
         };
         let data = MixerPreset::of(track);
         let name = if track.name.is_empty() {
-            format!("Insert {t}")
+            fill(self.tr().pre_insert_n, &[("n", &t.to_string())])
         } else {
             track.name.clone()
         };
@@ -197,13 +211,14 @@ impl App {
         name: &str,
         patch: keyframexl::synth::SynthPatch,
     ) -> String {
+        let tr = self.tr();
         use keyframexl::sequence::InstrumentKind;
         self.checkpoint();
         if let Some(id) = at
             && let Some(inst) = self.song.instruments.iter_mut().find(|i| i.id == id)
         {
             inst.kind = InstrumentKind::Synth { patch };
-            return format!("{name} on {}. Ctrl+Z undoes.", inst.name);
+            return fill(tr.pre_synth_on, &[("name", name), ("channel", &inst.name)]);
         }
         let channel = self.song.free_name(name);
         let id = self
@@ -211,7 +226,7 @@ impl App {
             .add_channel(&channel, InstrumentKind::Synth { patch });
         self.instrument = id;
         self.win(super::Cmd::Show(super::Tab::Instrument { id }));
-        format!("{channel} added with the {name} patch. Ctrl+Z undoes.")
+        fill(tr.pre_synth_added, &[("channel", &channel), ("name", name)])
     }
 
     /// Save synth channel `id`'s patch as a preset (`Presets/Synth`).
@@ -255,6 +270,7 @@ impl App {
     /// a mixer preset goes onto the selected track, an effect preset into the
     /// selected track's first free slot.
     pub(crate) fn open_preset_file(&mut self, path: &Path) {
+        let tr = self.tr();
         let target = match Kind::of_path(path) {
             Some(Kind::Channel) => Target::NewChannel,
             Some(Kind::Mixer) => Target::Mixer(self.mix_sel),
@@ -268,7 +284,10 @@ impl App {
             ),
             Some(Kind::Synth) => Target::Synth(self.selected_synth()),
             None => {
-                self.say(Tone::Bad, format!("{} is not a preset", path.display()));
+                self.say(
+                    Tone::Bad,
+                    fill(tr.pre_not_preset, &[("path", &path.display().to_string())]),
+                );
                 return;
             }
         };
@@ -276,6 +295,7 @@ impl App {
     }
 
     pub(crate) fn load_preset_into(&mut self, path: &Path, target: Target) {
+        let tr = self.tr();
         let file = path
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
@@ -290,7 +310,7 @@ impl App {
                     self.collect_plugin_states();
                     self.checkpoint();
                     p.apply(&mut self.song, id);
-                    format!("Channel preset {file} loaded")
+                    fill(tr.pre_ch_loaded, &[("file", &file)])
                 }),
             Target::NewChannel => preset::load::<ChannelPreset>(Kind::Channel, path)
                 .and_then(|p| {
@@ -301,13 +321,16 @@ impl App {
                     self.checkpoint();
                     let id = p.add(&mut self.song);
                     self.instrument = id;
-                    format!("Channel {file} added")
+                    fill(tr.pre_ch_added, &[("file", &file)])
                 }),
             Target::Mixer(t) => preset::load::<MixerPreset>(Kind::Mixer, path).map(|p| {
                 self.collect_plugin_states();
                 self.checkpoint();
                 p.apply(&mut self.song, t);
-                format!("Mixer preset {file} on {}", self.mixer_name(t))
+                fill(
+                    tr.pre_mixer_on,
+                    &[("file", &file), ("track", &self.mixer_name(t))],
+                )
             }),
             Target::Synth(at) => {
                 preset::load::<preset::SynthPreset>(Kind::Synth, path).and_then(|p| {
@@ -319,7 +342,10 @@ impl App {
                 self.collect_plugin_states();
                 self.checkpoint();
                 p.apply(&mut self.song, t, k);
-                format!("Effect preset {file} on {}", self.mixer_name(t))
+                fill(
+                    tr.pre_fx_on,
+                    &[("file", &file), ("track", &self.mixer_name(t))],
+                )
             }),
         };
         match result {

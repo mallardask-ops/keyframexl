@@ -6,6 +6,7 @@
 
 use super::{App, Tone};
 use crate::audio::TapCmd;
+use crate::i18n::fill;
 use keyframexl::engine::{MAX_TAPS, Tap};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -121,24 +122,31 @@ pub fn recordings_dir() -> PathBuf {
 
 impl App {
     pub(crate) fn toggle_arm(&mut self, track: usize) {
+        let tr = self.tr();
         if let Some(i) = self.rec.armed.iter().position(|t| *t == track) {
             self.rec.armed.remove(i);
-            self.say(Tone::Quiet, format!("{} disarmed.", self.mixer_name(track)));
+            self.say(
+                Tone::Quiet,
+                fill(tr.rec_disarmed, &[("track", &self.mixer_name(track))]),
+            );
         } else if self.rec.armed.len() >= MAX_TAPS {
             self.say(
                 Tone::Bad,
-                format!("Up to {MAX_TAPS} tracks record at once. Disarm one first."),
+                fill(tr.rec_max_taps, &[("n", &MAX_TAPS.to_string())]),
             );
         } else {
             self.rec.armed.push(track);
             let next = if self.rec.on {
-                "Press Play to record."
+                tr.rec_press_play
             } else {
-                "Turn on Record (R) and press Play."
+                tr.rec_turn_on
             };
             self.say(
                 Tone::Quiet,
-                format!("{} armed. {next}", self.mixer_name(track)),
+                fill(
+                    tr.rec_armed,
+                    &[("track", &self.mixer_name(track)), ("next", next)],
+                ),
             );
         }
     }
@@ -148,59 +156,61 @@ impl App {
     }
 
     pub(crate) fn toggle_record(&mut self) {
+        let tr = self.tr();
         self.rec.on = !self.rec.on;
         let audio = self.rec.armed.len() + self.rec.input as usize;
         let midi = if self.midi_in.as_ref().is_some_and(|m| m.connected() > 0) {
-            " MIDI keys record into the pattern."
+            tr.rec_midi_note
         } else {
             ""
         };
         let auto = if self.rec.automation {
-            " Tweaked controls record as automation."
+            tr.rec_auto_note
         } else {
             ""
         };
         let text = match (self.rec.on, audio) {
-            (false, _) => "Record off.".to_string(),
-            (true, 0) => format!(
-                "Record on.{auto}{midi} Arm a mixer track (the dot on its strip) or the audio input to record sound."
-            ),
-            (true, n) => {
-                format!("Record on: {n} armed source(s) record while playing.{auto}{midi}")
-            }
+            (false, _) => tr.rec_off.to_string(),
+            (true, 0) => fill(tr.rec_on_none, &[("auto", auto), ("midi", midi)]),
+            (true, n) => tr
+                .rec_on_n
+                .fmt_with(tr.lang, n, &[("auto", auto), ("midi", midi)]),
         };
         self.say(Tone::Quiet, text);
     }
 
     pub(crate) fn toggle_record_automation(&mut self) {
+        let tr = self.tr();
         self.rec.automation = !self.rec.automation;
         let text = if self.rec.automation {
-            "Automation recording enabled. Tweaking controls while Record + Play are on writes automation clips."
+            tr.rec_auto_on
         } else {
-            "Automation recording disabled."
+            tr.rec_auto_off
         };
         self.say(Tone::Quiet, text);
     }
 
     /// Arm / disarm the audio input (microphone, line in).
     pub(crate) fn toggle_input(&mut self) {
+        let tr = self.tr();
         self.rec.input = !self.rec.input;
         let dev = self
             .settings
             .audio
             .input
             .clone()
-            .unwrap_or_else(|| "the default input".into());
+            .unwrap_or_else(|| tr.rec_default_input.into());
         let text = if self.rec.input {
-            format!("Audio input armed ({dev}). Record (R) + Play records it.")
+            fill(tr.rec_input_armed, &[("dev", &dev)])
         } else {
-            "Audio input disarmed.".into()
+            tr.rec_input_disarmed.into()
         };
         self.say(Tone::Quiet, text);
     }
 
     /// Once per UI frame: start, feed or finish takes.
     pub(crate) fn record_frame(&mut self) {
+        let tr = self.tr();
         let Some(audio) = &self.audio else { return };
         let active = self.rec.on
             && (!self.rec.armed.is_empty() || self.rec.input)
@@ -243,7 +253,10 @@ impl App {
                     }
                     Err(e) => {
                         self.rec.input = false;
-                        self.say(Tone::Bad, format!("Audio input not recorded: {e}. Pick a device in Settings (F10) → Audio."));
+                        self.say(
+                            Tone::Bad,
+                            fill(tr.rec_input_err, &[("err", &e.to_string())]),
+                        );
                     }
                 }
             }
@@ -260,6 +273,7 @@ impl App {
 
     /// Stop the taps, collect the last frames and write one WAV per track.
     pub(crate) fn finish_takes(&mut self) {
+        let tr = self.tr();
         let mut dropped = 0;
         if let Some(audio) = &self.audio
             && let Ok(mut taps) = audio.taps.lock()
@@ -296,9 +310,7 @@ impl App {
             })
             .collect();
         match write_takes(&recordings_dir(), &self.project_name(), &parts, &names) {
-            Ok(files) if files.is_empty() => {
-                self.say(Tone::Quiet, "Nothing recorded: the take was empty.")
-            }
+            Ok(files) if files.is_empty() => self.say(Tone::Quiet, tr.rec_nothing),
             Ok(files) => {
                 let secs = parts
                     .iter()
@@ -307,7 +319,7 @@ impl App {
                 self.files.add_root(recordings_dir());
                 self.files.refresh();
                 let warn = if dropped > 0 {
-                    format!(" {dropped} frames were lost: the interface was busy.")
+                    tr.rec_frames_lost.fmt(tr.lang, dropped as usize)
                 } else {
                     String::new()
                 };
@@ -317,14 +329,21 @@ impl App {
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_default()
                 } else {
-                    format!("{} takes", files.len())
+                    tr.rec_takes.fmt(tr.lang, files.len())
                 };
                 self.say(
                     if dropped > 0 { Tone::Bad } else { Tone::Done },
-                    format!("Recorded {what} ({secs:.1} s) to Browser → Files → Recordings.{warn}"),
+                    fill(
+                        tr.rec_saved,
+                        &[
+                            ("what", &what),
+                            ("secs", &format!("{secs:.1}")),
+                            ("warn", &warn),
+                        ],
+                    ),
                 );
             }
-            Err(e) => self.say(Tone::Bad, format!("Take not saved: {e}")),
+            Err(e) => self.say(Tone::Bad, fill(tr.rec_take_err, &[("err", &e.to_string())])),
         }
     }
 }

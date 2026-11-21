@@ -4,6 +4,7 @@
 
 use super::playlist::{song_bar_pos, song_snap};
 use super::{App, Tone, kit};
+use crate::i18n::fill;
 use crate::theme as t;
 use eframe::egui::{self, Align2, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
 use keyframexl::sequence::{BAR, Tick};
@@ -47,6 +48,7 @@ impl App {
     }
 
     pub(super) fn tempo_lane(&mut self, ui: &mut Ui, g: &LaneGeo) {
+        let tr = self.tr();
         let folded = self.tempo_lane_folded(ui);
         let p = ui.painter().clone();
         // Head cell: caption, fold arrow, tempo at the playhead.
@@ -61,11 +63,7 @@ impl App {
         );
         let fr = ui
             .interact(fold, ui.id().with("tempo-fold"), Sense::click())
-            .on_hover_text(if folded {
-                "Open the tempo lane"
-            } else {
-                "Fold the tempo lane"
-            });
+            .on_hover_text(if folded { tr.tl_open } else { tr.tl_fold });
         hp.text(
             fold.center(),
             Align2::CENTER_CENTER,
@@ -86,7 +84,7 @@ impl App {
             &hp,
             pos2(g.head.left() + 22.0, cap_y),
             Align2::LEFT_CENTER,
-            "tempo",
+            tr.tl_caps,
             12.0,
             t::faint(),
         );
@@ -320,16 +318,19 @@ impl App {
                 self.publish();
                 self.say(
                     Tone::Quiet,
-                    format!(
-                        "Tempo {bpm:.1} BPM at {}.",
-                        song_bar_pos(&self.song.meters, at)
+                    fill(
+                        tr.tl_at,
+                        &[
+                            ("bpm", &format!("{bpm:.1}")),
+                            ("pos", &song_bar_pos(&self.song.meters, at)),
+                        ],
                     ),
                 );
             }
         }
         if resp.drag_stopped() && ui.data(|d| d.get_temp::<usize>(drag_id)).is_some() {
             ui.data_mut(|d| d.remove::<usize>(drag_id));
-            self.say(Tone::Quiet, "Tempo point moved. Ctrl+Z undoes.");
+            self.say(Tone::Quiet, tr.tl_moved);
         }
         let added_id = ui.id().with("tempo-added");
         let now_t = ui.input(|i| i.time);
@@ -361,12 +362,9 @@ impl App {
                         TempoShape::Step
                     };
                     let ramp = pt.shape == TempoShape::Linear;
-                    self.say(Tone::Quiet, if ramp { "Tempo ramps to the next point. Double-click again to jump. Ctrl+Z undoes." } else { "Tempo jumps at the next point. Double-click again to ramp. Ctrl+Z undoes." });
+                    self.say(Tone::Quiet, if ramp { tr.tl_ramps } else { tr.tl_jumps });
                 }
-                None => self.say(
-                    Tone::Quiet,
-                    "Double-click between two tempo points to ramp or jump.",
-                ),
+                None => self.say(Tone::Quiet, tr.tl_between),
             }
             self.publish();
         } else if resp.clicked()
@@ -399,9 +397,12 @@ impl App {
                 self.publish();
                 self.say(
                     Tone::Quiet,
-                    format!(
-                        "Tempo point at {} ({bpm:.1} BPM). Drag it up or down. Ctrl+Z undoes.",
-                        song_bar_pos(&self.song.meters, tk)
+                    fill(
+                        tr.tl_point_at,
+                        &[
+                            ("pos", &song_bar_pos(&self.song.meters, tk)),
+                            ("bpm", &format!("{bpm:.1}")),
+                        ],
                     ),
                 );
             }
@@ -411,15 +412,12 @@ impl App {
             && let Some(i) = resp.interact_pointer_pos().and_then(hit)
         {
             if i == 0 {
-                self.say(
-                    Tone::Quiet,
-                    "The first tempo point stays. Right-click the lane to reset the map.",
-                );
+                self.say(Tone::Quiet, tr.tl_first_stays);
             } else {
                 self.checkpoint();
                 self.song.tempo_map.points.remove(i);
                 self.publish();
-                self.say(Tone::Quiet, "Tempo point deleted. Ctrl+Z undoes.");
+                self.say(Tone::Quiet, tr.tl_deleted);
             }
         }
         // Lane menu: reset or scale the whole map (destructive, so it lives here).
@@ -429,20 +427,20 @@ impl App {
                 ui.close_menu();
                 return;
             }
-            if ui.button("Reset to one tempo").clicked() {
+            if ui.button(tr.tl_reset).clicked() {
                 self.checkpoint();
                 self.song.tempo_map.points.clear();
                 self.publish();
                 self.say(
                     Tone::Quiet,
-                    format!(
-                        "Tempo map cleared: {:.1} BPM throughout. Ctrl+Z undoes.",
-                        self.song.tempo
+                    fill(
+                        tr.tl_cleared,
+                        &[("bpm", &format!("{:.1}", self.song.tempo))],
                     ),
                 );
                 ui.close_menu();
             }
-            for (label, k) in [("Half time (×0.5)", 0.5), ("Double time (×2)", 2.0)] {
+            for (label, k) in [(tr.tl_half, 0.5), (tr.tl_double, 2.0)] {
                 if ui
                     .add_enabled(!self.song.tempo_map.is_empty(), egui::Button::new(label))
                     .clicked()
@@ -452,7 +450,7 @@ impl App {
                         p.bpm = (p.bpm * k).clamp(TEMPO_MIN, TEMPO_MAX);
                     }
                     self.publish();
-                    self.say(Tone::Quiet, "Tempo map scaled. Ctrl+Z undoes.");
+                    self.say(Tone::Quiet, tr.tl_scaled);
                     ui.close_menu();
                 }
             }
