@@ -159,6 +159,7 @@ impl MidiOut {
             .filter_map(|p| probe.port_name(p).ok())
             .filter(|n| !skip(n))
             .collect();
+        #[allow(clippy::drop_non_drop)]
         drop(probe);
         if let Ok(mut conns) = self.conns.lock() {
             conns.retain(|(n, _)| names.contains(n) && is_enabled(port_key(n)));

@@ -271,6 +271,7 @@ pub fn alsa_era_name(n: &str) -> bool {
 }
 
 /// The name PipeWire's default output and input are listed under.
+#[allow(dead_code)]
 pub const SYSTEM_DEFAULT: &str = "System default";
 
 /// Devices a person picks from: on PipeWire the hardware and Bluetooth nodes
@@ -378,6 +379,7 @@ impl AudioBackend {
 }
 
 /// Is a PipeWire socket in one of `dirs`? (Pure, so tests need no daemon.)
+#[allow(dead_code)]
 fn pipewire_socket_in(dirs: impl IntoIterator<Item = std::path::PathBuf>) -> bool {
     dirs.into_iter().any(|d| {
         let sock = d.join("pipewire-0");
@@ -394,6 +396,7 @@ fn pipewire_socket_in(dirs: impl IntoIterator<Item = std::path::PathBuf>) -> boo
 }
 
 /// The PipeWire daemon's socket exists (a stat, never a connect: cannot block).
+#[allow(dead_code)]
 pub fn pipewire_daemon_active() -> bool {
     let dirs = ["PIPEWIRE_RUNTIME_DIR", "XDG_RUNTIME_DIR"]
         .into_iter()
