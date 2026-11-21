@@ -7,7 +7,7 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 ## Unreleased (0.2.0)
 
 Everything since 0.1.2, gathered from the nightlies up to
-`v0.2.0-nightly.rc.3`. Native PipeWire output (E1) is still in review and
+`v0.2.0-nightly.rc.4`. Native PipeWire output (E1) is still in review and
 not part of this list.
 
 ### New features
@@ -91,6 +91,7 @@ not part of this list.
   delete. *File → Welcome screen* reopens the Welcome screen.
 - **Colours** of tracks and patterns are picked from a grid of swatches
   (they were a list of hex codes).
+- **Pattern list** on the deck: larger rows in each pattern's colour.
 - **Knobs, faders and number fields** capture the mouse, so a long drag
   does not stop at the screen edge.
 - **Docked panels**: dragging a shared edge resizes both panels. Embedded
@@ -119,6 +120,8 @@ not part of this list.
 - **Export tail** ran 30 s past the end when a plugin (an amp simulator)
   hissed above −80 dBFS: the tail now ends 60 dB under the song's peak, so
   the file is as long as the estimate.
+- **Switch highlights** (sample rate, buffer…) no longer trail behind a
+  window that is dragged quickly.
 - **Window height creep**: Export audio and Project info lost a few pixels
   of height on every drag of a side edge.
 - **Maximised start on X11** was ignored: the request was sent before the
