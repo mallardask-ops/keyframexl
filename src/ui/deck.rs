@@ -304,6 +304,9 @@ impl App {
             170.0,
             |ui| {
                 // Automation clips are patterns too, but they live in the playlist only (FL).
+                // Rows in the pattern's own colour, as on the playlist.
+                ui.set_min_width(260.0);
+                ui.spacing_mut().item_spacing.y = 2.0;
                 for (i, p) in self
                     .song
                     .patterns
@@ -311,15 +314,57 @@ impl App {
                     .enumerate()
                     .filter(|(_, p)| p.automation.is_none())
                 {
-                    if ui
-                        .selectable_label(
-                            p.id == self.selected,
-                            egui::RichText::new(format!("{:02}  {}", i + 1, p.name))
-                                .font(t::sans(13.0)),
-                        )
-                        .clicked()
-                    {
+                    let col = t::pattern_color(p.id, p.color);
+                    let on = p.id == self.selected;
+                    let (row, resp) = ui.allocate_exact_size(
+                        vec2(ui.available_width(), 30.0),
+                        egui::Sense::click(),
+                    );
+                    let paint = ui.painter();
+                    let fill = if on {
+                        col.gamma_multiply(0.38)
+                    } else if resp.hovered() {
+                        col.gamma_multiply(0.24)
+                    } else {
+                        col.gamma_multiply(0.12)
+                    };
+                    paint.rect_filled(row, 4.0, fill);
+                    paint.rect_filled(
+                        Rect::from_min_size(row.min, vec2(5.0, row.height())),
+                        egui::CornerRadius {
+                            nw: 4,
+                            sw: 4,
+                            ne: 0,
+                            se: 0,
+                        },
+                        col,
+                    );
+                    if on {
+                        paint.rect_stroke(
+                            row,
+                            4.0,
+                            egui::Stroke::new(1.0_f32, col),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                    paint.text(
+                        pos2(row.left() + 14.0, row.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        format!("{:02}", i + 1),
+                        t::mono(13.0),
+                        if on { t::text() } else { t::muted() },
+                    );
+                    let name = kit::elide(paint, &p.name, t::sans(14.0), row.width() - 52.0);
+                    paint.text(
+                        pos2(row.left() + 42.0, row.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        name,
+                        t::sans(14.0),
+                        t::text(),
+                    );
+                    if resp.clicked() {
                         pick = Some(p.id);
+                        ui.memory_mut(|m| m.close_popup());
                     }
                 }
             },

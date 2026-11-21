@@ -554,9 +554,11 @@ pub fn chips(
         x += w;
     }
     let tid = ui.id().with((id, "thumb"));
-    let tx = ui
-        .ctx()
-        .animate_value_with_time(tid, rects[selected].left(), 0.2);
+    // Animated relative to the track, so the thumb moves with its window
+    // instead of trailing it when the window is dragged.
+    let tx = track.left()
+        + ui.ctx()
+            .animate_value_with_time(tid, rects[selected].left() - track.left(), 0.2);
     let tw = ui
         .ctx()
         .animate_value_with_time(tid.with("w"), rects[selected].width(), 0.2);
