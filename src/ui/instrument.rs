@@ -3,6 +3,7 @@
 //! the formats and plugin hosts that come later.
 
 use super::{App, Cmd, Slot, Tab, Tone, kit};
+use crate::i18n::fill;
 use crate::theme as t;
 use eframe::egui::{self, Align2, Rect, Sense, Ui, vec2};
 use keyframexl::sequence::{DRUM_VOICES, InstrumentKind};
@@ -17,10 +18,8 @@ impl App {
         let id = self.song.add_sampler(&name);
         self.publish();
         self.win(Cmd::Show(Tab::Instrument { id }));
-        self.say(
-            Tone::Quiet,
-            format!("{name} added. Load a preset into it, or draw notes. Ctrl+Z undoes."),
-        );
+        let msg = fill(self.tr().inst_sampler_added, &[("name", &name)]);
+        self.say(Tone::Quiet, msg);
         id
     }
 
@@ -30,25 +29,24 @@ impl App {
         let name = self.song.free_name(DRUM_VOICES[voice as usize]);
         let id = self.song.add_channel(&name, InstrumentKind::Drum { voice });
         self.publish();
-        self.say(
-            Tone::Quiet,
-            format!("{name} added. Click its steps. Ctrl+Z undoes."),
-        );
+        let msg = fill(self.tr().inst_drum_added, &[("name", &name)]);
+        self.say(Tone::Quiet, msg);
         id
     }
 
     /// FL: Add → channel. The instrument list grows with plugin hosting.
     pub(crate) fn add_channel_menu(&mut self, ui: &mut Ui) {
+        let tr = self.tr();
         kit::menu_style(ui);
         if ui
-            .button("Sampler")
-            .on_hover_text("Our sampler: loads DirectWave .dwp presets")
+            .button(tr.inst_menu_sampler)
+            .on_hover_text(tr.inst_menu_sampler_tip)
             .clicked()
         {
             self.add_sampler();
             ui.close_menu();
         }
-        if ui.button("KeyFrame Tide (synth)").clicked() {
+        if ui.button(tr.inst_menu_tide).clicked() {
             self.checkpoint();
             let name = self.song.free_name("KeyFrame Tide");
             let id = self.song.add_channel(
@@ -62,21 +60,19 @@ impl App {
             ui.close_menu();
         }
         if ui
-            .button("Forge (game sounds)")
-            .on_hover_text(
-                "Build jumps, coins, hits and lasers from layers, then export them for your game",
-            )
+            .button(tr.inst_menu_forge)
+            .on_hover_text(tr.inst_menu_forge_tip)
             .clicked()
         {
             self.add_forge();
             ui.close_menu();
         }
-        ui.menu_button("Drum kit", |ui| {
+        ui.menu_button(tr.inst_menu_drum_kit, |ui| {
             kit::menu_style(ui);
             for k in keyframexl::kits::Kit::ALL {
                 if ui
-                    .button(k.label())
-                    .on_hover_text("Every sound of the kit as its own channel, built in Forge (edit any of them there)")
+                    .button(tr.drum_kit_label(k))
+                    .on_hover_text(tr.inst_menu_drum_kit_tip)
                     .clicked()
                 {
                     self.add_kit(k);
@@ -85,8 +81,8 @@ impl App {
             }
         });
         if ui
-            .button("Vocal (singing voice)")
-            .on_hover_text("Notes with lyrics, sung from a UTAU voicebank such as Kasane Teto")
+            .button(tr.inst_menu_vocal)
+            .on_hover_text(tr.inst_menu_vocal_tip)
             .clicked()
         {
             self.add_vocal();
@@ -98,13 +94,16 @@ impl App {
                 ui.close_menu();
             }
         }
-        if ui.button("More plugins…").clicked() {
+        if ui.button(tr.inst_menu_more_plugins).clicked() {
             Self::toggle_picker(ui.ctx());
             ui.close_menu();
         }
         ui.separator();
         for (v, name) in DRUM_VOICES.iter().enumerate() {
-            if ui.button(format!("Drum voice · {name}")).clicked() {
+            if ui
+                .button(fill(tr.inst_menu_drum_voice, &[("name", name)]))
+                .clicked()
+            {
                 self.add_drum(v as u8);
                 ui.close_menu();
             }
@@ -113,13 +112,14 @@ impl App {
 
     /// Usable VST3 instruments from the scan (Settings → Plugins lists the rest).
     pub(crate) fn plugin_instrument_menu(&mut self, ui: &mut Ui) {
+        let tr = self.tr();
         kit::menu_style(ui);
         let list = self.plugin_choices(true);
         if list.is_empty() {
             let note = if self.plugins.scan_rx.is_some() {
-                "Checking plugins…"
+                tr.mixer_checking_plugins
             } else {
-                "No instrument plugins found"
+                tr.inst_no_plugins
             };
             kit::menu_header(
                 ui,
@@ -136,7 +136,7 @@ impl App {
             }
         }
         ui.separator();
-        if ui.button("Plugin settings…").clicked() {
+        if ui.button(tr.mixer_plugin_settings).clicked() {
             self.open_settings(super::settings_ui::Page::Plugins);
             ui.close_menu();
         }
@@ -156,10 +156,8 @@ impl App {
         match self.song.remove_instrument(id) {
             Ok(()) => {
                 self.publish();
-                self.say(
-                    Tone::Quiet,
-                    format!("{name} and its notes deleted. Ctrl+Z undoes."),
-                );
+                let msg = fill(self.tr().inst_deleted, &[("name", &name)]);
+                self.say(Tone::Quiet, msg);
             }
             Err(e) => {
                 self.history.pop();
@@ -171,10 +169,7 @@ impl App {
     /// Ask for a preset file and load it into sampler `id` in the background.
     pub(crate) fn load_preset_dialog(&mut self, id: u64) {
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter(
-                "Sampler preset or sample (.dwp, .wav, .flac, .ogg)",
-                &PRESET_EXTS,
-            )
+            .add_filter(self.tr().inst_dlg_sampler_filter, &PRESET_EXTS)
             .pick_file()
         {
             self.load_preset(id, path);
@@ -211,10 +206,12 @@ impl App {
         self.importing.retain(|(t, _, _)| *t != id);
         self.importing.push((id, rx, quiet));
         if !quiet {
-            self.say(
-                Tone::Wait,
-                format!("Loading {file} into {}", self.instrument_name(id)),
+            let name = self.instrument_name(id);
+            let msg = fill(
+                self.tr().inst_loading_into,
+                &[("file", &file), ("name", &name)],
             );
+            self.say(Tone::Wait, msg);
         }
     }
 
@@ -266,7 +263,9 @@ impl App {
             } else if keyframexl::preset::Kind::of_path(&path).is_some() {
                 self.open_preset_file(&path);
             } else {
-                self.say(Tone::Bad, format!("{} is not a sample, preset or project. Drop .wav, .flac, .ogg, .dwp or .kfxl.", path.display()));
+                let path_str = path.display().to_string();
+                let msg = fill(self.tr().inst_drop_unsupported, &[("path", &path_str)]);
+                self.say(Tone::Bad, msg);
             }
         }
     }
@@ -279,7 +278,7 @@ impl App {
             {
                 self.instrument_name(*id)
             }
-            _ => "a new sampler".into(),
+            _ => self.tr().inst_drop_new_sampler.into(),
         }
     }
 
@@ -291,8 +290,9 @@ impl App {
     }
 
     pub(super) fn instrument_window(&mut self, ui: &mut Ui, id: u64) {
+        let tr = self.tr();
         let Some(inst) = self.song.instruments.iter().find(|i| i.id == id).cloned() else {
-            ui.label("This channel no longer exists.");
+            ui.label(tr.inst_gone);
             return;
         };
         let ch = self
@@ -305,14 +305,15 @@ impl App {
         let sampler = matches!(inst.kind, InstrumentKind::Sampler { .. });
         let has_sound = matches!(&inst.kind, InstrumentKind::Sampler { preset: Some(_) });
         let kind = match &inst.kind {
-            InstrumentKind::Sampler { .. } => "sampler",
-            InstrumentKind::Plugin { .. } => "plugin",
-            InstrumentKind::Drum { .. } => "drum voice",
-            InstrumentKind::Synth { .. } => "KeyFrame Tide",
-            InstrumentKind::Vocal { .. } => "vocal",
-            InstrumentKind::Forge { .. } => "forge",
+            InstrumentKind::Sampler { .. } => tr.inst_kind_sampler,
+            InstrumentKind::Plugin { .. } => tr.inst_kind_plugin,
+            InstrumentKind::Drum { .. } => tr.inst_kind_drum,
+            InstrumentKind::Synth { .. } => tr.inst_kind_synth,
+            InstrumentKind::Vocal { .. } => tr.inst_kind_vocal,
+            InstrumentKind::Forge { .. } => tr.inst_kind_forge,
         };
-        let sub = format!("{kind}  ·  ch {ch:02}");
+        let ch_str = format!("{ch:02}");
+        let sub = fill(tr.inst_sub_ch, &[("kind", kind), ("ch", &ch_str)]);
         // A plugin channel is FL's wrapper: one compact bar, then the plugin.
         if let InstrumentKind::Plugin { plugin } = &inst.kind {
             ui.add_space(6.0);
@@ -324,27 +325,27 @@ impl App {
             if slot == Slot::Menu {
                 if sampler
                     && ui
-                        .add_enabled(!loading, egui::Button::new("Load sound (.dwp, sample)…"))
+                        .add_enabled(!loading, egui::Button::new(tr.inst_load_sound_menu))
                         .clicked()
                 {
                     self.load_preset_dialog(id);
                     ui.close_menu();
                 }
-                if ui.button("Piano roll").clicked() {
+                if ui.button(tr.win_roll).clicked() {
                     self.open_roll(id);
                     ui.close_menu();
                 }
                 ui.separator();
-                if ui.button("Save channel preset…").clicked() {
+                if ui.button(tr.inst_save_ch_preset).clicked() {
                     ui.close_menu();
                     self.save_channel_preset(id);
                 }
-                if ui.button("Load channel preset…").clicked() {
+                if ui.button(tr.inst_load_ch_preset).clicked() {
                     ui.close_menu();
                     self.load_preset_dialog_for(super::presets_ui::Target::Channel(id));
                 }
                 ui.separator();
-                if ui.button("Delete channel").clicked() {
+                if ui.button(tr.inst_delete_channel).clicked() {
                     self.delete_channel(id);
                     ui.close_menu();
                 }
@@ -354,19 +355,19 @@ impl App {
             // The empty sampler shows its own big Load button; one is enough.
             if sampler && (has_sound || loading) {
                 let label = if loading {
-                    "Loading"
+                    tr.inst_loading_btn
                 } else {
-                    "Replace sound…"
+                    tr.inst_replace_sound
                 };
                 if kit::button(ui, label, kit::Kind::Normal, !loading)
-                    .on_hover_text("Load a DirectWave .dwp or a sample into this sampler. You can also drop the file on the window.")
+                    .on_hover_text(tr.inst_replace_sound_tip)
                     .clicked()
                 {
                     self.load_preset_dialog(id);
                 }
             }
-            if kit::button(ui, "Piano roll", kit::Kind::Normal, true)
-                .on_hover_text("Edit this channel's notes  F7")
+            if kit::button(ui, tr.win_roll, kit::Kind::Normal, true)
+                .on_hover_text(tr.inst_roll_btn_tip)
                 .clicked()
             {
                 self.open_roll(id);
@@ -380,7 +381,7 @@ impl App {
                 .font(t::semibold(20.0))
                 .frame(false)
                 .desired_width(ui.available_width().min(420.0))
-                .hint_text("Channel name"),
+                .hint_text(tr.inst_ch_name_hint),
         );
         if r.changed() && !name.trim().is_empty() {
             // One undo step per rename, made by its first keystroke (focus alone changes nothing).
@@ -393,7 +394,7 @@ impl App {
             self.publish();
         }
         super::kit::end_edit(ui, &r);
-        r.on_hover_text("Click to rename");
+        r.on_hover_text(tr.inst_click_rename);
         ui.add_space(6.0);
 
         if let InstrumentKind::Synth { patch } = &inst.kind {
@@ -419,7 +420,7 @@ impl App {
             self.drop_file_on_channel(id, drag.0.clone());
         }
         let InstrumentKind::Sampler { preset } = &inst.kind else {
-            ui.label(egui::RichText::new("Built-in drum voice. Its steps live in the channel rack and the piano roll; sound parameters arrive with the parameter system.").color(t::muted()));
+            ui.label(egui::RichText::new(tr.inst_drum_desc).color(t::muted()));
             return;
         };
         let Some(preset) = preset.clone() else {
@@ -438,6 +439,7 @@ impl App {
     }
 
     fn empty_sampler(&mut self, ui: &mut Ui, id: u64, loading: bool) {
+        let tr = self.tr();
         let _dark = t::Faceplate::enter(ui);
         let h = ui.available_height().clamp(200.0, 260.0);
         let (area, _) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::hover());
@@ -474,7 +476,7 @@ impl App {
             p.text(
                 c + vec2(0.0, 4.0),
                 Align2::CENTER_CENTER,
-                "Loading sound…",
+                tr.inst_loading_sound,
                 t::medium(15.0),
                 t::SMP_GOLD,
             );
@@ -484,18 +486,19 @@ impl App {
         p.text(
             c - vec2(0.0, 16.0),
             Align2::CENTER_CENTER,
-            "DWP SAMPLER  ·  NO SAMPLE LOADED",
+            tr.inst_empty_sampler_head,
             t::semibold(13.0),
             t::SMP_GOLD,
         );
         p.text(
             c + vec2(0.0, 6.0),
             Align2::CENTER_CENTER,
-            "Drop a DirectWave .dwp preset or audio file (.wav, .flac, .ogg) anywhere in this window.",
+            tr.inst_empty_sampler_desc,
             t::sans(13.0),
             t::SMP_SAND,
         );
-        let b = Rect::from_center_size(c + vec2(0.0, 44.0), vec2(170.0, kit::CONTROL_H));
+        let btn_w = (kit::text_width(p, tr.inst_load_sound_btn, t::sans(14.0)) + 40.0).max(170.0);
+        let b = Rect::from_center_size(c + vec2(0.0, 44.0), vec2(btn_w, kit::CONTROL_H));
         let r = ui.interact(b, ui.id().with(("load-empty", id)), Sense::click());
         kit::paint_button(
             ui,
@@ -503,12 +506,12 @@ impl App {
             &r,
             kit::Kind::Normal,
             true,
-            "Load sound",
+            tr.inst_load_sound_a11y,
             |p, face, ink| {
                 p.text(
                     face.center(),
                     Align2::CENTER_CENTER,
-                    "Load sound…",
+                    tr.inst_load_sound_btn,
                     t::sans(14.0),
                     ink,
                 );

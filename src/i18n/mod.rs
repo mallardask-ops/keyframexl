@@ -401,6 +401,74 @@ define_strings! {
         synth_cat_arp, synth_cat_bass, synth_cat_bell, synth_cat_chiptune, synth_cat_drum,
         synth_cat_fx, synth_cat_init, synth_cat_keys, synth_cat_lead, synth_cat_pad,
         synth_cat_pluck,
+        // Shared kit widgets
+        kit_create_auto, kit_create_auto_tip, kit_link_ctrl, kit_link_ctrl_tip,
+        kit_reset, kit_reset_back_to, kit_type_value, kit_copy_value, kit_paste_value,
+        kit_auto_unavailable, kit_link_unavailable, kit_knob_tip_footer,
+        // Instrument window & menus
+        inst_sampler_added, inst_drum_added,
+        inst_menu_sampler, inst_menu_sampler_tip, inst_menu_tide,
+        inst_menu_forge, inst_menu_forge_tip, inst_menu_drum_kit, inst_menu_drum_kit_tip,
+        inst_kit_core, inst_kit_chip, inst_menu_vocal, inst_menu_vocal_tip,
+        inst_menu_more_plugins, inst_menu_drum_voice, inst_no_plugins, inst_deleted,
+        inst_dlg_sampler_filter, inst_loading_into, inst_drop_unsupported, inst_drop_new_sampler,
+        inst_gone, inst_sub_ch, inst_load_sound_menu, inst_save_ch_preset, inst_load_ch_preset,
+        inst_delete_channel, inst_loading_btn, inst_replace_sound, inst_replace_sound_tip,
+        inst_roll_btn_tip, inst_ch_name_hint, inst_click_rename, inst_drum_desc,
+        inst_loading_sound, inst_empty_sampler_head, inst_empty_sampler_desc,
+        inst_load_sound_a11y, inst_load_sound_btn,
+        // Sampler editor
+        smp_page_program, smp_page_zone, smp_page_filter, smp_page_mod, smp_page_zones,
+        smp_loop_off, smp_loop_fwd, smp_loop_oneshot, smp_loop_sustained, smp_loop_bounce,
+        smp_bipolar_tip, smp_val_out_of_range, smp_no_zones, smp_editing_zone,
+        smp_zn_short, smp_scope_all, smp_scope_zone, smp_audition_tip, smp_zone_map_tip,
+        smp_sec_prog_out, smp_k_volume, smp_k_volume_hint, smp_k_pan, smp_k_pan_hint,
+        smp_k_trans, smp_k_trans_hint, smp_k_pb_rng, smp_k_pb_rng_hint,
+        smp_sec_voice_glide, smp_k_poly, smp_k_poly_hint, smp_k_glide, smp_k_glide_hint,
+        smp_off_lower, smp_sec_summary, smp_summary_line,
+        smp_sec_pitch_root, smp_root_up_tip, smp_root_down_tip, smp_root_badge,
+        smp_k_semi, smp_k_semi_hint, smp_k_fine, smp_k_fine_hint, smp_k_ktrk, smp_k_ktrk_hint,
+        smp_sec_amp_grp, smp_k_gain, smp_k_gain_hint, smp_k_zone_pan_hint,
+        smp_k_vel, smp_k_vel_hint, smp_k_group, smp_k_group_hint,
+        smp_sec_stretch, smp_k_length, smp_k_length_hint, smp_k_beats, smp_k_beats_hint,
+        smp_stretch_recorded, smp_stretch_rendering, smp_stretch_ready, smp_stretch_arrow,
+        smp_sec_amp_env,
+        smp_dir_fwd, smp_dir_rev, smp_snap_0x, smp_snap_0x_tip, smp_fit, smp_fit_tip,
+        smp_zoom_in_tip, smp_zoom_out_tip, smp_wave_len_loop, smp_wave_len_frames, smp_wave_tip,
+        smp_sec_dual_filter, smp_route_serial, smp_route_parallel, smp_filter_n,
+        smp_fk_short_off, smp_fk_short_notch, smp_k_freq, smp_k_freq_hint,
+        smp_k_emph, smp_k_emph_hint, smp_env_unrouted, smp_env_routed,
+        smp_filters_bypassed, smp_dual_filter_tip,
+        smp_lfo_sync, smp_lfo_free, smp_k_rate, smp_k_lfo_rate_hint,
+        smp_k_attack, smp_k_mod_fade_hint, smp_k_phase, smp_k_phase_hint,
+        smp_mod_matrix_caps, smp_mod_depth_hint, smp_clear_slot_tip,
+        smp_col_wave, smp_col_sample, smp_col_keys, smp_col_root, smp_col_vel, smp_col_loop,
+        smp_env_curve_tip, smp_k_delay, smp_k_delay_hint, smp_k_attack_hint,
+        smp_k_hold, smp_k_hold_hint, smp_k_decay, smp_k_decay_hint,
+        smp_k_sustain, smp_k_sustain_hint, smp_k_release, smp_k_release_hint,
+        smp_play_poly, smp_play_mono, smp_play_legato,
+        smp_glide_fixed, smp_glide_auto,
+        smp_stretch_off, smp_stretch_time, smp_stretch_beat,
+        smp_fk_off, smp_fk_lp, smp_fk_hp, smp_fk_bp, smp_fk_notch, smp_fk_ap,
+        smp_fr_serial, smp_fr_parallel,
+        smp_lfo_sine, smp_lfo_abs_sine, smp_lfo_tri, smp_lfo_sq, smp_lfo_saw,
+        smp_lfo_inv_saw, smp_lfo_rand, smp_lfo_lp_rand,
+        smp_ms_env1, smp_ms_env2, smp_ms_vel, smp_ms_key, smp_ms_rand,
+        smp_ms_plfo1, smp_ms_plfo2,
+        smp_mt_pitch, smp_mt_gain, smp_mt_pan, smp_mt_cut1, smp_mt_emph1,
+        smp_mt_cut2, smp_mt_emph2, smp_mt_lfo1, smp_mt_lfo2,
+        // Vocal editor & lyrics
+        vocal_installed, vocal_sec_bank, vocal_no_bank, vocal_none_installed,
+        vocal_folder_btn, vocal_folder_tip, vocal_install_zip_btn, vocal_install_zip_tip,
+        vocal_dlg_utau_filter, vocal_bank_fallback, vocal_installing, vocal_working,
+        vocal_download_teto, vocal_download_teto_tip, vocal_downloading_teto, vocal_teto_terms,
+        vocal_empty_hint, vocal_rendering_progress, vocal_sec_voice,
+        vocal_k_vibrato, vocal_k_vibrato_hint, vocal_k_rate, vocal_k_rate_hint,
+        vocal_k_delay, vocal_k_delay_hint, vocal_k_fade_in, vocal_k_fade_in_hint,
+        vocal_k_glide, vocal_k_glide_hint, vocal_k_gender, vocal_k_gender_hint,
+        vocal_k_breath, vocal_k_breath_hint, vocal_sec_default_lyric, vocal_default_lyric_desc,
+        vocal_sec_singing, vocal_singing_p1, vocal_singing_p2, vocal_singing_p3,
+        vocal_lyrics_title, vocal_lyrics_desc, vocal_lyrics_summary,
     },
     plurals: {
         clips_deleted,
@@ -451,6 +519,13 @@ define_strings! {
         mixer_inserts_count,
         mixer_channels_routed,
         browser_plugin_problems,
+        smp_global_edit_zones,
+        smp_zones_count,
+        smp_frames_count,
+        vocal_syllables,
+        vocal_notes_in_channel,
+        vocal_notes_selected,
+        vocal_lyrics_set,
     },
 }
 
@@ -734,6 +809,124 @@ impl Strings {
             "Pad" => self.synth_cat_pad,
             "Pluck" => self.synth_cat_pluck,
             other => other,
+        }
+    }
+
+    pub fn drum_kit_label(&self, kit: keyframexl::kits::Kit) -> &'static str {
+        match kit {
+            keyframexl::kits::Kit::Core => self.inst_kit_core,
+            keyframexl::kits::Kit::Chip => self.inst_kit_chip,
+        }
+    }
+
+    pub fn smp_pages(&self) -> [&'static str; 5] {
+        [
+            self.smp_page_program,
+            self.smp_page_zone,
+            self.smp_page_filter,
+            self.smp_page_mod,
+            self.smp_page_zones,
+        ]
+    }
+
+    pub fn smp_loop_types(&self) -> [&'static str; 5] {
+        [
+            self.smp_loop_off,
+            self.smp_loop_fwd,
+            self.smp_loop_oneshot,
+            self.smp_loop_sustained,
+            self.smp_loop_bounce,
+        ]
+    }
+
+    pub fn smp_play_mode(&self, m: keyframexl::sampler::PlayMode) -> &'static str {
+        use keyframexl::sampler::PlayMode as P;
+        match m {
+            P::Poly => self.smp_play_poly,
+            P::Mono => self.smp_play_mono,
+            P::Legato => self.smp_play_legato,
+        }
+    }
+
+    pub fn smp_glide_mode(&self, m: keyframexl::sampler::GlideMode) -> &'static str {
+        use keyframexl::sampler::GlideMode as G;
+        match m {
+            G::Fixed => self.smp_glide_fixed,
+            G::Auto => self.smp_glide_auto,
+        }
+    }
+
+    pub fn smp_stretch_mode(&self, m: keyframexl::sampler::StretchMode) -> &'static str {
+        use keyframexl::sampler::StretchMode as S;
+        match m {
+            S::Off => self.smp_stretch_off,
+            S::Time => self.smp_stretch_time,
+            S::Beat => self.smp_stretch_beat,
+        }
+    }
+
+    pub fn smp_filter_kind(&self, k: keyframexl::sampler::FilterKind) -> &'static str {
+        use keyframexl::sampler::FilterKind as F;
+        match k {
+            F::Off => self.smp_fk_off,
+            F::Lowpass => self.smp_fk_lp,
+            F::Highpass => self.smp_fk_hp,
+            F::Bandpass => self.smp_fk_bp,
+            F::Notch => self.smp_fk_notch,
+            F::Allpass => self.smp_fk_ap,
+        }
+    }
+
+    pub fn smp_filter_routing(&self, r: keyframexl::sampler::FilterRouting) -> &'static str {
+        use keyframexl::sampler::FilterRouting as R;
+        match r {
+            R::Serial => self.smp_fr_serial,
+            R::Parallel => self.smp_fr_parallel,
+        }
+    }
+
+    pub fn smp_lfo_shape(&self, s: keyframexl::sampler::LfoShape) -> &'static str {
+        use keyframexl::sampler::LfoShape as L;
+        match s {
+            L::Sine => self.smp_lfo_sine,
+            L::AbsSine => self.smp_lfo_abs_sine,
+            L::Triangle => self.smp_lfo_tri,
+            L::Square => self.smp_lfo_sq,
+            L::Saw => self.smp_lfo_saw,
+            L::InvSaw => self.smp_lfo_inv_saw,
+            L::Random => self.smp_lfo_rand,
+            L::LpRandom => self.smp_lfo_lp_rand,
+        }
+    }
+
+    pub fn smp_mod_source(&self, s: keyframexl::sampler::ModSource) -> &'static str {
+        use keyframexl::sampler::ModSource as M;
+        match s {
+            M::None => "—",
+            M::Lfo1 => "LFO 1",
+            M::Lfo2 => "LFO 2",
+            M::Env1 => self.smp_ms_env1,
+            M::Env2 => self.smp_ms_env2,
+            M::Velocity => self.smp_ms_vel,
+            M::Key => self.smp_ms_key,
+            M::Random => self.smp_ms_rand,
+            M::ProgLfo1 => self.smp_ms_plfo1,
+            M::ProgLfo2 => self.smp_ms_plfo2,
+        }
+    }
+
+    pub fn smp_mod_target(&self, t: keyframexl::sampler::ModTarget) -> &'static str {
+        use keyframexl::sampler::ModTarget as M;
+        match t {
+            M::Pitch => self.smp_mt_pitch,
+            M::Gain => self.smp_mt_gain,
+            M::Pan => self.smp_mt_pan,
+            M::Cutoff1 => self.smp_mt_cut1,
+            M::Emphasis1 => self.smp_mt_emph1,
+            M::Cutoff2 => self.smp_mt_cut2,
+            M::Emphasis2 => self.smp_mt_emph2,
+            M::Lfo1Rate => self.smp_mt_lfo1,
+            M::Lfo2Rate => self.smp_mt_lfo2,
         }
     }
 }

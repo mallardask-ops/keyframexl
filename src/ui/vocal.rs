@@ -5,6 +5,7 @@ use super::{
     App, Tone, kit,
     synth::{Edit, pair, panel, pct, secs, signed},
 };
+use crate::i18n::fill;
 use crate::theme as t;
 use eframe::egui::{self, Ui, vec2};
 use keyframexl::{
@@ -47,7 +48,8 @@ impl App {
                     a.vocal.reload(&dir);
                 }
                 self.publish();
-                self.say(Tone::Done, format!("{name} installed."));
+                let msg = fill(self.tr().vocal_installed, &[("name", &name)]);
+                self.say(Tone::Done, msg);
             }
             Ok(Err(e)) => {
                 self.vocal_job = None;
@@ -106,108 +108,238 @@ impl App {
     }
 
     pub(super) fn vocal_editor(&mut self, ui: &mut Ui, id: u64, voice: &Voice) {
+        let tr = self.tr();
         let mut v = voice.clone();
         let mut ed = Edit::default();
         let mut pick: Option<(String, String)> = None;
         let busy = self.vocal_job.as_ref().map(|(l, _)| l.clone());
         let status = self.audio.as_ref().map(|a| a.vocal.status.clone());
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-            panel(ui, "voicebank", t::enc_blue(), |ui| {
-                let installed = install::installed();
-                ui.horizontal_wrapped(|ui| {
-                    let shown = if v.name.is_empty() { "No voicebank".to_string() } else { v.name.clone() };
-                    egui::ComboBox::from_id_salt(("vocal-bank", id)).width(220.0).selected_text(shown).show_ui(ui, |ui| {
-                        kit::menu_style(ui);
-                        for b in &installed {
-                            if ui.selectable_label(b.path.to_string_lossy() == v.bank.as_str(), &b.name).clicked() {
-                                pick = Some((b.path.to_string_lossy().to_string(), b.name.clone()));
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+                panel(ui, tr.vocal_sec_bank, t::enc_blue(), |ui| {
+                    let installed = install::installed();
+                    ui.horizontal_wrapped(|ui| {
+                        let shown = if v.name.is_empty() {
+                            tr.vocal_no_bank.to_string()
+                        } else {
+                            v.name.clone()
+                        };
+                        egui::ComboBox::from_id_salt(("vocal-bank", id))
+                            .width(220.0)
+                            .selected_text(shown)
+                            .show_ui(ui, |ui| {
+                                kit::menu_style(ui);
+                                for b in &installed {
+                                    if ui
+                                        .selectable_label(
+                                            b.path.to_string_lossy() == v.bank.as_str(),
+                                            &b.name,
+                                        )
+                                        .clicked()
+                                    {
+                                        pick = Some((
+                                            b.path.to_string_lossy().to_string(),
+                                            b.name.clone(),
+                                        ));
+                                    }
+                                }
+                                if installed.is_empty() {
+                                    ui.label(
+                                        egui::RichText::new(tr.vocal_none_installed)
+                                            .color(t::muted()),
+                                    );
+                                }
+                            });
+                        if kit::button(ui, tr.vocal_folder_btn, kit::Kind::Normal, busy.is_none())
+                            .on_hover_text(tr.vocal_folder_tip)
+                            .clicked()
+                            && let Some(dir) = rfd::FileDialog::new().pick_folder()
+                        {
+                            match vocal::oto::Voicebank::load(&dir) {
+                                Ok(b) => pick = Some((dir.to_string_lossy().to_string(), b.name)),
+                                Err(e) => self.say(Tone::Bad, e),
                             }
                         }
-                        if installed.is_empty() {
-                            ui.label(egui::RichText::new("None installed yet").color(t::muted()));
-                        }
-                    });
-                    if kit::button(ui, "Folder…", kit::Kind::Normal, busy.is_none()).on_hover_text("Use an unpacked UTAU voicebank folder (the one with oto.ini)").clicked()
-                        && let Some(dir) = rfd::FileDialog::new().pick_folder()
-                    {
-                        match vocal::oto::Voicebank::load(&dir) {
-                            Ok(b) => pick = Some((dir.to_string_lossy().to_string(), b.name)),
-                            Err(e) => self.say(Tone::Bad, e),
-                        }
-                    }
-                    if kit::button(ui, "Install zip…", kit::Kind::Normal, busy.is_none()).on_hover_text("Install a downloaded UTAU voicebank (.zip) into KeyFrameXL's voicebank folder").clicked()
-                        && let Some(zip) = rfd::FileDialog::new().add_filter("UTAU voicebank", &["zip"]).pick_file()
-                    {
-                        let name = zip.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "Voicebank".into());
-                        self.start_job(&format!("Installing {name}"), move || install::install_zip(&zip, &name));
-                    }
-                });
-                ui.horizontal_wrapped(|ui| {
-                    let label = if busy.is_some() { "Working…" } else { "Download Kasane Teto" };
-                    if kit::button(ui, label, kit::Kind::Primary, busy.is_none())
-                        .on_hover_text("Fetch the free Kasane Teto UTAU voicebank from her official site (about 12 MB)")
+                        if kit::button(
+                            ui,
+                            tr.vocal_install_zip_btn,
+                            kit::Kind::Normal,
+                            busy.is_none(),
+                        )
+                        .on_hover_text(tr.vocal_install_zip_tip)
                         .clicked()
-                    {
-                        self.start_job("Downloading Kasane Teto", install::download_teto);
+                            && let Some(zip) = rfd::FileDialog::new()
+                                .add_filter(tr.vocal_dlg_utau_filter, &["zip"])
+                                .pick_file()
+                        {
+                            let name = zip
+                                .file_stem()
+                                .map(|s| s.to_string_lossy().to_string())
+                                .unwrap_or_else(|| tr.vocal_bank_fallback.into());
+                            let job_label = fill(tr.vocal_installing, &[("name", &name)]);
+                            self.start_job(&job_label, move || install::install_zip(&zip, &name));
+                        }
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        let label = if busy.is_some() {
+                            tr.vocal_working
+                        } else {
+                            tr.vocal_download_teto
+                        };
+                        if kit::button(ui, label, kit::Kind::Primary, busy.is_none())
+                            .on_hover_text(tr.vocal_download_teto_tip)
+                            .clicked()
+                        {
+                            self.start_job(tr.vocal_downloading_teto, install::download_teto);
+                        }
+                        ui.hyperlink_to(
+                            egui::RichText::new(tr.vocal_teto_terms).size(12.0),
+                            install::TETO_TERMS,
+                        );
+                    });
+                    if let Some(label) = &busy {
+                        ui.label(egui::RichText::new(format!("{label}…")).color(t::wait()));
                     }
-                    ui.hyperlink_to(egui::RichText::new("Teto's terms of use").size(12.0), install::TETO_TERMS);
+                    if v.bank.is_empty() {
+                        ui.label(egui::RichText::new(tr.vocal_empty_hint).color(t::muted()));
+                    } else {
+                        ui.label(
+                            egui::RichText::new(&v.bank)
+                                .font(t::sans(11.5))
+                                .color(t::faint()),
+                        );
+                    }
+                    if let Some(st) = &status {
+                        if st.busy() {
+                            let done = st
+                                .done
+                                .load(std::sync::atomic::Ordering::Relaxed)
+                                .to_string();
+                            let total = st
+                                .total
+                                .load(std::sync::atomic::Ordering::Relaxed)
+                                .to_string();
+                            ui.label(
+                                egui::RichText::new(fill(
+                                    tr.vocal_rendering_progress,
+                                    &[("done", &done), ("total", &total)],
+                                ))
+                                .color(t::wait()),
+                            );
+                        }
+                        for m in st.messages() {
+                            ui.label(egui::RichText::new(m).color(t::bad()));
+                        }
+                    }
                 });
-                if let Some(label) = &busy {
-                    ui.label(egui::RichText::new(format!("{label}…")).color(t::wait()));
-                }
-                if v.bank.is_empty() {
-                    ui.label(egui::RichText::new("This channel has no voice yet. Download Kasane Teto, install a .zip, or pick a bank folder. Any UTAU voicebank works.").color(t::muted()));
-                } else {
-                    ui.label(egui::RichText::new(&v.bank).font(t::sans(11.5)).color(t::faint()));
-                }
-                if let Some(st) = &status {
-                    if st.busy() {
-                        ui.label(egui::RichText::new(format!("Rendering the singing: {} of {}", st.done.load(std::sync::atomic::Ordering::Relaxed), st.total.load(std::sync::atomic::Ordering::Relaxed))).color(t::wait()));
-                    }
-                    for m in st.messages() {
-                        ui.label(egui::RichText::new(m).color(t::bad()));
-                    }
-                }
-            });
-            panel(ui, "voice", t::enc_green(), |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    let c = t::enc_green();
-                    let p = &mut v.params;
-                    ed.knob(ui, "VIBRATO", c, &mut p.vibrato_depth, (0.0, 150.0, 35.0), false, &|x| format!("{x:.0} ct"), "Vibrato depth on long notes, in cents");
-                    ed.knob(ui, "RATE", c, &mut p.vibrato_rate, (2.0, 9.0, 5.5), false, &|x| format!("{x:.1} Hz"), "Vibrato speed");
-                    ed.knob(ui, "DELAY", c, &mut p.vibrato_delay, (0.0, 1.5, 0.3), false, &secs, "How long a note holds still before the vibrato starts");
-                    ed.knob(ui, "FADE IN", c, &mut p.vibrato_fade, (0.0, 1.5, 0.25), false, &secs, "How slowly the vibrato grows to full depth");
-                    ed.knob(ui, "GLIDE", c, &mut p.transition, (0.01, 0.3, 0.07), true, &secs, "How long the pitch takes to move between touching notes");
-                    ed.knob(ui, "GENDER", c, &mut p.gender, (-1.0, 1.0, 0.0), false, &signed, "Formant shift: darker, bigger voice (−) or brighter, smaller voice (+). The pitch stays.");
-                    ed.knob(ui, "BREATH", c, &mut p.breath, (0.0, 1.0, 0.0), false, &pct, "Breathiness");
+                panel(ui, tr.vocal_sec_voice, t::enc_green(), |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        let c = t::enc_green();
+                        let p = &mut v.params;
+                        ed.knob(
+                            ui,
+                            tr.vocal_k_vibrato,
+                            c,
+                            &mut p.vibrato_depth,
+                            (0.0, 150.0, 35.0),
+                            false,
+                            &|x| format!("{x:.0} ct"),
+                            tr.vocal_k_vibrato_hint,
+                        );
+                        ed.knob(
+                            ui,
+                            tr.vocal_k_rate,
+                            c,
+                            &mut p.vibrato_rate,
+                            (2.0, 9.0, 5.5),
+                            false,
+                            &|x| format!("{x:.1} Hz"),
+                            tr.vocal_k_rate_hint,
+                        );
+                        ed.knob(
+                            ui,
+                            tr.vocal_k_delay,
+                            c,
+                            &mut p.vibrato_delay,
+                            (0.0, 1.5, 0.3),
+                            false,
+                            &secs,
+                            tr.vocal_k_delay_hint,
+                        );
+                        ed.knob(
+                            ui,
+                            tr.vocal_k_fade_in,
+                            c,
+                            &mut p.vibrato_fade,
+                            (0.0, 1.5, 0.25),
+                            false,
+                            &secs,
+                            tr.vocal_k_fade_in_hint,
+                        );
+                        ed.knob(
+                            ui,
+                            tr.vocal_k_glide,
+                            c,
+                            &mut p.transition,
+                            (0.01, 0.3, 0.07),
+                            true,
+                            &secs,
+                            tr.vocal_k_glide_hint,
+                        );
+                        ed.knob(
+                            ui,
+                            tr.vocal_k_gender,
+                            c,
+                            &mut p.gender,
+                            (-1.0, 1.0, 0.0),
+                            false,
+                            &signed,
+                            tr.vocal_k_gender_hint,
+                        );
+                        ed.knob(
+                            ui,
+                            tr.vocal_k_breath,
+                            c,
+                            &mut p.breath,
+                            (0.0, 1.0, 0.0),
+                            false,
+                            &pct,
+                            tr.vocal_k_breath_hint,
+                        );
+                    });
                 });
-            });
-            pair(ui, |ui, col| {
-                if col == 0 {
-                    panel(ui, "default lyric", t::enc_orange(), |ui| {
-                        ui.label(egui::RichText::new("What a note sings until you type a lyric for it.").color(t::muted()));
-                        let r = ui.add(egui::TextEdit::singleline(&mut v.default_lyric).desired_width(140.0));
-                        if r.changed() {
-                            if kit::first_edit(ui, &r) {
-                                ed.started = true;
+                pair(ui, |ui, col| {
+                    if col == 0 {
+                        panel(ui, tr.vocal_sec_default_lyric, t::enc_orange(), |ui| {
+                            ui.label(
+                                egui::RichText::new(tr.vocal_default_lyric_desc).color(t::muted()),
+                            );
+                            let r = ui.add(
+                                egui::TextEdit::singleline(&mut v.default_lyric)
+                                    .desired_width(140.0),
+                            );
+                            if r.changed() {
+                                if kit::first_edit(ui, &r) {
+                                    ed.started = true;
+                                }
+                                ed.changed = true;
                             }
-                            ed.changed = true;
-                        }
-                        kit::end_edit(ui, &r);
-                    });
-                } else {
-                    panel(ui, "singing", t::enc_white(), |ui| {
-                        ui.label("Open the piano roll, draw notes, then double-click a note (or press F2) and type its lyric: ka, shi, tsu, か, カ, or Cyrillic.");
-                        ui.label(egui::RichText::new("+  keeps the vowel of the note before   ·   -  is a rest   ·   Enter / Tab moves on to the next note").color(t::muted()));
-                        ui.label(egui::RichText::new("Tools → Lyrics… in the piano roll pastes a whole text over the notes. The event lane tunes each note: Velocity = loudness, Mod X = vibrato depth, Mod Y = gender.").color(t::muted()));
-                        if kit::button(ui, "Piano roll", kit::Kind::Normal, true).clicked() {
-                            self.open_roll(id);
-                        }
-                    });
-                }
+                            kit::end_edit(ui, &r);
+                        });
+                    } else {
+                        panel(ui, tr.vocal_sec_singing, t::enc_white(), |ui| {
+                            ui.label(tr.vocal_singing_p1);
+                            ui.label(egui::RichText::new(tr.vocal_singing_p2).color(t::muted()));
+                            ui.label(egui::RichText::new(tr.vocal_singing_p3).color(t::muted()));
+                            if kit::button(ui, tr.win_roll, kit::Kind::Normal, true).clicked() {
+                                self.open_roll(id);
+                            }
+                        });
+                    }
+                });
             });
-        });
         if let Some((dir, name)) = pick {
             v.bank = dir;
             v.name = name;
@@ -310,6 +442,8 @@ impl App {
         let Some(mut text) = self.lyrics_dialog.take() else {
             return;
         };
+        let tr = self.tr();
+        let lang = tr.lang;
         let mut open = true;
         let mut apply = false;
         let targets = if self.roll_sel.is_empty() {
@@ -317,20 +451,46 @@ impl App {
         } else {
             self.roll_sel.len()
         };
-        egui::Window::new("Lyrics").open(&mut open).default_width(420.0).collapsible(false).show(ctx, |ui| {
-            ui.label(egui::RichText::new("Paste the words. Each syllable goes onto one note, in time order. Separate with spaces or hyphens: ko-n-ni-chi-ha, こんにちは, привіт. + keeps the last vowel, - is a rest.").color(t::muted()));
-            ui.add(egui::TextEdit::multiline(&mut text).desired_rows(6).desired_width(f32::INFINITY));
-            let n = split_text(&text).len();
-            ui.label(format!("{n} syllable(s) for {targets} note(s){}", if self.roll_sel.is_empty() { " in this channel" } else { " selected" }));
-            ui.horizontal(|ui| {
-                if kit::button(ui, "Apply", kit::Kind::Primary, n > 0 && targets > 0).clicked() {
-                    apply = true;
-                }
+        egui::Window::new(tr.vocal_lyrics_title)
+            .id(egui::Id::new("kfxl-lyrics-window"))
+            .open(&mut open)
+            .default_width(420.0)
+            .collapsible(false)
+            .show(ctx, |ui| {
+                ui.label(egui::RichText::new(tr.vocal_lyrics_desc).color(t::muted()));
+                ui.add(
+                    egui::TextEdit::multiline(&mut text)
+                        .desired_rows(6)
+                        .desired_width(f32::INFINITY),
+                );
+                let n = split_text(&text).len();
+                let syl = tr.vocal_syllables.fmt(lang, n);
+                let notes = if self.roll_sel.is_empty() {
+                    tr.vocal_notes_in_channel.fmt(lang, targets)
+                } else {
+                    tr.vocal_notes_selected.fmt(lang, targets)
+                };
+                ui.label(fill(
+                    tr.vocal_lyrics_summary,
+                    &[("syllables", &syl), ("notes", &notes)],
+                ));
+                ui.horizontal(|ui| {
+                    if kit::button(
+                        ui,
+                        tr.common_apply,
+                        kit::Kind::Primary,
+                        n > 0 && targets > 0,
+                    )
+                    .clicked()
+                    {
+                        apply = true;
+                    }
+                });
             });
-        });
         if apply {
             let n = self.apply_lyrics_text(&text);
-            self.say(Tone::Done, format!("{n} lyric(s) set. Ctrl+Z undoes."));
+            let msg = tr.vocal_lyrics_set.fmt(lang, n);
+            self.say(Tone::Done, msg);
             return;
         }
         if open {
