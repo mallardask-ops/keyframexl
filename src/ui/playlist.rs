@@ -192,6 +192,20 @@ fn tool_icon(p: &egui::Painter, c: Pos2, tool: Tool, col: egui::Color32) {
 }
 
 impl App {
+    fn playlist_track_name(&self, t: u32) -> String {
+        let custom = self
+            .song
+            .tracks
+            .get(t as usize)
+            .map(|tr| tr.name.as_str())
+            .unwrap_or("");
+        if custom.is_empty() {
+            crate::i18n::fill(self.tr().pl_track_n, &[("n", &(t + 1).to_string())])
+        } else {
+            custom.to_string()
+        }
+    }
+
     pub(crate) fn delete_clip(&mut self, i: usize) {
         if i >= self.song.clips.len() {
             return;
@@ -200,7 +214,7 @@ impl App {
         self.song.clips.remove(i);
         self.clip = None;
         self.publish();
-        self.say(Tone::Quiet, "Clip deleted. Ctrl+Z undoes.");
+        self.say(Tone::Quiet, self.tr().pl_clip_deleted);
     }
 
     /// Time signature `num/den` from bar `bar` on (one undo step). Bars before
@@ -229,10 +243,15 @@ impl App {
             m.clear();
         }
         self.publish();
-        self.say(
-            Tone::Quiet,
-            format!("{num}/{den} from bar {}. Ctrl+Z undoes.", bar + 1),
+        let msg = crate::i18n::fill(
+            self.tr().pl_meter_set,
+            &[
+                ("num", &num.to_string()),
+                ("den", &den.to_string()),
+                ("bar", &(bar + 1).to_string()),
+            ],
         );
+        self.say(Tone::Quiet, msg);
     }
 
     /// Move the song playhead to the next (`dir` > 0) or previous marker.
@@ -260,16 +279,13 @@ impl App {
                     format!("{name} · {}", song_bar_pos(&self.song.meters, tick)),
                 );
             }
-            None if m.is_empty() => self.say(
-                Tone::Quiet,
-                "No markers yet: right-click the playlist ruler to add one.",
-            ),
+            None if m.is_empty() => self.say(Tone::Quiet, self.tr().pl_no_markers),
             None => self.say(
                 Tone::Quiet,
                 if dir > 0 {
-                    "No marker after the playhead."
+                    self.tr().pl_no_marker_after
                 } else {
-                    "No marker before the playhead."
+                    self.tr().pl_no_marker_before
                 },
             ),
         }
@@ -285,14 +301,13 @@ impl App {
         self.publish();
         self.seek_tick(a);
         let name = self.song.markers[i].name.clone();
-        self.say(
-            Tone::Quiet,
-            format!(
-                "Looping {name}: {} to {}.",
-                song_bar_pos(&self.song.meters, a),
-                song_bar_pos(&self.song.meters, b)
-            ),
+        let a_pos = song_bar_pos(&self.song.meters, a);
+        let b_pos = song_bar_pos(&self.song.meters, b);
+        let msg = crate::i18n::fill(
+            self.tr().pl_looping_marker,
+            &[("name", &name), ("a", &a_pos), ("b", &b_pos)],
         );
+        self.say(Tone::Quiet, msg);
     }
 
     fn add_clip(&mut self) {
@@ -305,14 +320,10 @@ impl App {
         self.song.clips.push(Clip::new(self.selected, start, 0));
         self.clip = Some(self.song.clips.len() - 1);
         self.publish();
-        self.say(
-            Tone::Quiet,
-            format!(
-                "{} placed at {} on track 1. Ctrl+Z undoes.",
-                self.pattern().name,
-                song_bar_pos(&self.song.meters, start)
-            ),
-        );
+        let pat = self.pattern().name.clone();
+        let pos = song_bar_pos(&self.song.meters, start);
+        let msg = crate::i18n::fill(self.tr().pl_placed_track1, &[("pat", &pat), ("pos", &pos)]);
+        self.say(Tone::Quiet, msg);
     }
 
     fn make_unique(&mut self, i: usize) {
@@ -321,13 +332,9 @@ impl App {
             Ok(id) => {
                 self.selected = id;
                 self.publish();
-                self.say(
-                    Tone::Quiet,
-                    format!(
-                        "Clip now has its own copy: {}. Ctrl+Z undoes.",
-                        self.pattern().name
-                    ),
-                );
+                let pat = self.pattern().name.clone();
+                let msg = crate::i18n::fill(self.tr().pl_made_unique, &[("pat", &pat)]);
+                self.say(Tone::Quiet, msg);
             }
             Err(e) => {
                 self.history.pop();
@@ -346,17 +353,18 @@ impl App {
         let at = self.song.clips[i].start;
         self.clip = Some(i);
         self.publish();
-        self.say(
-            Tone::Quiet,
-            format!(
-                "Clip at {} {}. Ctrl+Z undoes.",
-                song_bar_pos(&self.song.meters, at),
-                if on { "muted" } else { "unmuted" }
-            ),
-        );
+        let pos = song_bar_pos(&self.song.meters, at);
+        let tmpl = if on {
+            self.tr().pl_clip_muted
+        } else {
+            self.tr().pl_clip_unmuted
+        };
+        let msg = crate::i18n::fill(tmpl, &[("pos", &pos)]);
+        self.say(Tone::Quiet, msg);
     }
 
     pub(super) fn playlist(&mut self, ui: &mut Ui) {
+        let tr = self.tr();
         let tool_id = egui::Id::new("kfxl-playlist-tool");
         let mut tool = ui
             .data(|d| d.get_temp::<Tool>(tool_id))
@@ -366,7 +374,10 @@ impl App {
                 if ui.input(|i| !i.modifiers.command && !i.modifiers.alt && i.key_pressed(tl.key()))
                 {
                     tool = tl;
-                    self.say(Tone::Quiet, format!("{} tool.", tl.label()));
+                    self.say(
+                        Tone::Quiet,
+                        crate::i18n::fill(tr.pl_tool_selected, &[("label", tr.tool_label(tl))]),
+                    );
                 }
             }
         }
@@ -403,48 +414,50 @@ impl App {
         }
         let n = self.song.clips.len();
         let sub = if n == 0 {
-            "empty".to_string()
+            tr.pl_empty.to_string()
         } else {
-            format!("{n} clip(s)  ·  {} bar(s)", self.song.bars())
+            format!(
+                "{}  ·  {}",
+                tr.pl_clips_count.fmt(tr.lang, n),
+                tr.rack_bars.fmt(tr.lang, self.song.bars() as usize)
+            )
         };
         let has_sel = self.clip.is_some();
         let mut act: Option<&str> = None;
         App::panel_header(ui, &sub, |ui, slot| {
             if slot == Slot::Menu {
-                if ui.button("Add clip").clicked() {
+                if ui.button(tr.pl_add_clip).clicked() {
                     act = Some("add");
                     ui.close_menu();
                 }
                 if ui
-                    .add_enabled(has_sel, egui::Button::new("Make unique"))
+                    .add_enabled(has_sel, egui::Button::new(tr.pl_make_unique))
                     .clicked()
                 {
                     act = Some("unique");
                     ui.close_menu();
                 }
                 if ui
-                    .add_enabled(has_sel, egui::Button::new("Mute clip"))
+                    .add_enabled(has_sel, egui::Button::new(tr.pl_mute_clip))
                     .clicked()
                 {
                     act = Some("mute");
                     ui.close_menu();
                 }
                 if ui
-                    .add_enabled(has_sel, egui::Button::new("Delete clip"))
+                    .add_enabled(has_sel, egui::Button::new(tr.pl_delete_clip))
                     .clicked()
                 {
                     act = Some("delete");
                     ui.close_menu();
                 }
                 ui.separator();
-                if kit::menu_check(ui, self.song_mode, "Play the playlist (song mode)", "")
-                    .clicked()
-                {
+                if kit::menu_check(ui, self.song_mode, tr.pl_play_song_mode, "").clicked() {
                     self.set_song_mode(!self.song_mode);
                     ui.close_menu();
                 }
-                if kit::menu_check(ui, self.follow, "Follow playhead", "")
-                    .on_hover_text("Keep the playhead on screen while playing")
+                if kit::menu_check(ui, self.follow, tr.view_follow_playhead, "")
+                    .on_hover_text(tr.pl_follow_tip)
                     .clicked()
                 {
                     self.follow = !self.follow;
@@ -453,8 +466,8 @@ impl App {
                 self.window_menu_tail(ui, Tab::Playlist);
                 return;
             }
-            let r = kit::button(ui, "Make unique", kit::Kind::Normal, has_sel)
-                .on_hover_text("Give the selected clip its own copy of the pattern");
+            let r = kit::button(ui, tr.pl_make_unique, kit::Kind::Normal, has_sel)
+                .on_hover_text(tr.pl_make_unique_tip);
             #[cfg(test)]
             {
                 self.probe.unique = Some(r.rect);
@@ -478,7 +491,7 @@ impl App {
                         kit::Kind::Ghost
                     },
                     true,
-                    tl.label(),
+                    tr.tool_label(tl),
                     |p, face, ink| {
                         tool_icon(p, face.center(), tl, if on { t::text() } else { ink });
                         if on {
@@ -492,13 +505,13 @@ impl App {
                         }
                     },
                 );
-                if kit::tip(r, format!("{}  {:?}", tl.label(), tl.key())).clicked() {
+                if kit::tip(r, format!("{}  {:?}", tr.tool_label(tl), tl.key())).clicked() {
                     tool = tl;
                 }
             }
             ui.spacing_mut().item_spacing.x = 8.0;
-            let r = kit::button(ui, "Add clip", kit::Kind::Normal, true)
-                .on_hover_text("Place the selected pattern after the last clip");
+            let r = kit::button(ui, tr.pl_add_clip, kit::Kind::Normal, true)
+                .on_hover_text(tr.pl_add_clip_tip);
             #[cfg(test)]
             {
                 self.probe.add = Some(r.rect);
@@ -699,7 +712,7 @@ impl App {
             &painter,
             pos2(well.left() + 12.0, well.top() + RULER_H / 2.0),
             Align2::LEFT_CENTER,
-            "track",
+            tr.pl_track_caps,
             12.0,
             t::faint(),
         );
@@ -818,7 +831,7 @@ impl App {
             gp.text(
                 pos2(x - 4.0, well.top() + RULER_H / 2.0),
                 Align2::RIGHT_CENTER,
-                "END",
+                tr.pl_end_tag,
                 t::mono(12.0),
                 t::text(),
             );
@@ -875,22 +888,31 @@ impl App {
             }
             let led_hit = Rect::from_center_size(led_c, vec2(24.0, 24.0));
             let led_resp = ui.interact(led_hit, ui.id().with(("track-mute", t)), Sense::click());
-            let led_resp = led_resp.on_hover_text(format!(
-                "Track {}: click to {}mute",
-                t + 1,
-                if muted { "un" } else { "" }
+            let tr = self.tr();
+            let t_num = (t + 1).to_string();
+            let led_resp = led_resp.on_hover_text(crate::i18n::fill(
+                if muted {
+                    tr.pl_track_unmute_tip
+                } else {
+                    tr.pl_track_mute_tip
+                },
+                &[("n", &t_num)],
             ));
             if led_resp.clicked() {
                 self.checkpoint();
                 self.song.track_mut(t as u32).muted = !self.song.track_mut(t as u32).muted;
                 let now_muted = self.song.track_muted(t as u32);
                 self.publish();
+                let tr = self.tr();
                 self.say(
                     Tone::Quiet,
-                    format!(
-                        "Track {} {}. Ctrl+Z undoes.",
-                        t + 1,
-                        if now_muted { "muted" } else { "unmuted" }
+                    crate::i18n::fill(
+                        if now_muted {
+                            tr.pl_track_muted
+                        } else {
+                            tr.pl_track_unmuted
+                        },
+                        &[("n", &t_num)],
                     ),
                 );
             }
@@ -959,14 +981,15 @@ impl App {
                     self.checkpoint();
                     self.song.track_mut(t as u32).name = name;
                     self.publish();
+                    let tr = self.tr();
                     self.say(
                         Tone::Quiet,
-                        format!("Track {} renamed. Ctrl+Z undoes.", t + 1),
+                        crate::i18n::fill(tr.pl_track_renamed, &[("n", &t_num)]),
                     );
                     rename = None;
                 }
             } else {
-                let name = self.song.track_name(t as u32);
+                let name = self.playlist_track_name(t as u32);
                 let shown = kit::elide(&painter, &name, t::sans(13.0), HEAD_W - 46.0);
                 painter.text(
                     pos2(well.left() + 32.0, y + lane_h / 2.0),
@@ -997,23 +1020,25 @@ impl App {
                 lane_next = LANE_H;
             }
             if head_resp.double_clicked() {
-                rename = Some((t as u32, self.song.track_name(t as u32)));
+                rename = Some((t as u32, self.playlist_track_name(t as u32)));
             }
             let cur_color = self.song.tracks.get(t).and_then(|tr| tr.color);
             head_resp.context_menu(|ui| {
                 kit::menu_style(ui);
+                let tr = self.tr();
                 if ui
-                    .button("Rename…")
-                    .on_hover_text("Double-click the header does the same")
+                    .button(tr.pat_rename)
+                    .on_hover_text(tr.pl_track_rename_tip)
                     .clicked()
                 {
-                    rename = Some((t as u32, self.song.track_name(t as u32)));
+                    rename = Some((t as u32, self.playlist_track_name(t as u32)));
                     ui.close_menu();
                 }
-                ui.menu_button("Colour", |ui| {
+                ui.menu_button(tr.pat_colour, |ui| {
                     kit::menu_style(ui);
+                    let tr = self.tr();
                     if ui
-                        .selectable_label(cur_color.is_none(), "Default")
+                        .selectable_label(cur_color.is_none(), tr.pl_track_default_colour)
                         .clicked()
                     {
                         self.checkpoint();
@@ -1021,7 +1046,7 @@ impl App {
                         self.publish();
                         self.say(
                             Tone::Quiet,
-                            format!("Track {} colour reset. Ctrl+Z undoes.", t + 1),
+                            crate::i18n::fill(tr.pl_track_colour_reset, &[("n", &t_num)]),
                         );
                         ui.close_menu();
                     }
@@ -1052,16 +1077,19 @@ impl App {
                             self.publish();
                             self.say(
                                 Tone::Quiet,
-                                format!("Track {} colour #{hex}. Ctrl+Z undoes.", t + 1),
+                                crate::i18n::fill(
+                                    tr.pl_track_colour_set,
+                                    &[("n", &t_num), ("hex", &hex)],
+                                ),
                             );
                             ui.close_menu();
                         }
                     }
                 });
                 let label = if self.song.track_muted(t as u32) {
-                    "Unmute"
+                    tr.pl_track_unmute
                 } else {
-                    "Mute"
+                    tr.pl_track_mute
                 };
                 if ui.button(label).clicked() {
                     self.checkpoint();
@@ -1070,10 +1098,13 @@ impl App {
                     self.publish();
                     self.say(
                         Tone::Quiet,
-                        format!(
-                            "Track {} {}. Ctrl+Z undoes.",
-                            t + 1,
-                            if !m { "muted" } else { "unmuted" }
+                        crate::i18n::fill(
+                            if !m {
+                                tr.pl_track_muted
+                            } else {
+                                tr.pl_track_unmuted
+                            },
+                            &[("n", &t_num)],
                         ),
                     );
                     ui.close_menu();
@@ -1088,7 +1119,14 @@ impl App {
                 let soloed = !muted
                     && !others.is_empty()
                     && others.iter().all(|o| self.song.track_muted(*o));
-                if ui.button(if soloed { "Unsolo" } else { "Solo" }).clicked() {
+                if ui
+                    .button(if soloed {
+                        tr.pl_track_unsolo
+                    } else {
+                        tr.pl_track_solo
+                    })
+                    .clicked()
+                {
                     self.checkpoint();
                     for o in others {
                         self.song.track_mut(o).muted = !soloed;
@@ -1097,15 +1135,18 @@ impl App {
                     self.publish();
                     self.say(
                         Tone::Quiet,
-                        format!(
-                            "Track {} {}. Ctrl+Z undoes.",
-                            t + 1,
-                            if soloed { "unsoloed" } else { "soloed" }
+                        crate::i18n::fill(
+                            if soloed {
+                                tr.pl_track_unsoloed
+                            } else {
+                                tr.pl_track_soloed
+                            },
+                            &[("n", &t_num)],
                         ),
                     );
                     ui.close_menu();
                 }
-                if ui.button("Clear track").clicked() {
+                if ui.button(tr.pl_track_clear).clicked() {
                     if self.song.clips.iter().any(|c| c.track == t as u32) {
                         self.checkpoint();
                         self.song.clips.retain(|c| c.track != t as u32);
@@ -1113,7 +1154,7 @@ impl App {
                         self.publish();
                         self.say(
                             Tone::Quiet,
-                            format!("Track {} cleared. Ctrl+Z undoes.", t + 1),
+                            crate::i18n::fill(tr.pl_track_cleared, &[("n", &t_num)]),
                         );
                     }
                     ui.close_menu();
@@ -1136,7 +1177,7 @@ impl App {
             painter.text(
                 c,
                 Align2::CENTER_CENTER,
-                "Click the grid or use Add clip to place a pattern.",
+                self.tr().pl_empty_grid_prompt,
                 t::sans(14.0),
                 t::muted(),
             );
@@ -1363,33 +1404,38 @@ impl App {
             }
             let mut menu_pick: Option<String> = None;
             let pat_color = pat.color;
+            let tr = self.tr();
             kit::popup_menu(ui, popup_id, &marker_resp, 220.0, |ui| {
-                if ui.button("Open in channel rack").clicked() {
+                if ui.button(tr.pl_open_in_rack).clicked() {
                     menu_pick = Some("rack".to_string());
                 }
-                if ui.button("Open in piano roll").clicked() {
+                if ui.button(tr.pl_open_in_roll).clicked() {
                     menu_pick = Some("roll".to_string());
                 }
-                if ui.button("Make unique").clicked() {
+                if ui.button(tr.pl_make_unique).clicked() {
                     menu_pick = Some("unique".to_string());
                 }
                 if ui
-                    .button(if c.muted { "Unmute clip" } else { "Mute clip" })
+                    .button(if c.muted {
+                        tr.pl_unmute_clip
+                    } else {
+                        tr.pl_mute_clip
+                    })
                     .clicked()
                 {
                     menu_pick = Some("mute".to_string());
                 }
                 if ui
-                    .button("Rename pattern…")
-                    .on_hover_text("F2 renames the pattern everywhere")
+                    .button(tr.pl_rename_pattern)
+                    .on_hover_text(tr.pl_rename_pattern_tip)
                     .clicked()
                 {
                     menu_pick = Some("rename-pat".to_string());
                 }
-                ui.menu_button("Pattern colour", |ui| {
+                ui.menu_button(tr.pl_pattern_colour, |ui| {
                     kit::menu_style(ui);
                     if ui
-                        .selectable_label(pat_color.is_none(), "By id (default)")
+                        .selectable_label(pat_color.is_none(), tr.pat_colour_by_id)
                         .clicked()
                     {
                         menu_pick = Some("pat-color-default".to_string());
@@ -1431,7 +1477,7 @@ impl App {
                         }
                     }
                 });
-                if ui.button("Delete").clicked() {
+                if ui.button(tr.pl_delete).clicked() {
                     menu_pick = Some("delete".to_string());
                 }
             });
@@ -1676,15 +1722,19 @@ impl App {
                 }
                 ui.data_mut(|d| d.insert_temp(drag_id, None::<PlDrag>));
             }
-            let tip = format!(
-                "{} at {}{}",
-                pat.name,
-                song_bar_pos(&self.song.meters, c.start),
-                if shared > 1 {
-                    format!(", shares notes with {} other clip(s)", shared - 1)
-                } else {
-                    String::new()
-                }
+            let tr = self.tr();
+            let shared_str = if shared > 1 {
+                tr.pl_shares_notes.fmt(tr.lang, shared - 1)
+            } else {
+                String::new()
+            };
+            let tip = crate::i18n::fill(
+                tr.pl_clip_tip,
+                &[
+                    ("pat", &pat.name),
+                    ("pos", &song_bar_pos(&self.song.meters, c.start)),
+                    ("shared", &shared_str),
+                ],
             );
             let resp = resp.on_hover_text(tip);
             if marker_used[i] {
@@ -1816,7 +1866,7 @@ impl App {
                             self.song.clips[i].length = Some(left);
                             self.song.clips.push(right);
                             self.publish();
-                            self.say(Tone::Quiet, "Clip sliced. Ctrl+Z undoes.");
+                            self.say(Tone::Quiet, self.tr().pl_clip_sliced);
                         }
                     }
                     _ => {}
@@ -1932,18 +1982,16 @@ impl App {
                         self.clip = None;
                         selection.clear();
                         self.publish();
-                        self.say(Tone::Quiet, "1 clip(s) deleted. Ctrl+Z undoes.");
+                        self.say(Tone::Quiet, self.tr().clips_deleted_msg(1));
                     } else {
                         selection.clear();
                         self.clip = None;
                     }
                 } else if b.dragging {
+                    let tr = self.tr();
                     self.say(
                         Tone::Quiet,
-                        format!(
-                            "{} clip(s) selected. Drag to move together, Shift+drag to duplicate, Del deletes.",
-                            selection.len()
-                        ),
+                        tr.pl_clips_selected.fmt(tr.lang, selection.len()),
                     );
                 }
                 pbox = None;
@@ -2037,13 +2085,16 @@ impl App {
                 self.song.clips.push(Clip::new(self.selected, start, track));
                 self.clip = Some(self.song.clips.len() - 1);
                 self.publish();
+                let tr = self.tr();
                 self.say(
                     Tone::Quiet,
-                    format!(
-                        "{} placed at {} on track {}. Ctrl+Z undoes.",
-                        self.pattern().name,
-                        song_bar_pos(&self.song.meters, start),
-                        track + 1
+                    crate::i18n::fill(
+                        tr.pl_placed_at_track,
+                        &[
+                            ("pat", &self.pattern().name),
+                            ("pos", &song_bar_pos(&self.song.meters, start)),
+                            ("track", &(track + 1).to_string()),
+                        ],
                     ),
                 );
             }
@@ -2088,22 +2139,29 @@ impl App {
         if let Some(hover) = rr.hover_pos()
             && let Some(i) = chip_at(hover)
         {
+            let tr = self.tr();
+            let marker_tip =
+                crate::i18n::fill(tr.pl_marker_tip, &[("name", &self.song.markers[i].name)]);
             egui::show_tooltip_at_pointer(
                 ui.ctx(),
                 ui.layer_id(),
                 ui.id().with("marker-tip"),
                 |ui| {
-                    ui.label(format!("{} · click: jump · double-click: loop to the next marker · right-click: rename", self.song.markers[i].name));
+                    ui.label(&marker_tip);
                 },
             );
         }
         rr.context_menu(|ui| {
             kit::menu_style(ui);
+            let tr = self.tr();
             let (tick, marker): (Tick, Option<usize>) =
                 ui.data(|d| d.get_temp(mark_id)).unwrap_or((0, None));
             match marker.filter(|&i| i < self.song.markers.len()) {
                 Some(i) => {
-                    kit::menu_header(ui, egui::RichText::new("Marker").color(t::muted()));
+                    kit::menu_header(
+                        ui,
+                        egui::RichText::new(tr.pl_marker_header).color(t::muted()),
+                    );
                     let edit = ui.add(
                         egui::TextEdit::singleline(&mut self.song.markers[i].name)
                             .char_limit(64)
@@ -2112,39 +2170,40 @@ impl App {
                     if edit.gained_focus() {
                         self.checkpoint();
                     }
-                    if ui.button("Loop to the next marker").clicked() {
+                    if ui.button(tr.pl_loop_to_next_marker).clicked() {
                         self.loop_marker(i);
                         ui.close_menu();
                     }
-                    if ui.button("Remove marker").clicked() {
+                    if ui.button(tr.pl_remove_marker).clicked() {
                         self.checkpoint();
                         let m = self.song.markers.remove(i);
-                        self.say(Tone::Quiet, format!("{} removed. Ctrl+Z undoes.", m.name));
+                        self.say(
+                            Tone::Quiet,
+                            crate::i18n::fill(tr.pl_marker_removed, &[("name", &m.name)]),
+                        );
                         ui.close_menu();
                     }
                 }
                 None => {
                     if ui
-                        .button(format!(
-                            "Add marker at {}",
-                            song_bar_pos(&self.song.meters, tick)
+                        .button(crate::i18n::fill(
+                            tr.pl_add_marker_at,
+                            &[("pos", &song_bar_pos(&self.song.meters, tick))],
                         ))
                         .clicked()
                     {
                         self.checkpoint();
                         let i = self.song.add_marker(tick);
+                        let mname = self.song.markers[i].name.clone();
                         self.say(
                             Tone::Quiet,
-                            format!(
-                                "{} added. Right-click it to rename. Ctrl+Z undoes.",
-                                self.song.markers[i].name
-                            ),
+                            crate::i18n::fill(tr.pl_marker_added, &[("name", &mname)]),
                         );
                         ui.close_menu();
                     }
                 }
             }
-            if self.song.loop_range.is_some() && ui.button("Clear time selection").clicked() {
+            if self.song.loop_range.is_some() && ui.button(tr.pl_clear_time_sel).clicked() {
                 self.song.loop_range = None;
                 self.publish();
                 ui.close_menu();
@@ -2155,8 +2214,11 @@ impl App {
             let (_, _, _, num, den) = bar_at(&self.song.meters, tick);
             kit::menu_header(
                 ui,
-                egui::RichText::new(format!("Time signature from bar {}", bar + 1))
-                    .color(t::muted()),
+                egui::RichText::new(crate::i18n::fill(
+                    tr.pl_time_sig_from_bar,
+                    &[("bar", &(bar + 1).to_string())],
+                ))
+                .color(t::muted()),
             );
             for (n, d) in [
                 (2, 4),
@@ -2176,7 +2238,7 @@ impl App {
             let here = self.song.meters.iter().any(|m| m.bar == bar && bar > 0);
             ui.separator();
             if ui
-                .add_enabled(here, egui::Button::new("Remove change here"))
+                .add_enabled(here, egui::Button::new(tr.pl_remove_change_here))
                 .clicked()
             {
                 self.checkpoint();
@@ -2187,10 +2249,7 @@ impl App {
                 self.publish();
                 self.say(
                     Tone::Quiet,
-                    format!(
-                        "Bar {} follows the bar before it again. Ctrl+Z undoes.",
-                        bar + 1
-                    ),
+                    crate::i18n::fill(tr.pl_meter_removed, &[("bar", &(bar + 1).to_string())]),
                 );
                 ui.close_menu();
             }
@@ -2208,7 +2267,7 @@ impl App {
         } else if rr.double_clicked() {
             if self.song.loop_range.take().is_some() {
                 self.publish();
-                self.say(Tone::Quiet, "Time selection cleared: the whole song loops.");
+                self.say(Tone::Quiet, self.tr().pl_time_sel_cleared);
             }
         } else if rr.clicked()
             && let Some(pos) = rr.interact_pointer_pos()
@@ -2244,12 +2303,15 @@ impl App {
             self.set_song_mode(true);
             self.publish();
             self.seek_tick(a);
+            let tr = self.tr();
             self.say(
                 Tone::Quiet,
-                format!(
-                    "Looping {} to {}. Double-click the ruler to clear.",
-                    song_bar_pos(&meters, a),
-                    song_bar_pos(&meters, b)
+                crate::i18n::fill(
+                    tr.pl_looping_span,
+                    &[
+                        ("a", &song_bar_pos(&meters, a)),
+                        ("b", &song_bar_pos(&meters, b)),
+                    ],
                 ),
             );
         }
@@ -2419,22 +2481,23 @@ impl App {
                             }
                             self.clip = None;
                             self.publish();
-                            self.say(
-                                Tone::Quiet,
-                                format!("{} clips moved. Ctrl+Z undoes.", selection.len()),
-                            );
+                            let tr = self.tr();
+                            self.say(Tone::Quiet, tr.pl_clips_moved.fmt(tr.lang, selection.len()));
                         } else {
                             self.song.clips[i].start = start;
                             self.song.clips[i].track = track;
                             selection = vec![i];
                             self.clip = if tool == Tool::Select { None } else { Some(i) };
                             self.publish();
+                            let tr = self.tr();
                             self.say(
                                 Tone::Quiet,
-                                format!(
-                                    "Clip moved to {} on track {}. Ctrl+Z undoes.",
-                                    song_bar_pos(&self.song.meters, start),
-                                    track + 1
+                                crate::i18n::fill(
+                                    tr.pl_clip_moved,
+                                    &[
+                                        ("pos", &song_bar_pos(&self.song.meters, start)),
+                                        ("track", &(track + 1).to_string()),
+                                    ],
                                 ),
                             );
                         }
@@ -2446,12 +2509,18 @@ impl App {
                         self.song.clips[i].length = Some(len.max(1));
                         self.clip = Some(i);
                         self.publish();
+                        let tr = self.tr();
                         self.say(
                             Tone::Quiet,
-                            format!(
-                                "Clip length {} at {}. Ctrl+Z undoes.",
-                                len,
-                                song_bar_pos(&self.song.meters, self.song.clips[i].start)
+                            crate::i18n::fill(
+                                tr.pl_clip_length,
+                                &[
+                                    ("len", &len.to_string()),
+                                    (
+                                        "pos",
+                                        &song_bar_pos(&self.song.meters, self.song.clips[i].start),
+                                    ),
+                                ],
                             ),
                         );
                     }
@@ -2469,12 +2538,15 @@ impl App {
                         self.song.clips[i].length = Some(len.max(1));
                         self.clip = Some(i);
                         self.publish();
+                        let tr = self.tr();
                         self.say(
                             Tone::Quiet,
-                            format!(
-                                "Clip trimmed to {} at {}. Ctrl+Z undoes.",
-                                len,
-                                song_bar_pos(&self.song.meters, start)
+                            crate::i18n::fill(
+                                tr.pl_clip_trimmed,
+                                &[
+                                    ("len", &len.to_string()),
+                                    ("pos", &song_bar_pos(&self.song.meters, start)),
+                                ],
                             ),
                         );
                     }
@@ -2510,9 +2582,10 @@ impl App {
                             selection = new_sel;
                             self.clip = None;
                             self.publish();
+                            let tr = self.tr();
                             self.say(
                                 Tone::Quiet,
-                                format!("{} clips duplicated. Ctrl+Z undoes.", selection.len()),
+                                tr.pl_clips_duplicated.fmt(tr.lang, selection.len()),
                             );
                         } else {
                             let mut nc = self.song.clips[i];
@@ -2523,12 +2596,15 @@ impl App {
                             self.clip = Some(ni);
                             selection = vec![ni];
                             self.publish();
+                            let tr = self.tr();
                             self.say(
                                 Tone::Quiet,
-                                format!(
-                                    "Clip duplicated to {} on track {}. Ctrl+Z undoes.",
-                                    song_bar_pos(&self.song.meters, start),
-                                    track + 1
+                                crate::i18n::fill(
+                                    tr.pl_clip_duplicated,
+                                    &[
+                                        ("pos", &song_bar_pos(&self.song.meters, start)),
+                                        ("track", &(track + 1).to_string()),
+                                    ],
                                 ),
                             );
                         }
@@ -2573,7 +2649,7 @@ impl App {
                                 p.color = None;
                             }
                             self.publish();
-                            self.say(Tone::Quiet, "Pattern colour reset to by-id. Ctrl+Z undoes.");
+                            self.say(Tone::Quiet, self.tr().pat_colour_reset_status);
                         }
                         w if w.starts_with("pat-color-") => {
                             let pid = clips[i].pattern;
@@ -2584,9 +2660,10 @@ impl App {
                                     p.color = Some(v);
                                 }
                                 self.publish();
+                                let tr = self.tr();
                                 self.say(
                                     Tone::Quiet,
-                                    format!("Pattern colour #{hex}. Ctrl+Z undoes."),
+                                    crate::i18n::fill(tr.pat_colour_set_status, &[("hex", hex)]),
                                 );
                             }
                         }

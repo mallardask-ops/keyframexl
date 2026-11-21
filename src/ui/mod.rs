@@ -25,7 +25,7 @@ mod project;
 mod rack;
 pub(crate) mod record;
 mod riff_machine;
-mod roll;
+pub(crate) mod roll;
 mod sampler;
 mod script;
 mod settings_ui;
@@ -82,18 +82,6 @@ impl Tool {
         Tool::Zoom,
         Tool::Slide,
     ];
-    pub fn label(self) -> &'static str {
-        match self {
-            Tool::Draw => "Draw",
-            Tool::Paint => "Paint",
-            Tool::Delete => "Delete",
-            Tool::Mute => "Mute",
-            Tool::Slice => "Slice",
-            Tool::Select => "Select",
-            Tool::Zoom => "Zoom",
-            Tool::Slide => "Slide",
-        }
-    }
     pub fn key(self) -> egui::Key {
         match self {
             Tool::Draw => egui::Key::P,
@@ -104,18 +92,6 @@ impl Tool {
             Tool::Select => egui::Key::E,
             Tool::Zoom => egui::Key::Z,
             Tool::Slide => egui::Key::S,
-        }
-    }
-    pub fn hint(self) -> &'static str {
-        match self {
-            Tool::Draw => "Click places a note of the last length; drag moves, edges resize",
-            Tool::Paint => "Drag paints a run of notes along the row",
-            Tool::Delete => "Click or drag over notes to delete them",
-            Tool::Mute => "Click or drag over notes to mute or unmute them",
-            Tool::Slice => "Click or drag a line to cut notes there",
-            Tool::Select => "Drag a box to select; drag a selected note to move",
-            Tool::Zoom => "Drag a span to zoom to it; click zooms in, right-click out",
-            Tool::Slide => "Drag stretches a slide to the row's pitch",
         }
     }
 }
@@ -150,16 +126,6 @@ impl Snap {
             Snap::Beat => PPQ,
             Snap::Bar => BAR,
             Snap::Off => 1,
-        }
-    }
-    pub fn label(self) -> &'static str {
-        match self {
-            Snap::Half => "1/32",
-            Snap::Step => "1/16",
-            Snap::Triplet => "1/8T",
-            Snap::Beat => "1/4",
-            Snap::Bar => "Bar",
-            Snap::Off => "Off",
         }
     }
 }

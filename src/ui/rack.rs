@@ -29,10 +29,11 @@ impl App {
     fn rack_header(&mut self, ui: &mut Ui, sub: &str) {
         let steps = self.pattern().step_count();
         App::panel_header(ui, sub, |ui, slot| {
+            let tr = self.tr();
             if slot == Slot::Menu {
-                ui.menu_button("Add channel", |ui| self.add_channel_menu(ui));
+                ui.menu_button(tr.rack_add_channel, |ui| self.add_channel_menu(ui));
                 ui.separator();
-                if ui.button("Unmute all channels").clicked() {
+                if ui.button(tr.rack_unmute_all).clicked() {
                     self.checkpoint();
                     self.song
                         .instruments
@@ -41,19 +42,19 @@ impl App {
                     self.publish();
                     ui.close_menu();
                 }
-                if ui.button("Clear this pattern's notes").clicked() {
+                if ui.button(tr.rack_clear_pattern).clicked() {
                     self.checkpoint();
                     self.pattern_mut().notes.clear();
                     self.pattern_mut().slides.clear();
                     self.publish();
-                    self.say(Tone::Quiet, "Pattern cleared. Ctrl+Z undoes.");
+                    self.say(Tone::Quiet, tr.rack_pattern_cleared);
                     ui.close_menu();
                 }
                 let any = !self.rack_sel.is_empty();
                 if ui
                     .add_enabled(
                         any,
-                        egui::Button::new("Clone selected").shortcut_text("Alt+C"),
+                        egui::Button::new(tr.rack_clone_selected).shortcut_text("Alt+C"),
                     )
                     .clicked()
                 {
@@ -61,14 +62,20 @@ impl App {
                     ui.close_menu();
                 }
                 if ui
-                    .add_enabled(any, egui::Button::new("Move up").shortcut_text("Alt+↑"))
+                    .add_enabled(
+                        any,
+                        egui::Button::new(tr.rack_move_up).shortcut_text("Alt+↑"),
+                    )
                     .clicked()
                 {
                     self.move_channels(-1);
                     ui.close_menu();
                 }
                 if ui
-                    .add_enabled(any, egui::Button::new("Move down").shortcut_text("Alt+↓"))
+                    .add_enabled(
+                        any,
+                        egui::Button::new(tr.rack_move_down).shortcut_text("Alt+↓"),
+                    )
                     .clicked()
                 {
                     self.move_channels(1);
@@ -77,7 +84,7 @@ impl App {
                 if ui
                     .add_enabled(
                         any,
-                        egui::Button::new("Delete selected").shortcut_text("Alt+Del"),
+                        egui::Button::new(tr.rack_delete_selected).shortcut_text("Alt+Del"),
                     )
                     .clicked()
                 {
@@ -87,8 +94,7 @@ impl App {
                 if ui
                     .add_enabled(
                         any,
-                        egui::Button::new("Route selected to a free insert")
-                            .shortcut_text("Ctrl+L"),
+                        egui::Button::new(tr.rack_route_free).shortcut_text("Ctrl+L"),
                     )
                     .clicked()
                 {
@@ -98,16 +104,18 @@ impl App {
                     ui.close_menu();
                 }
                 ui.separator();
-                if kit::menu_check(ui, self.rack_graph, "Graph editor (velocity)", "Ctrl+K")
-                    .clicked()
-                {
+                if kit::menu_check(ui, self.rack_graph, tr.rack_graph_editor, "Ctrl+K").clicked() {
                     self.rack_graph = !self.rack_graph;
                     ui.close_menu();
                 }
-                ui.menu_button("Pattern length", |ui| {
+                ui.menu_button(tr.rack_pattern_length, |ui| {
                     kit::menu_style(ui);
+                    let tr = self.tr();
                     for bars in [1i64, 2, 4, 8] {
-                        if ui.button(format!("{bars} bar(s)")).clicked() {
+                        if ui
+                            .button(tr.rack_bars.fmt(tr.lang, bars as usize))
+                            .clicked()
+                        {
                             self.checkpoint();
                             let p = self.pattern_mut();
                             let need = p
@@ -135,14 +143,14 @@ impl App {
             let (_, started, changed) = kit::knob(
                 ui,
                 &kit::Knob {
-                    label: "Swing",
+                    label: tr.rack_swing,
                     color: t::enc_green(),
                     min: 0.0,
                     max: 0.6,
                     default: 0.0,
                     log: false,
                     fmt: &|v| format!("{:.0}%", v * 100.0),
-                    hint: "Delays every second 1/16. 0% is straight.",
+                    hint: tr.rack_swing_tip,
                 },
                 &mut swing,
             );
@@ -154,10 +162,18 @@ impl App {
                 self.publish();
                 self.say(
                     Tone::Quiet,
-                    format!("Swing {:.0}%. Ctrl+Z undoes.", swing * 100.0),
+                    crate::i18n::fill(
+                        tr.rack_swing_status,
+                        &[("pct", &format!("{:.0}", swing * 100.0))],
+                    ),
                 );
             }
-            let g = kit::caps_galley(ui.painter(), &format!("{steps} steps"), 11.0, t::faint());
+            let g = kit::caps_galley(
+                ui.painter(),
+                &tr.rack_steps.fmt(tr.lang, steps),
+                11.0,
+                t::faint(),
+            );
             let (r, _) = ui.allocate_exact_size(g.size() + vec2(8.0, 0.0), Sense::hover());
             ui.painter().galley(r.min, g, t::faint());
         });
@@ -171,11 +187,12 @@ impl App {
         inst.muted = !inst.muted;
         let (name, on) = (inst.name.clone(), inst.muted);
         self.publish();
+        let tr = self.tr();
         self.say(
             Tone::Quiet,
-            format!(
-                "{name} {}. Ctrl+Z undoes.",
-                if on { "muted" } else { "unmuted" }
+            crate::i18n::fill(
+                if on { tr.rack_muted } else { tr.rack_unmuted },
+                &[("name", &name)],
             ),
         );
     }
@@ -186,12 +203,13 @@ impl App {
         let name = self.instrument_name(id);
         let on = self.song.is_solo(id);
         self.publish();
+        let tr = self.tr();
         self.say(
             Tone::Quiet,
             if on {
-                format!("Only {name} plays. Solo again to hear all. Ctrl+Z undoes.")
+                crate::i18n::fill(tr.rack_soloed, &[("name", &name)])
             } else {
-                "All channels play. Ctrl+Z undoes.".into()
+                tr.rack_all_play.into()
             },
         );
     }
@@ -226,14 +244,16 @@ impl App {
             }
         }
         self.publish();
+        let tr = self.tr();
+        let step_s = format!("{:02}", step + 1);
         self.say(
             Tone::Quiet,
             if nv == 0 {
-                format!("{name} step {:02} off. Ctrl+Z undoes.", step + 1)
+                crate::i18n::fill(tr.rack_step_off, &[("name", &name), ("step", &step_s)])
             } else {
-                format!(
-                    "{name} step {:02} at velocity {nv}. Ctrl+Z undoes.",
-                    step + 1
+                crate::i18n::fill(
+                    tr.rack_step_vel,
+                    &[("name", &name), ("step", &step_s), ("v", &nv.to_string())],
                 )
             },
         );
@@ -258,9 +278,10 @@ impl App {
 
     fn no_steps(&mut self, id: u64) {
         let name = self.instrument_name(id);
+        let tr = self.tr();
         self.say(
             Tone::Quiet,
-            format!("{name} has off-grid notes: edit them in the piano roll."),
+            crate::i18n::fill(tr.rack_off_grid_status, &[("name", &name)]),
         );
     }
 
@@ -286,11 +307,16 @@ impl App {
             }
         }
         self.publish();
+        let tr = self.tr();
         self.say(
             Tone::Quiet,
-            format!(
-                "{name} steps shifted {}. Ctrl+Z undoes.",
-                if right { "right" } else { "left" }
+            crate::i18n::fill(
+                if right {
+                    tr.rack_steps_shifted_right
+                } else {
+                    tr.rack_steps_shifted_left
+                },
+                &[("name", &name)],
             ),
         );
     }
@@ -315,9 +341,14 @@ impl App {
             added += 1;
         }
         self.publish();
+        let tr = self.tr();
         self.say(
             Tone::Quiet,
-            format!("{name}: filled every {every} ({added} step(s) added). Ctrl+Z undoes."),
+            tr.rack_filled_steps.fmt_with(
+                tr.lang,
+                added,
+                &[("name", &name), ("every", &every.to_string())],
+            ),
         );
     }
 
@@ -338,9 +369,17 @@ impl App {
             self.song.add_note(pid, n);
         }
         self.publish();
+        let tr = self.tr();
         self.say(
             Tone::Quiet,
-            format!("{name} steps inverted ({off} off, {on} on). Ctrl+Z undoes."),
+            crate::i18n::fill(
+                tr.rack_steps_inverted,
+                &[
+                    ("name", &name),
+                    ("off", &off.to_string()),
+                    ("on", &on.to_string()),
+                ],
+            ),
         );
     }
 
@@ -355,9 +394,13 @@ impl App {
         let n = keyframexl::step_ops::clear(&mut chan);
         self.pattern_mut().notes.retain(|n| n.instrument != id);
         self.publish();
+        let tr = self.tr();
         self.say(
             Tone::Quiet,
-            format!("{name} steps cleared ({n} removed). Ctrl+Z undoes."),
+            crate::i18n::fill(
+                tr.rack_steps_cleared,
+                &[("name", &name), ("n", &n.to_string())],
+            ),
         );
     }
 
@@ -378,6 +421,7 @@ impl App {
     /// pattern (FL: the channel's Edit items). The clipboard is the piano
     /// roll's, so notes move between channels, rolls and the rack.
     pub(crate) fn channel_notes_menu(&mut self, ui: &mut Ui, id: u64) {
+        let tr = self.tr();
         let has = self.pattern().notes.iter().any(|n| n.instrument == id);
         let clip = !self.note_clip.is_empty();
         let item = |ui: &mut Ui, label: &str, key: &str, on: bool, why: &str| {
@@ -388,59 +432,41 @@ impl App {
                 r.on_disabled_hover_text(why).clicked()
             }
         };
-        if item(
-            ui,
-            "Copy notes",
-            "",
-            has,
-            "This channel has no notes in this pattern",
-        ) {
+        if item(ui, tr.rack_copy_notes, "", has, tr.rack_no_notes_in_pattern) {
             self.copy_channel_notes(id, false);
             ui.close_menu();
         }
-        if item(
-            ui,
-            "Cut notes",
-            "",
-            has,
-            "This channel has no notes in this pattern",
-        ) {
+        if item(ui, tr.rack_cut_notes, "", has, tr.rack_no_notes_in_pattern) {
             self.copy_channel_notes(id, true);
             ui.close_menu();
         }
         if item(
             ui,
-            "Paste notes (replace)",
+            tr.rack_paste_replace,
             "",
             clip,
-            "Copy notes first (here or in a piano roll)",
+            tr.rack_copy_notes_first,
         ) {
             self.paste_channel_notes(id);
             ui.close_menu();
         }
-        if item(
-            ui,
-            "Duplicate notes to the right",
-            "",
-            has,
-            "This channel has no notes in this pattern",
-        ) {
+        if item(ui, tr.rack_dup_right, "", has, tr.rack_no_notes_in_pattern) {
             self.duplicate_channel_notes(id);
             ui.close_menu();
         }
         if item(
             ui,
-            "Clear notes",
+            tr.rack_clear_notes,
             "",
             has,
-            "This channel has no notes in this pattern",
+            tr.rack_no_notes_in_pattern,
         ) {
             self.clear_channel_notes(id);
             ui.close_menu();
         }
         if ui
-            .button("Clone channel")
-            .on_hover_text("A copy of the channel with its notes, below it")
+            .button(tr.rack_clone_channel)
+            .on_hover_text(tr.rack_clone_channel_tip)
             .clicked()
         {
             self.rack_sel = vec![id];
@@ -456,19 +482,22 @@ impl App {
         }
         let name = self.instrument_name(id);
         self.note_clip = notes.clone();
+        let tr = self.tr();
         if cut {
             self.checkpoint();
             self.pattern_mut().notes.retain(|n| n.instrument != id);
             self.roll_sel.clear();
             self.publish();
-            self.say(Tone::Quiet, format!("{} note(s) cut from {name}. Paste them on any channel or in a piano roll. Ctrl+Z undoes.", notes.len()));
+            self.say(
+                Tone::Quiet,
+                tr.rack_notes_cut
+                    .fmt_with(tr.lang, notes.len(), &[("name", &name)]),
+            );
         } else {
             self.say(
                 Tone::Quiet,
-                format!(
-                    "{} note(s) of {name} copied. Paste them on any channel or in a piano roll.",
-                    notes.len()
-                ),
+                tr.rack_notes_copied
+                    .fmt_with(tr.lang, notes.len(), &[("name", &name)]),
             );
         }
     }
@@ -494,12 +523,12 @@ impl App {
         self.fit_pattern();
         self.roll_sel.clear();
         self.publish();
+        let tr = self.tr();
+        let count = self.note_clip.len();
         self.say(
             Tone::Quiet,
-            format!(
-                "{} note(s) pasted into {name}. Ctrl+Z undoes.",
-                self.note_clip.len()
-            ),
+            tr.rack_notes_pasted
+                .fmt_with(tr.lang, count, &[("name", &name)]),
         );
     }
 
@@ -525,12 +554,13 @@ impl App {
         }
         self.fit_pattern();
         self.publish();
+        let tr = self.tr();
         self.say(
             Tone::Quiet,
-            format!(
-                "{name}: {} note(s) repeated from bar {}. Ctrl+Z undoes.",
+            tr.rack_notes_repeated.fmt_with(
+                tr.lang,
                 notes.len(),
-                span / BAR + 1
+                &[("name", &name), ("bar", &(span / BAR + 1).to_string())],
             ),
         );
     }
@@ -545,9 +575,11 @@ impl App {
         self.pattern_mut().notes.retain(|x| x.instrument != id);
         self.roll_sel.clear();
         self.publish();
+        let tr = self.tr();
         self.say(
             Tone::Quiet,
-            format!("{name}: {n} note(s) removed. Ctrl+Z undoes."),
+            tr.rack_notes_removed
+                .fmt_with(tr.lang, n, &[("name", &name)]),
         );
     }
 
@@ -559,34 +591,79 @@ impl App {
             return;
         };
         let name = self.instrument_name(id);
+        let tr = self.tr();
         let mut open = true;
         let mut apply = false;
         let mut cancel = false;
-        egui::Window::new("Humanize steps")
+        let ticks_unit = tr.rack_humanize_ticks;
+        egui::Window::new(tr.rack_humanize_title)
+            .id(egui::Id::new("rack-humanize-window"))
             .collapsible(false)
             .resizable(false)
             .open(&mut open)
             .anchor(Align2::CENTER_TOP, vec2(0.0, 140.0))
             .show(ui.ctx(), |ui| {
                 ui.spacing_mut().item_spacing = vec2(10.0, 8.0);
-                ui.label(egui::RichText::new("Shifts velocity (and a touch of timing) by random amounts. The same seed gives the same result.").font(t::sans(12.0)).color(t::faint()));
-                egui::Grid::new("rack-humanize-grid").num_columns(2).spacing(vec2(14.0, 8.0)).show(ui, |ui| {
-                    ui.label(egui::RichText::new("Velocity ±").font(t::sans(13.0)).color(t::text()));
-                    ui.add(egui::DragValue::new(amount).range(0..=64));
-                    ui.end_row();
-                    ui.label(egui::RichText::new("Timing ±").font(t::sans(13.0)).color(t::text()));
-                    ui.add(egui::DragValue::new(timing).range(0..=12).custom_formatter(|x, _| format!("{x:.0} ticks")).custom_parser(|s| s.trim().trim_end_matches("ticks").trim().parse::<f64>().ok()));
-                    ui.end_row();
-                    ui.label(egui::RichText::new("Seed").font(t::sans(13.0)).color(t::text()));
-                    ui.add(egui::DragValue::new(seed));
-                    ui.end_row();
-                });
-                ui.label(egui::RichText::new(format!("Applies to the steps of {name}. Ctrl+Z undoes.")).font(t::sans(12.0)).color(t::faint()));
+                ui.label(
+                    egui::RichText::new(tr.rack_humanize_desc)
+                        .font(t::sans(12.0))
+                        .color(t::faint()),
+                );
+                egui::Grid::new("rack-humanize-grid")
+                    .num_columns(2)
+                    .spacing(vec2(14.0, 8.0))
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new(tr.rack_humanize_vel)
+                                .font(t::sans(13.0))
+                                .color(t::text()),
+                        );
+                        ui.add(egui::DragValue::new(amount).range(0..=64));
+                        ui.end_row();
+                        ui.label(
+                            egui::RichText::new(tr.rack_humanize_timing)
+                                .font(t::sans(13.0))
+                                .color(t::text()),
+                        );
+                        ui.add(
+                            egui::DragValue::new(timing)
+                                .range(0..=12)
+                                .custom_formatter(move |x, _| format!("{x:.0} {ticks_unit}"))
+                                .custom_parser(move |s| {
+                                    s.trim()
+                                        .trim_end_matches(ticks_unit)
+                                        .trim_end_matches("ticks")
+                                        .trim()
+                                        .parse::<f64>()
+                                        .ok()
+                                }),
+                        );
+                        ui.end_row();
+                        ui.label(
+                            egui::RichText::new(tr.rack_humanize_seed)
+                                .font(t::sans(13.0))
+                                .color(t::text()),
+                        );
+                        ui.add(egui::DragValue::new(seed));
+                        ui.end_row();
+                    });
+                ui.label(
+                    egui::RichText::new(crate::i18n::fill(
+                        tr.rack_humanize_applies,
+                        &[("name", &name)],
+                    ))
+                    .font(t::sans(12.0))
+                    .color(t::faint()),
+                );
                 ui.horizontal(|ui| {
-                    if kit::button(ui, "Apply", kit::Kind::Primary, true).clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    if kit::button(ui, tr.common_apply, kit::Kind::Primary, true).clicked()
+                        || ui.input(|i| i.key_pressed(egui::Key::Enter))
+                    {
                         apply = true;
                     }
-                    if kit::button(ui, "Cancel", kit::Kind::Normal, true).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    if kit::button(ui, tr.common_cancel, kit::Kind::Normal, true).clicked()
+                        || ui.input(|i| i.key_pressed(egui::Key::Escape))
+                    {
                         cancel = true;
                     }
                 });
@@ -627,9 +704,13 @@ impl App {
                     }
                 }
                 self.publish();
+                let tr = self.tr();
                 self.say(
                     Tone::Quiet,
-                    format!("Humanized {name} (±{amount} velocity). Ctrl+Z undoes."),
+                    crate::i18n::fill(
+                        tr.rack_humanize_status,
+                        &[("name", &name), ("amount", &amount.to_string())],
+                    ),
                 );
             }
             ui.ctx()
@@ -710,12 +791,13 @@ impl App {
         let y0 = body.top();
         let tray_top = y0 + 18.0;
         let tray_bottom = tray_top + STEP_NUM_H + LED_ROW + channels.len() as f32 * ROW_H + 4.0;
+        let tr = self.tr();
         for beat in beat_range.clone() {
             let x = grid_l + beat as f32 * (tray_w + TRAY_GAP);
             let label = if beats > 4 {
                 format!("{}.{}", beat / 4 + 1, beat % 4 + 1)
             } else {
-                format!("beat {}", beat + 1)
+                crate::i18n::fill(tr.rack_beat_label, &[("n", &(beat + 1).to_string())])
             };
             kit::caps(
                 &p,
@@ -903,11 +985,12 @@ impl App {
                 }
                 self.publish();
                 self.plugins_frame();
+                let tr = self.tr();
                 self.say(
                     Tone::Quiet,
-                    format!(
-                        "{} replaced the instrument on {renamed}. Ctrl+Z undoes.",
-                        plugin.name
+                    crate::i18n::fill(
+                        tr.rack_replaced_instrument,
+                        &[("plugin", &plugin.name), ("name", &renamed)],
                     ),
                 );
             }
@@ -935,8 +1018,9 @@ impl App {
                 kit::mix(t::sunken(), t::strong(), hover)
             };
             p.rect_filled(sel_hit.shrink2(vec2(7.0, 2.0)), 3.0, face);
+            let tr = self.tr();
             if sr
-                .on_hover_text(format!("Select {name}  · Ctrl toggles · Shift extends"))
+                .on_hover_text(crate::i18n::fill(tr.rack_select_tip, &[("name", name)]))
                 .clicked()
             {
                 let (ctrl, shift) = ui.input(|i| (i.modifiers.command, i.modifiers.shift));
@@ -961,7 +1045,10 @@ impl App {
                             egui::WidgetType::Checkbox,
                             true,
                             vel > 0,
-                            format!("{name} step {}", i + 1),
+                            crate::i18n::fill(
+                                tr.rack_step_a11y,
+                                &[("name", name), ("n", &(i + 1).to_string())],
+                            ),
                         )
                     });
                     self.paint_pad(ui, rect, &resp, i, vel, heard, playing == Some(i));
@@ -998,13 +1085,14 @@ impl App {
                     p.rect_filled(well, 7.0, t::raised().gamma_multiply(0.35));
                 }
                 self.paint_note_strip(&p, well.shrink2(vec2(4.0, 5.0)), id, &pat, hot);
-                let resp = resp.on_hover_text(format!("{name} plays notes off the step grid. Click to edit them in the piano roll, right-click to copy, paste or duplicate them."));
+                let resp = resp
+                    .on_hover_text(crate::i18n::fill(tr.rack_off_grid_hover, &[("name", name)]));
                 if resp.clicked() {
                     self.open_roll(id);
                 }
                 resp.context_menu(|ui| {
                     kit::menu_style(ui);
-                    if ui.button("Piano roll").clicked() {
+                    if ui.button(self.tr().win_roll).clicked() {
                         self.open_roll(id);
                         ui.close_menu();
                     }
@@ -1024,9 +1112,11 @@ impl App {
         }
 
         // FL: the + under the channels adds one.
+        let tr = self.tr();
+        let add_w = (kit::text_width(&p, tr.rack_add_channel, t::sans(14.0)) + 42.0).max(150.0);
         let add = Rect::from_min_size(
             pos2(body.left(), tray_bottom + 14.0 + graph_h),
-            vec2(150.0, kit::CONTROL_H),
+            vec2(add_w, kit::CONTROL_H),
         );
         let r = ui.interact(add, ui.id().with("add-channel"), Sense::click());
         kit::paint_button(
@@ -1035,13 +1125,13 @@ impl App {
             &r,
             kit::Kind::Ghost,
             true,
-            "Add channel",
+            tr.rack_add_channel,
             |p, face, ink| {
                 kit::icon_plus(p, pos2(face.left() + 16.0, face.center().y), 10.0, ink);
                 p.text(
                     pos2(face.left() + 30.0, face.center().y),
                     Align2::LEFT_CENTER,
-                    "Add channel",
+                    tr.rack_add_channel,
                     t::sans(14.0),
                     ink,
                 );
@@ -1051,7 +1141,7 @@ impl App {
         {
             self.probe.add_channel = Some(add);
         }
-        let r = r.on_hover_text("Add a channel");
+        let r = r.on_hover_text(tr.rack_add_channel_tip);
         let add_popup = ui.make_persistent_id("add-channel-menu");
         if r.clicked() {
             ui.memory_mut(|m| m.toggle_popup(add_popup));
@@ -1146,9 +1236,13 @@ impl App {
         let name = inst.name.clone();
         self.song.instruments.insert(at, inst);
         self.publish();
+        let tr = self.tr();
         self.say(
             Tone::Quiet,
-            format!("{name} added as channel {}. Ctrl+Z undoes.", at + 1),
+            crate::i18n::fill(
+                tr.rack_added_as_channel,
+                &[("name", &name), ("n", &(at + 1).to_string())],
+            ),
         );
     }
 
@@ -1169,9 +1263,13 @@ impl App {
         }
         self.publish();
         let (name, target) = (self.instrument_name(id), self.mixer_name(to as usize));
+        let tr = self.tr();
         self.say(
             Tone::Quiet,
-            format!("{name} plays through {target}. Ctrl+Z undoes."),
+            crate::i18n::fill(
+                tr.rack_plays_through,
+                &[("name", &name), ("target", &target)],
+            ),
         );
     }
 
@@ -1289,10 +1387,9 @@ impl App {
         }
         self.rack_sel = new_ids;
         self.publish();
-        self.say(
-            Tone::Quiet,
-            format!("{} channel(s) cloned. Ctrl+Z undoes.", self.rack_sel.len()),
-        );
+        let tr = self.tr();
+        let count = self.rack_sel.len();
+        self.say(Tone::Quiet, tr.rack_channels_cloned.fmt(tr.lang, count));
     }
 
     pub(crate) fn delete_channels(&mut self) {
@@ -1305,12 +1402,10 @@ impl App {
             let _ = self.song.remove_instrument(*id);
         }
         self.publish();
+        let tr = self.tr();
         self.say(
             Tone::Quiet,
-            format!(
-                "{} channel(s) deleted with their notes. Ctrl+Z undoes.",
-                sel.len()
-            ),
+            tr.rack_channels_deleted.fmt(tr.lang, sel.len()),
         );
     }
 
@@ -1338,10 +1433,7 @@ impl App {
         if m.command && pressed(egui::Key::L) {
             match self.free_insert() {
                 Some(to) => self.route_selected_channels(to),
-                None => self.say(
-                    Tone::Bad,
-                    "Every insert already has channels. Pick one in the box left of the name.",
-                ),
+                None => self.say(Tone::Bad, self.tr().rack_all_inserts_busy),
             }
         }
     }
@@ -1368,11 +1460,12 @@ impl App {
         let well = kit::sunken(p, lane, 8.0);
         let area = well.shrink2(vec2(0.0, 8.0));
         let name = self.instrument_name(id);
+        let tr = self.tr();
         kit::caps(
             p,
             pos2(lane.left() - 8.0, lane.top() + 10.0),
             Align2::RIGHT_CENTER,
-            &format!("vel · {name}"),
+            &crate::i18n::fill(tr.rack_graph_vel_label, &[("name", &name)]),
             11.0,
             t::faint(),
         );
@@ -1416,9 +1509,17 @@ impl App {
             };
             self.pattern_mut().notes[k].velocity = v;
             self.publish();
+            let tr = self.tr();
             self.say(
                 Tone::Quiet,
-                format!("{name} step {:02}: velocity {v}. Ctrl+Z undoes.", step + 1),
+                crate::i18n::fill(
+                    tr.rack_graph_vel_status,
+                    &[
+                        ("name", &name),
+                        ("step", &format!("{:02}", step + 1)),
+                        ("v", &v.to_string()),
+                    ],
+                ),
             );
         }
     }
@@ -1439,6 +1540,7 @@ impl App {
         audible: bool,
         soloed: bool,
     ) {
+        let tr = self.tr();
         // Mute LED: filled while the channel plays, hollow ring while muted
         // (shape as well as colour, so colour-blind users can tell them apart).
         // Hit area is 24x24; the painted LED stays small and centred in it.
@@ -1449,7 +1551,7 @@ impl App {
                 egui::WidgetType::Checkbox,
                 true,
                 audible,
-                format!("{name} on"),
+                crate::i18n::fill(tr.rack_ch_on_a11y, &[("name", name)]),
             )
         });
         let hover = kit::hover_amount(ui, &r);
@@ -1478,8 +1580,9 @@ impl App {
         } else {
             String::new()
         };
-        let r = r.on_hover_text(format!(
-            "{name}: click mutes{key} · right-click or Ctrl+click solos"
+        let r = r.on_hover_text(crate::i18n::fill(
+            tr.rack_mute_solo_tip,
+            &[("name", name), ("key", &key)],
         ));
         let ctrl = ui.input(|i| i.modifiers.command);
         if r.secondary_clicked() || (r.clicked() && ctrl) {
@@ -1498,9 +1601,10 @@ impl App {
         let vol_fmt = |pos: f64| {
             keyframexl::sequence::gain_db_text(keyframexl::sequence::volume_gain(pos as f32))
         };
+        let tr = self.tr();
         let specs: [(&str, f64, f64, f64, f64, &dyn Fn(f64) -> String, &str); 2] = [
             (
-                "Pan",
+                tr.rack_pan,
                 inst.pan as f64,
                 -1.0,
                 1.0,
@@ -1514,16 +1618,16 @@ impl App {
                         format!("R{:.0}", v * 100.0)
                     }
                 },
-                "Channel pan",
+                tr.rack_pan_tip,
             ),
             (
-                "Vol",
+                tr.rack_vol,
                 keyframexl::sequence::volume_pos(inst.volume) as f64,
                 0.0,
                 1.0,
                 keyframexl::sequence::volume_pos(1.0) as f64,
                 &vol_fmt,
-                "Channel volume. Double-click for 0 dB.",
+                tr.rack_vol_tip,
             ),
         ];
         for (k, (label, v, min, max, default, fmt, hint)) in specs.into_iter().enumerate() {
@@ -1577,12 +1681,16 @@ impl App {
                     )
                 };
                 self.publish_param(target, sent);
+                let tr = self.tr();
                 self.say(
                     Tone::Quiet,
-                    format!(
-                        "{name} {} {}. Ctrl+Z undoes.",
-                        label.to_lowercase(),
-                        fmt(val)
+                    crate::i18n::fill(
+                        if k == 0 {
+                            tr.rack_pan_status
+                        } else {
+                            tr.rack_vol_status
+                        },
+                        &[("name", name), ("val", &fmt(val))],
                     ),
                 );
             }
@@ -1619,9 +1727,9 @@ impl App {
                 egui::StrokeKind::Inside,
             );
         }
-        let mr = mr.on_hover_text(format!(
-            "Mixer insert: {}. Click to choose, Ctrl+wheel or drag to step.",
-            self.mixer_name(inst.mixer as usize)
+        let mr = mr.on_hover_text(crate::i18n::fill(
+            self.tr().rack_mixer_insert_tip,
+            &[("target", &self.mixer_name(inst.mixer as usize))],
         ));
         // Only Ctrl+wheel steps the insert: a plain wheel keeps scrolling the rack.
         let (ctrl_held, wheel) = ui.input(|i| {
@@ -1669,7 +1777,7 @@ impl App {
         let names: Vec<String> = (0..self.song.mixer.len())
             .map(|m| {
                 if m == 0 {
-                    "Master".to_string()
+                    self.mixer_name(0)
                 } else {
                     format!("{m:02}  {}", self.mixer_name(m))
                 }
@@ -1797,13 +1905,14 @@ impl App {
             .instrument(id)
             .and_then(|i| i.plugin())
             .map(|p| p.id);
-        let r = r.on_hover_text(format!(
-            "{name}: click for the {} window, right-click for more",
+        let tr = self.tr();
+        let r = r.on_hover_text(crate::i18n::fill(
             if plugin.is_some() {
-                "plugin's"
+                tr.rack_ch_plugin_hover
             } else {
-                "instrument"
-            }
+                tr.rack_ch_inst_hover
+            },
+            &[("name", name)],
         ));
         if r.clicked() {
             match plugin {
@@ -1814,55 +1923,57 @@ impl App {
         }
         r.context_menu(|ui| {
             kit::menu_style(ui);
-            if ui.button("Instrument window").clicked() {
+            let tr = self.tr();
+            if ui.button(tr.rack_menu_inst_win).clicked() {
                 self.win(Cmd::Show(Tab::Instrument { id }));
                 ui.close_menu();
             }
-            if ui.button("Piano roll").clicked() {
+            if ui.button(tr.win_roll).clicked() {
                 self.open_roll(id);
                 ui.close_menu();
             }
-            if sampler && ui.button("Load preset").clicked() {
+            if sampler && ui.button(tr.rack_menu_load_preset).clicked() {
                 self.load_preset_dialog(id);
                 ui.close_menu();
             }
             ui.separator();
             self.channel_notes_menu(ui, id);
             ui.separator();
-            ui.menu_button("Steps", |ui| {
+            ui.menu_button(tr.rack_menu_steps, |ui| {
                 kit::menu_style(ui);
-                if ui.button("Shift left").clicked() {
+                let tr = self.tr();
+                if ui.button(tr.rack_menu_shift_left).clicked() {
                     self.step_shift(id, false);
                     ui.close_menu();
                 }
-                if ui.button("Shift right").clicked() {
+                if ui.button(tr.rack_menu_shift_right).clicked() {
                     self.step_shift(id, true);
                     ui.close_menu();
                 }
                 ui.separator();
-                if ui.button("Fill every 2").clicked() {
+                if ui.button(tr.rack_menu_fill_2).clicked() {
                     self.step_fill(id, 2);
                     ui.close_menu();
                 }
-                if ui.button("Fill every 4").clicked() {
+                if ui.button(tr.rack_menu_fill_4).clicked() {
                     self.step_fill(id, 4);
                     ui.close_menu();
                 }
-                if ui.button("Fill every 8").clicked() {
+                if ui.button(tr.rack_menu_fill_8).clicked() {
                     self.step_fill(id, 8);
                     ui.close_menu();
                 }
                 ui.separator();
-                if ui.button("Invert").clicked() {
+                if ui.button(tr.rack_menu_invert).clicked() {
                     self.step_invert(id);
                     ui.close_menu();
                 }
-                if ui.button("Clear").clicked() {
+                if ui.button(tr.rack_menu_clear).clicked() {
                     self.step_clear(id);
                     ui.close_menu();
                 }
                 ui.separator();
-                if ui.button("Humanize…").clicked() {
+                if ui.button(tr.rack_menu_humanize).clicked() {
                     ui.ctx().data_mut(|d| {
                         d.insert_temp(
                             egui::Id::new("rack-humanize"),
@@ -1873,7 +1984,7 @@ impl App {
                 }
             });
             ui.separator();
-            if ui.button("Delete channel").clicked() {
+            if ui.button(tr.rack_menu_delete_ch).clicked() {
                 self.delete_channel(id);
                 ui.close_menu();
             }
@@ -2019,6 +2130,7 @@ impl App {
         let py = |pitch: u8| {
             area.bottom() - 3.0 - (pitch - lo) as f32 / (hi - lo) as f32 * (area.height() - 6.0)
         };
+        let tr = self.tr();
         for s in &slides {
             let y = py(s.target);
             let (a, b) = (sx(s.start), sx(s.start + s.length));
@@ -2027,7 +2139,10 @@ impl App {
                 p.text(
                     pos2(a, y + 4.0),
                     Align2::LEFT_TOP,
-                    format!("slide to {}", super::roll::note_name(s.target)),
+                    crate::i18n::fill(
+                        tr.rack_slide_to,
+                        &[("note", &super::roll::note_name(s.target))],
+                    ),
                     t::sans(12.0),
                     t::wait(),
                 );
@@ -2048,7 +2163,7 @@ impl App {
             p.rect_filled(r, 2.0, if n.muted { t::strong() } else { t::text() });
         }
         if hot && area.height() >= 24.0 {
-            let tag = "Open in piano roll  F7";
+            let tag = tr.rack_open_roll_tag;
             let w = kit::text_width(p, tag, t::sans(13.0)) + 20.0;
             let r = Rect::from_min_size(
                 pos2(area.right() - w, area.center().y - 13.0),

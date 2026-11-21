@@ -97,24 +97,27 @@ impl App {
     }
 
     pub(super) fn mixer(&mut self, ui: &mut Ui) {
+        let tr = self.tr();
         let n = self.song.mixer.len();
         if self.mix_sel >= n {
             self.mix_sel = 0;
         }
         let sel = self.mix_sel;
-        let sub = format!("{} inserts  ·  selected {}", n - 1, self.mixer_name(sel));
+        let inserts_str = tr.mixer_inserts_count.fmt(tr.lang, n - 1);
+        let sel_str = crate::i18n::fill(tr.mixer_selected, &[("name", &self.mixer_name(sel))]);
+        let sub = format!("{inserts_str}  ·  {sel_str}");
         App::panel_header(ui, &sub, |ui, slot| {
             if slot == Slot::Menu {
-                if ui.button("Save track preset…").clicked() {
+                if ui.button(tr.mixer_save_preset).clicked() {
                     ui.close_menu();
                     self.save_mixer_preset(sel);
                 }
-                if ui.button("Load track preset…").clicked() {
+                if ui.button(tr.mixer_load_preset).clicked() {
                     ui.close_menu();
                     self.load_preset_dialog_for(super::presets_ui::Target::Mixer(sel));
                 }
                 ui.separator();
-                if ui.button("Reset selected track").clicked() {
+                if ui.button(tr.mixer_reset_track).clicked() {
                     self.checkpoint();
                     let name = self.song.mixer[sel].name.clone();
                     self.song.mixer[sel] = keyframexl::sequence::MixerTrack::new(&name);
@@ -124,7 +127,7 @@ impl App {
                 if ui
                     .add_enabled(
                         sel > 0,
-                        egui::Button::new("Route selected channels here").shortcut_text("Ctrl+L"),
+                        egui::Button::new(tr.mixer_route_channels_here).shortcut_text("Ctrl+L"),
                     )
                     .clicked()
                 {
@@ -132,33 +135,33 @@ impl App {
                     ui.close_menu();
                 }
                 let solo = if self.insert_solo(sel) {
-                    "Unsolo"
+                    tr.pl_track_unsolo
                 } else {
-                    "Solo selected track"
+                    tr.mixer_solo_selected
                 };
                 if ui
                     .add_enabled(
                         sel > 0,
-                        egui::Button::new(solo).shortcut_text("Ctrl+click lamp"),
+                        egui::Button::new(solo).shortcut_text(tr.mixer_solo_shortcut),
                     )
                     .clicked()
                 {
                     self.solo_insert(sel);
                     ui.close_menu();
                 }
-                if ui.button("Unmute all tracks").clicked() {
+                if ui.button(tr.mixer_unmute_all).clicked() {
                     self.checkpoint();
                     self.song.mixer.iter_mut().for_each(|m| m.muted = false);
                     self.publish();
                     ui.close_menu();
                 }
                 let arm = if self.is_armed(sel) {
-                    "Disarm"
+                    tr.mixer_disarm
                 } else {
-                    "Arm for recording"
+                    tr.mixer_arm
                 };
                 if ui
-                    .add(egui::Button::new(arm).shortcut_text("Click ● on strip"))
+                    .add(egui::Button::new(arm).shortcut_text(tr.mixer_arm_shortcut))
                     .clicked()
                 {
                     self.toggle_arm(sel);
@@ -270,7 +273,7 @@ impl App {
                         &response,
                         kit::Kind::Normal,
                         enabled,
-                        "Add insert",
+                        tr.mixer_add_insert,
                         |p, face, ink| {
                             p.text(
                                 face.center(),
@@ -281,7 +284,7 @@ impl App {
                             );
                         },
                     );
-                    if response.on_hover_text("Add insert").clicked() && enabled {
+                    if response.on_hover_text(tr.mixer_add_insert).clicked() && enabled {
                         action = Some((true, n));
                     }
                 });
@@ -409,37 +412,34 @@ impl App {
     /// FL solo: mute every other insert (keeping `i`'s send chain); again to unmute all.
     pub(crate) fn solo_insert(&mut self, i: usize) {
         self.checkpoint();
+        let tr = self.tr();
         if self.insert_solo(i) {
             self.song
                 .mixer
                 .iter_mut()
                 .skip(1)
                 .for_each(|m| m.muted = false);
-            self.say(Tone::Quiet, "All inserts play again. Ctrl+Z undoes.");
+            self.say(Tone::Quiet, tr.mixer_all_inserts_play);
         } else {
             for j in 1..self.song.mixer.len() {
                 let keep = self.solo_keeps(i, j);
                 self.song.mixer[j].muted = !keep;
             }
             self.mix_solo = Some(i);
-            self.say(
-                Tone::Quiet,
-                format!(
-                    "{} soloed. Ctrl+click its lamp again to unsolo.",
-                    self.mixer_name(i)
-                ),
-            );
+            let msg = crate::i18n::fill(tr.mixer_insert_soloed, &[("name", &self.mixer_name(i))]);
+            self.say(Tone::Quiet, msg);
         }
         self.publish();
     }
 
     /// The strip's built-in 3-band EQ (after the effect slots).
     fn strip_eq(&mut self, ui: &mut Ui, track: usize) {
+        let tr = self.tr();
         kit::caps(
             ui.painter(),
             ui.cursor().min + vec2(0.0, 6.0),
             Align2::LEFT_CENTER,
-            "strip eq",
+            tr.mixer_strip_eq_caps,
             11.0,
             t::faint(),
         );
@@ -454,15 +454,18 @@ impl App {
         let r = keyframexl::sequence::EQ_RANGE as f64;
         ui.horizontal_wrapped(|ui| {
             for (b, (label, color)) in [
-                ("Low", t::enc_orange()),
-                ("Mid", t::enc_green()),
-                ("High", t::enc_blue()),
+                (tr.mixer_eq_low, t::enc_orange()),
+                (tr.mixer_eq_mid, t::enc_green()),
+                (tr.mixer_eq_high, t::enc_blue()),
             ]
             .into_iter()
             .enumerate()
             {
                 let hz = keyframexl::sequence::EQ_FREQS[b];
-                let hint = format!("{label} band at {} Hz. Double-click for 0 dB.", hz as u32);
+                let hint = crate::i18n::fill(
+                    tr.mixer_eq_band_hint,
+                    &[("label", label), ("hz", &(hz as u32).to_string())],
+                );
                 let knob = kit::Knob {
                     label,
                     color,
@@ -490,29 +493,37 @@ impl App {
     }
 
     pub(crate) fn mixer_name(&self, i: usize) -> String {
+        let tr = self.tr();
         match self.song.mixer.get(i) {
             Some(m) if !m.name.is_empty() => m.name.clone(),
-            _ if i == 0 => "Master".into(),
-            _ => format!("Insert {i}"),
+            _ if i == 0 => tr.mixer_master.into(),
+            _ => crate::i18n::fill(tr.mixer_insert_n, &[("n", &i.to_string())]),
         }
     }
 
     /// Whether insert `i` carries a real name, not its default (stored names
-    /// from FL imports and older files may spell the English default).
+    /// from FL imports and older files may spell the English or localized default).
     pub(crate) fn has_custom_mixer_name(&self, i: usize) -> bool {
+        let tr = self.tr();
+        let loc_default = if i == 0 {
+            tr.mixer_master.to_string()
+        } else {
+            crate::i18n::fill(tr.mixer_insert_n, &[("n", &i.to_string())])
+        };
         self.song.mixer.get(i).is_some_and(|m| {
-            !m.name.is_empty() && m.name != format!("Insert {i}") && !(i == 0 && m.name == "Master")
+            !m.name.is_empty()
+                && m.name != loc_default
+                && m.name != format!("Insert {i}")
+                && !(i == 0 && m.name == "Master")
         })
     }
 
     /// FL Ctrl+L: route the rack's selected channels to insert `to`.
     pub(crate) fn route_selected_channels(&mut self, to: u16) {
+        let tr = self.tr();
         let sel = self.rack_sel.clone();
         if sel.is_empty() {
-            self.say(
-                Tone::Quiet,
-                "Select channels in the channel rack first (the bar at each row's right end).",
-            );
+            self.say(Tone::Quiet, tr.mixer_select_channels_first);
             return;
         }
         self.checkpoint();
@@ -526,13 +537,10 @@ impl App {
         }
         self.publish();
         let name = self.mixer_name(to as usize);
-        self.say(
-            Tone::Quiet,
-            format!(
-                "{} channel(s) now play through {name}. Ctrl+Z undoes.",
-                sel.len()
-            ),
-        );
+        let msg = tr
+            .mixer_channels_routed
+            .fmt_with(tr.lang, sel.len(), &[("name", &name)]);
+        self.say(Tone::Quiet, msg);
     }
 
     /// First insert no channel uses (FL "next free mixer track").
@@ -594,6 +602,7 @@ impl App {
         i: usize,
         action: &mut Option<(bool, usize)>,
     ) {
+        let tr = self.tr();
         let track = self.song.mixer[i].clone();
         let selected = self.mix_sel == i;
         let sel_before = self.mix_sel;
@@ -623,7 +632,7 @@ impl App {
             if ui
                 .add_enabled(
                     can_edit && i > 0 && self.song.mixer.len() < 128,
-                    egui::Button::new("Insert track before"),
+                    egui::Button::new(tr.mixer_insert_before),
                 )
                 .clicked()
             {
@@ -633,7 +642,7 @@ impl App {
             if ui
                 .add_enabled(
                     can_edit && self.song.mixer.len() < 128,
-                    egui::Button::new("Insert track after"),
+                    egui::Button::new(tr.mixer_insert_after),
                 )
                 .clicked()
             {
@@ -641,7 +650,7 @@ impl App {
                 ui.close_menu();
             }
             if ui
-                .add_enabled(can_edit && i > 0, egui::Button::new("Delete track"))
+                .add_enabled(can_edit && i > 0, egui::Button::new(tr.mixer_delete_track))
                 .clicked()
             {
                 *action = Some((false, i));
@@ -689,10 +698,11 @@ impl App {
                     t::text(),
                 );
             } else if i == 0 {
+                let name = kit::elide(p, tr.mixer_master, t::sans(12.0), r.width() - 28.0);
                 p.text(
                     pos2(r.left() + 22.0, r.top() + 11.0),
                     Align2::LEFT_CENTER,
-                    "Master",
+                    name,
                     t::sans(12.0),
                     t::text(),
                 );
@@ -754,9 +764,9 @@ impl App {
         };
         p.circle_filled(arm_r.center(), 4.0, dot);
         let tip = if armed {
-            "Armed: records while Record is on and playing. Click to disarm."
+            tr.mixer_armed_tip
         } else {
-            "Arm: record this track to WAV"
+            tr.mixer_arm_tip
         };
         if ar.on_hover_text(tip).clicked() {
             self.toggle_arm(i);
@@ -773,16 +783,16 @@ impl App {
         let ctrl = ui.input(|inp| inp.modifiers.command);
         let tip = if i == 0 {
             if track.muted {
-                "Muted: click to unmute"
+                tr.mixer_muted_tip
             } else {
-                "Click to mute"
+                tr.mixer_mute_tip
             }
         } else if solo {
-            "Solo: Ctrl+click or right-click to unsolo"
+            tr.mixer_solo_lamp_tip
         } else if track.muted {
-            "Muted: click to unmute · Ctrl+click or right-click to solo"
+            tr.mixer_muted_solo_tip
         } else {
-            "Click to mute · Ctrl+click or right-click to solo"
+            tr.mixer_mute_solo_tip
         };
         let lr = lr.on_hover_text(tip);
         if i > 0 && (lr.secondary_clicked() || (lr.clicked() && ctrl)) {
@@ -794,26 +804,29 @@ impl App {
         }
         // Pan and stereo separation, side by side (FL: pan · sep). Short
         // strips hide SEP; the pan tooltip says where it went.
+        let sep_fmt = |v: f64| {
+            if v.abs() < 0.005 {
+                "0".to_string()
+            } else if v < 0.0 {
+                crate::i18n::fill(
+                    tr.mixer_sep_narrower,
+                    &[("pct", &format!("{:.0}", -v * 100.0))],
+                )
+            } else {
+                crate::i18n::fill(tr.mixer_sep_wider, &[("pct", &format!("{:.0}", v * 100.0))])
+            }
+        };
         if let Some(sep_r) = sep_r {
             let mut sep = track.sep as f64;
-            let sep_fmt = |v: f64| {
-                if v.abs() < 0.005 {
-                    "0".to_string()
-                } else if v < 0.0 {
-                    format!("{:.0}% narrower", -v * 100.0)
-                } else {
-                    format!("{:.0}% wider", v * 100.0)
-                }
-            };
             let spec = kit::Knob {
-                label: "Sep",
+                label: tr.mixer_sep,
                 color: t::enc_green(),
                 min: -1.0,
                 max: 1.0,
                 default: 0.0,
                 log: false,
                 fmt: &sep_fmt,
-                hint: "Stereo separation: left merges to mono, right widens. Double-click resets.",
+                hint: tr.mixer_sep_hint,
             };
             let (_, started, changed) =
                 kit::mini_knob(ui, sep_r, ui.id().with(("mix-sep", i)), &spec, &mut sep);
@@ -835,20 +848,14 @@ impl App {
                 format!("R{:.0}", v * 100.0)
             }
         };
-        let sep_now = if track.sep.abs() < 0.005 {
-            "0".to_string()
-        } else if track.sep < 0.0 {
-            format!("{:.0}% narrower", -track.sep * 100.0)
-        } else {
-            format!("{:.0}% wider", track.sep * 100.0)
-        };
+        let sep_now = sep_fmt(track.sep as f64);
         let pan_hint = if short {
-            format!("Track pan. Stereo separation {sep_now} (SEP knob in the inspector)")
+            crate::i18n::fill(tr.mixer_pan_short_hint, &[("sep", &sep_now)])
         } else {
-            "Track pan".to_string()
+            tr.mixer_pan_hint.to_string()
         };
         let spec = kit::Knob {
-            label: "Pan",
+            label: tr.rack_pan,
             color: t::enc_white(),
             min: -1.0,
             max: 1.0,
@@ -880,14 +887,14 @@ impl App {
         let max_db = 20.0 * (FADER_MAX as f64).log10();
         let fmt = |pos: f64| gain_db_text(volume_gain(pos as f32));
         let spec = kit::Knob {
-            label: "Volume",
+            label: tr.rack_vol,
             color: t::enc_orange(),
             min: 0.0,
             max: 1.0,
             default: volume_pos(1.0) as f64,
             log: false,
             fmt: &fmt,
-            hint: "Track volume. Double-click for 0 dB.",
+            hint: tr.mixer_vol_hint,
         };
         kit::automatable(
             ui,
@@ -958,8 +965,7 @@ impl App {
         } else {
             p.rect_filled(clip_r, 1.0, t::lcd_off());
         }
-        let clip_tip = "Clip indicator: lights at 0 dBFS; click to reset";
-        if cr.on_hover_text(clip_tip).clicked() {
+        if cr.on_hover_text(tr.mixer_clip_tip).clicked() {
             let mut states = states;
             if let Some(state) = states.get_mut(i) {
                 state.clipped = false;
@@ -1030,7 +1036,7 @@ impl App {
                     }
                 }
                 ui.separator();
-                ui.menu_button("Add send to", |ui| {
+                ui.menu_button(tr.mixer_add_send_to, |ui| {
                     kit::menu_style(ui);
                     for j in 1..self.song.mixer.len() {
                         if j == i {
@@ -1039,11 +1045,11 @@ impl App {
                         let dup = has[j];
                         let loops = route_would_loop(&self.song.mixer, i, j);
                         let tip = if dup {
-                            "Already sends here"
+                            tr.mixer_already_sends
                         } else if loops {
-                            "That would loop"
+                            tr.mixer_would_loop_tip
                         } else {
-                            "Add a send at 100%"
+                            tr.mixer_add_send_100_tip
                         };
                         if ui
                             .add_enabled(!dup && !loops, egui::Button::new(self.mixer_name(j)))
@@ -1056,14 +1062,20 @@ impl App {
                     }
                 });
                 if ui
-                    .add_enabled(!m.sends.is_empty(), egui::Button::new("Remove all sends"))
+                    .add_enabled(
+                        !m.sends.is_empty(),
+                        egui::Button::new(tr.mixer_remove_all_sends),
+                    )
                     .clicked()
                 {
                     edit = Some(RouteEdit::Clear);
                     ui.close_menu();
                 }
                 ui.separator();
-                if ui.selectable_label(to_master, "Route to Master").clicked() {
+                if ui
+                    .selectable_label(to_master, tr.mixer_route_to_master)
+                    .clicked()
+                {
                     edit = Some(RouteEdit::Only(0));
                     ui.close_menu();
                 }
@@ -1082,10 +1094,7 @@ impl App {
                 if ctrl && sel_before != i {
                     self.mix_sel = sel_before;
                     if sel_before == 0 {
-                        self.say(
-                            Tone::Quiet,
-                            "Master has no output to send: select an insert first.",
-                        );
+                        self.say(Tone::Quiet, tr.mixer_master_no_out);
                     } else {
                         self.apply_route_edit(sel_before, RouteEdit::Add(i as u16));
                     }
@@ -1094,14 +1103,15 @@ impl App {
                     self.song.mixer[i].to_master = !on;
                     self.publish();
                     let name = self.mixer_name(i);
-                    self.say(
-                        Tone::Quiet,
+                    let msg = crate::i18n::fill(
                         if on {
-                            format!("{name} no longer feeds Master. Ctrl+Z undoes.")
+                            tr.mixer_no_longer_master
                         } else {
-                            format!("{name} feeds Master again. Ctrl+Z undoes.")
+                            tr.mixer_feeds_master
                         },
+                        &[("name", &name)],
                     );
+                    self.say(Tone::Quiet, msg);
                 }
             }
         }
@@ -1109,6 +1119,7 @@ impl App {
 
     /// One route change from a menu, a Ctrl+click or a drop: one undo step.
     fn apply_route_edit(&mut self, from: usize, edit: RouteEdit) {
+        let tr = self.tr();
         let name = self.mixer_name(from);
         let dest = match edit {
             RouteEdit::Only(to) | RouteEdit::Add(to) => self.mixer_name(to as usize),
@@ -1117,83 +1128,78 @@ impl App {
         match edit {
             RouteEdit::Only(to) => {
                 if to as usize == from {
-                    self.say(Tone::Quiet, "Not routed: a track can't feed itself.");
+                    self.say(Tone::Quiet, tr.mixer_cant_feed_self);
                     return;
                 }
                 if route_would_loop(&self.song.mixer, from, to as usize) {
-                    self.say(
-                        Tone::Quiet,
-                        format!("Not routed: {name} → {dest} would loop."),
-                    );
+                    let msg =
+                        crate::i18n::fill(tr.mixer_would_loop, &[("from", &name), ("to", &dest)]);
+                    self.say(Tone::Quiet, msg);
                     return;
                 }
                 self.checkpoint();
                 self.song.mixer[from].route_only(to);
                 self.publish();
-                self.say(
-                    Tone::Quiet,
-                    format!("{name} now routes to {dest} only. Ctrl+Z undoes."),
-                );
+                let msg =
+                    crate::i18n::fill(tr.mixer_routes_only, &[("from", &name), ("to", &dest)]);
+                self.say(Tone::Quiet, msg);
             }
             RouteEdit::Add(to) => {
                 if to as usize == from {
-                    self.say(Tone::Quiet, "Not routed: a track can't feed itself.");
+                    self.say(Tone::Quiet, tr.mixer_cant_feed_self);
                     return;
                 }
                 if route_would_loop(&self.song.mixer, from, to as usize) {
-                    self.say(
-                        Tone::Quiet,
-                        format!("Not routed: {name} → {dest} would loop."),
-                    );
+                    let msg =
+                        crate::i18n::fill(tr.mixer_would_loop, &[("from", &name), ("to", &dest)]);
+                    self.say(Tone::Quiet, msg);
                     return;
                 }
                 if to == 0 {
                     if self.song.mixer[from].to_master {
-                        self.say(Tone::Quiet, format!("{name} already routes to Master."));
+                        let msg = crate::i18n::fill(tr.mixer_already_master, &[("name", &name)]);
+                        self.say(Tone::Quiet, msg);
                     } else {
                         self.checkpoint();
                         self.song.mixer[from].to_master = true;
                         self.publish();
-                        self.say(
-                            Tone::Quiet,
-                            format!("{name} feeds Master again. Ctrl+Z undoes."),
-                        );
+                        let msg = crate::i18n::fill(tr.mixer_feeds_master, &[("name", &name)]);
+                        self.say(Tone::Quiet, msg);
                     }
                     return;
                 }
                 if let Some(send) = self.song.mixer[from].sends.iter().find(|s| s.to == to) {
-                    let lv = send.level;
-                    self.say(
-                        Tone::Quiet,
-                        format!("{name} already sends to {dest} ({:.0}%).", lv * 100.0),
+                    let pct = format!("{:.0}", send.level * 100.0);
+                    let msg = crate::i18n::fill(
+                        tr.mixer_already_sends_pct,
+                        &[("from", &name), ("to", &dest), ("pct", &pct)],
                     );
+                    self.say(Tone::Quiet, msg);
                     return;
                 }
                 self.checkpoint();
                 self.song.mixer[from].add_send(to);
                 self.publish();
-                self.say(
-                    Tone::Quiet,
-                    format!("{name} now sends to {dest} at 100%. Ctrl+Z undoes."),
-                );
+                let msg = crate::i18n::fill(tr.mixer_now_sends, &[("from", &name), ("to", &dest)]);
+                self.say(Tone::Quiet, msg);
             }
             RouteEdit::Clear => {
                 if self.song.mixer[from].sends.is_empty() {
-                    self.say(Tone::Quiet, format!("{name} has no sends."));
+                    let msg = crate::i18n::fill(tr.mixer_no_sends, &[("name", &name)]);
+                    self.say(Tone::Quiet, msg);
                 } else {
                     self.checkpoint();
                     self.song.mixer[from].clear_sends();
                     self.publish();
-                    self.say(
-                        Tone::Quiet,
-                        format!("{name}: all sends removed. Ctrl+Z undoes."),
-                    );
+                    let msg = crate::i18n::fill(tr.mixer_all_sends_removed, &[("name", &name)]);
+                    self.say(Tone::Quiet, msg);
                 }
             }
         }
     }
 
     fn inspector(&mut self, ui: &mut Ui, p: &egui::Painter, r: Rect) {
+        let tr = self.tr();
         let i = self.mix_sel;
         kit::raised(
             p,
@@ -1206,97 +1212,206 @@ impl App {
             1.0,
         );
         let inner = r.shrink(12.0);
-        ui.scope_builder(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::top_down(egui::Align::LEFT)), |ui| {
-          egui::ScrollArea::vertical().id_salt("mixer-inspector").auto_shrink([false, false]).show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 4.0;
-            // Name, editable in place (one undo step).
-            let mut name = self.mixer_name(i);
-            let te = ui.add(egui::TextEdit::singleline(&mut name).font(t::semibold(16.0)).frame(false).desired_width(inner.width()));
-            if te.changed() {
-                if kit::first_edit(ui, &te) {
-                    self.checkpoint();
-                }
-                self.song.mixer[i].name = name;
-                self.publish();
-            }
-            kit::end_edit(ui, &te);
-            if i > 0 {
-                let m = &self.song.mixer[i];
-                let mut dest: Vec<String> = Vec::new();
-                if m.to_master {
-                    dest.push("Master".into());
-                }
-                for snd in &m.sends {
-                    dest.push(format!("{} ({:.0}%)", self.mixer_name(snd.to as usize), snd.level * 100.0));
-                }
-                let to = if dest.is_empty() { "nowhere: not routed, silent".to_string() } else { dest.join(", ") };
-                ui.label(egui::RichText::new(format!("To: {to}")).font(t::sans(12.0)).color(if dest.is_empty() { t::wait() } else { t::faint() }));
-                // Sidechain links both ways: what ducks this insert, what it ducks.
-                let keyed_by: Vec<String> = m.fx.iter().filter_map(|f| f.sidechain).map(|k| self.mixer_name(k as usize)).collect();
-                let keys: Vec<String> = (1..self.song.mixer.len())
-                    .filter(|&j| j != i && self.song.mixer[j].fx.iter().any(|f| f.sidechain == Some(i as u16)))
-                    .map(|j| self.mixer_name(j))
-                    .collect();
-                if !keyed_by.is_empty() {
-                    ui.label(egui::RichText::new(format!("Ducks under: {}", keyed_by.join(", "))).font(t::sans(12.0)).color(t::faint()));
-                }
-                if !keys.is_empty() {
-                    ui.label(egui::RichText::new(format!("Sidechains: {}", keys.join(", "))).font(t::sans(12.0)).color(t::faint()));
-                }
-            }
-            ui.add_space(6.0);
-            // Pan + stereo separation: short strips hide SEP, so it always lives here too.
-            ui.horizontal(|ui| {
-                let mut pan = self.song.mixer[i].pan as f64;
-                let pan_fmt = |v: f64| if v.abs() < 0.005 { "C".to_string() } else if v < 0.0 { format!("L{:.0}", -v * 100.0) } else { format!("R{:.0}", v * 100.0) };
-                let pan_knob = kit::Knob { label: "Pan", color: t::enc_white(), min: -1.0, max: 1.0, default: 0.0, log: false, fmt: &pan_fmt, hint: "Track pan" };
-                kit::automatable(ui, keyframexl::automation::Target::MixerPan { track: i as u16 });
-                let (_, started, changed) = kit::knob(ui, &pan_knob, &mut pan);
-                if started {
-                    self.checkpoint();
-                }
-                if changed {
-                    let v = pan as f32;
-                    self.song.mixer[i].pan = v;
-                    self.publish_param(
-                        keyframexl::automation::Target::MixerPan { track: i as u16 },
-                        v,
-                    );
-                }
-                let mut sep = self.song.mixer[i].sep as f64;
-                let sep_fmt = |v: f64| if v.abs() < 0.005 { "0".to_string() } else if v < 0.0 { format!("{:.0}% narrower", -v * 100.0) } else { format!("{:.0}% wider", v * 100.0) };
-                let sep_knob = kit::Knob { label: "Sep", color: t::enc_green(), min: -1.0, max: 1.0, default: 0.0, log: false, fmt: &sep_fmt, hint: "Stereo separation: left merges to mono, right widens. Double-click resets." };
-                let (_, started, changed) = kit::knob(ui, &sep_knob, &mut sep);
-                if started {
-                    self.checkpoint();
-                }
-                if changed {
-                    self.song.mixer[i].sep = sep as f32;
-                    self.publish();
-                }
-            });
-            ui.add_space(6.0);
-            kit::caps(ui.painter(), ui.cursor().min + vec2(0.0, 6.0), Align2::LEFT_CENTER, "effects", 11.0, t::faint());
-            ui.add_space(14.0);
-            // The slot list scrolls on its own when the inspector is short, so
-            // all ten slots stay reachable at dock height.
-            let slots_max = (r.height() - 300.0).clamp(72.0, FX_SLOTS as f32 * 28.0);
-            egui::ScrollArea::vertical().id_salt("mixer-fx-slots").max_height(slots_max).auto_shrink([false, false]).show(ui, |ui| {
-                for k in 0..FX_SLOTS {
-                    self.fx_slot_row(ui, i, k);
-                }
-            });
-            ui.add_space(8.0);
-            self.strip_eq(ui, i);
-            if i > 0 {
-                ui.add_space(8.0);
-                self.sends_ui(ui, i);
-            }
-          });
-        });
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(inner)
+                .layout(egui::Layout::top_down(egui::Align::LEFT)),
+            |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("mixer-inspector")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 4.0;
+                        // Name, editable in place (one undo step).
+                        let mut name = self.mixer_name(i);
+                        let te = ui.add(
+                            egui::TextEdit::singleline(&mut name)
+                                .font(t::semibold(16.0))
+                                .frame(false)
+                                .desired_width(inner.width()),
+                        );
+                        if te.changed() {
+                            if kit::first_edit(ui, &te) {
+                                self.checkpoint();
+                            }
+                            self.song.mixer[i].name = name;
+                            self.publish();
+                        }
+                        kit::end_edit(ui, &te);
+                        if i > 0 {
+                            let m = &self.song.mixer[i];
+                            let mut dest: Vec<String> = Vec::new();
+                            if m.to_master {
+                                dest.push(tr.mixer_master.into());
+                            }
+                            for snd in &m.sends {
+                                dest.push(format!(
+                                    "{} ({:.0}%)",
+                                    self.mixer_name(snd.to as usize),
+                                    snd.level * 100.0
+                                ));
+                            }
+                            let to = if dest.is_empty() {
+                                tr.mixer_to_nowhere.to_string()
+                            } else {
+                                dest.join(", ")
+                            };
+                            ui.label(
+                                egui::RichText::new(crate::i18n::fill(
+                                    tr.mixer_to_prefix,
+                                    &[("dest", &to)],
+                                ))
+                                .font(t::sans(12.0))
+                                .color(if dest.is_empty() {
+                                    t::wait()
+                                } else {
+                                    t::faint()
+                                }),
+                            );
+                            // Sidechain links both ways: what ducks this insert, what it ducks.
+                            let keyed_by: Vec<String> =
+                                m.fx.iter()
+                                    .filter_map(|f| f.sidechain)
+                                    .map(|k| self.mixer_name(k as usize))
+                                    .collect();
+                            let keys: Vec<String> = (1..self.song.mixer.len())
+                                .filter(|&j| {
+                                    j != i
+                                        && self.song.mixer[j]
+                                            .fx
+                                            .iter()
+                                            .any(|f| f.sidechain == Some(i as u16))
+                                })
+                                .map(|j| self.mixer_name(j))
+                                .collect();
+                            if !keyed_by.is_empty() {
+                                let list = keyed_by.join(", ");
+                                ui.label(
+                                    egui::RichText::new(crate::i18n::fill(
+                                        tr.mixer_ducks_under,
+                                        &[("list", &list)],
+                                    ))
+                                    .font(t::sans(12.0))
+                                    .color(t::faint()),
+                                );
+                            }
+                            if !keys.is_empty() {
+                                let list = keys.join(", ");
+                                ui.label(
+                                    egui::RichText::new(crate::i18n::fill(
+                                        tr.mixer_sidechains,
+                                        &[("list", &list)],
+                                    ))
+                                    .font(t::sans(12.0))
+                                    .color(t::faint()),
+                                );
+                            }
+                        }
+                        ui.add_space(6.0);
+                        // Pan + stereo separation: short strips hide SEP, so it always lives here too.
+                        ui.horizontal(|ui| {
+                            let mut pan = self.song.mixer[i].pan as f64;
+                            let pan_fmt = |v: f64| {
+                                if v.abs() < 0.005 {
+                                    "C".to_string()
+                                } else if v < 0.0 {
+                                    format!("L{:.0}", -v * 100.0)
+                                } else {
+                                    format!("R{:.0}", v * 100.0)
+                                }
+                            };
+                            let pan_knob = kit::Knob {
+                                label: tr.rack_pan,
+                                color: t::enc_white(),
+                                min: -1.0,
+                                max: 1.0,
+                                default: 0.0,
+                                log: false,
+                                fmt: &pan_fmt,
+                                hint: tr.mixer_pan_hint,
+                            };
+                            kit::automatable(
+                                ui,
+                                keyframexl::automation::Target::MixerPan { track: i as u16 },
+                            );
+                            let (_, started, changed) = kit::knob(ui, &pan_knob, &mut pan);
+                            if started {
+                                self.checkpoint();
+                            }
+                            if changed {
+                                let v = pan as f32;
+                                self.song.mixer[i].pan = v;
+                                self.publish_param(
+                                    keyframexl::automation::Target::MixerPan { track: i as u16 },
+                                    v,
+                                );
+                            }
+                            let mut sep = self.song.mixer[i].sep as f64;
+                            let sep_fmt = |v: f64| {
+                                if v.abs() < 0.005 {
+                                    "0".to_string()
+                                } else if v < 0.0 {
+                                    let pct = format!("{:.0}", -v * 100.0);
+                                    crate::i18n::fill(tr.mixer_sep_narrower, &[("pct", &pct)])
+                                } else {
+                                    let pct = format!("{:.0}", v * 100.0);
+                                    crate::i18n::fill(tr.mixer_sep_wider, &[("pct", &pct)])
+                                }
+                            };
+                            let sep_knob = kit::Knob {
+                                label: tr.mixer_sep,
+                                color: t::enc_green(),
+                                min: -1.0,
+                                max: 1.0,
+                                default: 0.0,
+                                log: false,
+                                fmt: &sep_fmt,
+                                hint: tr.mixer_sep_hint,
+                            };
+                            let (_, started, changed) = kit::knob(ui, &sep_knob, &mut sep);
+                            if started {
+                                self.checkpoint();
+                            }
+                            if changed {
+                                self.song.mixer[i].sep = sep as f32;
+                                self.publish();
+                            }
+                        });
+                        ui.add_space(6.0);
+                        kit::caps(
+                            ui.painter(),
+                            ui.cursor().min + vec2(0.0, 6.0),
+                            Align2::LEFT_CENTER,
+                            tr.mixer_effects_caps,
+                            11.0,
+                            t::faint(),
+                        );
+                        ui.add_space(14.0);
+                        // The slot list scrolls on its own when the inspector is short, so
+                        // all ten slots stay reachable at dock height.
+                        let slots_max = (r.height() - 300.0).clamp(72.0, FX_SLOTS as f32 * 28.0);
+                        egui::ScrollArea::vertical()
+                            .id_salt("mixer-fx-slots")
+                            .max_height(slots_max)
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                for k in 0..FX_SLOTS {
+                                    self.fx_slot_row(ui, i, k);
+                                }
+                            });
+                        ui.add_space(8.0);
+                        self.strip_eq(ui, i);
+                        if i > 0 {
+                            ui.add_space(8.0);
+                            self.sends_ui(ui, i);
+                        }
+                    });
+            },
+        );
     }
 
     fn fx_slot_row(&mut self, ui: &mut Ui, track: usize, k: usize) {
+        let tr = self.tr();
         let slot = self.song.mixer[track].fx.get(k).cloned();
         let w = ui.available_width();
         let (row, _) = ui.allocate_exact_size(vec2(w, 24.0), Sense::hover());
@@ -1325,9 +1440,9 @@ impl App {
                 kit::led(&p, lamp.center(), 3.5, s.enabled.then_some(t::ok()));
                 if lr
                     .on_hover_text(if s.enabled {
-                        "On: click to bypass"
+                        tr.mixer_slot_on_tip
                     } else {
-                        "Bypassed: click to turn on"
+                        tr.mixer_slot_bypass_tip
                     })
                     .clicked()
                 {
@@ -1364,14 +1479,14 @@ impl App {
                 );
                 let mut mix = s.mix as f64;
                 let spec = kit::Knob {
-                    label: "Mix",
+                    label: tr.mixer_slot_mix,
                     color: t::enc_green(),
                     min: 0.0,
                     max: 1.0,
                     default: 1.0,
                     log: false,
                     fmt: &|v| format!("{:.0}%", v * 100.0),
-                    hint: "Slot mix (dry / wet)",
+                    hint: tr.mixer_slot_mix_hint,
                 };
                 let (_, started, changed) = kit::mini_knob(
                     ui,
@@ -1399,15 +1514,13 @@ impl App {
                 p.text(
                     pos2(row.left() + 26.0, row.center().y),
                     Align2::LEFT_CENTER,
-                    "(empty)",
+                    tr.mixer_slot_empty,
                     t::sans(13.0),
                     t::faint(),
                 );
             }
         }
-        let resp = resp.on_hover_text(
-            "Click opens the effect in its own window · right-click to choose or remove",
-        );
+        let resp = resp.on_hover_text(tr.mixer_slot_hover);
         if resp.clicked() {
             self.mix_slot = k;
             if slot.is_some() {
@@ -1416,10 +1529,11 @@ impl App {
         }
         // Choose an effect: right-click, or click an empty slot.
         let open_menu = |ui: &mut Ui, this: &mut App| {
+            let tr = this.tr();
             kit::menu_style(ui);
             ui.set_min_width(160.0);
             for (&category, effects) in BUILTIN_GROUPS.iter() {
-                ui.menu_button(category, |ui| {
+                ui.menu_button(tr.fx_category_label(category), |ui| {
                     kit::menu_style(ui);
                     for effect in effects {
                         if ui.button(effect.name).clicked() {
@@ -1430,15 +1544,15 @@ impl App {
                 });
             }
             ui.separator();
-            ui.menu_button("External plugins", |ui| {
+            ui.menu_button(tr.mixer_ext_plugins, |ui| {
                 kit::menu_style(ui);
                 let mut effects = this.plugin_choices(false);
                 effects.sort_by_cached_key(|e| (e.name.to_lowercase(), e.vendor.to_lowercase()));
                 if effects.is_empty() {
                     ui.label(if this.plugins.scan_rx.is_some() {
-                        "Checking plugins…"
+                        tr.mixer_checking_plugins
                     } else {
-                        "No effect plugins found"
+                        tr.mixer_no_fx_plugins
                     });
                 }
                 for e in &effects {
@@ -1452,27 +1566,31 @@ impl App {
                     }
                 }
                 ui.separator();
-                if ui.button("Plugin settings…").clicked() {
+                if ui.button(tr.mixer_plugin_settings).clicked() {
                     this.open_settings(super::settings_ui::Page::Plugins);
                     ui.close_menu();
                 }
             });
             ui.separator();
-            if slot.is_some() && ui.button("Save effect preset…").clicked() {
+            if slot.is_some() && ui.button(tr.mixer_save_fx_preset).clicked() {
                 ui.close_menu();
                 this.save_fx_preset(track, k);
             }
-            if ui.button("Load effect preset…").clicked() {
+            if ui.button(tr.mixer_load_fx_preset).clicked() {
                 ui.close_menu();
                 this.load_preset_dialog_for(super::presets_ui::Target::Fx(track, k));
             }
             if let Some(s) = slot.as_ref().filter(|s| s.plugin.is_some()) {
                 ui.separator();
                 let now = s.sidechain.map(|i| i as usize);
-                ui.menu_button("Sidechain input", |ui| {
+                ui.menu_button(tr.mixer_sidechain_input, |ui| {
                     kit::menu_style(ui);
-                    ui.label(egui::RichText::new("For plugins with a sidechain input (a ducking compressor, a gate); others ignore it").font(t::sans(12.0)).color(t::faint()));
-                    if let Some(to) = this.sidechain_choices(ui, track, now, "Off") {
+                    ui.label(
+                        egui::RichText::new(tr.mixer_sidechain_plugin_hint)
+                            .font(t::sans(12.0))
+                            .color(t::faint()),
+                    );
+                    if let Some(to) = this.sidechain_choices(ui, track, now, tr.roll_scale_off) {
                         this.set_sidechain(track, k, to);
                         ui.close_menu();
                     }
@@ -1480,7 +1598,7 @@ impl App {
             }
             if slot.is_some() {
                 ui.separator();
-                if ui.button("Remove").clicked() {
+                if ui.button(tr.mixer_remove).clicked() {
                     this.set_slot(track, k, None);
                     ui.close_menu();
                 }
@@ -1518,11 +1636,13 @@ impl App {
             None => {}
         }
         self.publish();
-        let what = kind.map(|k| k.label()).unwrap_or("Effect removed");
-        self.say(
-            Tone::Quiet,
-            format!("{what} on {}. Ctrl+Z undoes.", self.mixer_name(track)),
+        let tr = self.tr();
+        let what = kind.map(|k| k.label()).unwrap_or(tr.mixer_effect_removed);
+        let msg = crate::i18n::fill(
+            tr.mixer_slot_set_status,
+            &[("what", what), ("track", &self.mixer_name(track))],
         );
+        self.say(Tone::Quiet, msg);
     }
 
     /// A hosted effect plugin into a slot; its editor opens once it has loaded.
@@ -1558,10 +1678,11 @@ impl App {
         if let Some(l) = self.plugins.live.get_mut(&id) {
             l.show_when_loaded = true;
         }
-        self.say(
-            Tone::Wait,
-            format!("Loading {} on {}…", e.name, self.mixer_name(track)),
+        let msg = crate::i18n::fill(
+            self.tr().mixer_loading_plugin,
+            &[("name", &e.name), ("track", &self.mixer_name(track))],
         );
+        self.say(Tone::Wait, msg);
     }
 
     /// Double-click on a slot: a plugin's own editor, or the built-in's window.
@@ -1621,10 +1742,11 @@ impl App {
                     }
                     changed = true;
                 }
-                None => self.say(
-                    Tone::Bad,
-                    format!("Impulse response not loaded: {}", path.display()),
-                ),
+                None => {
+                    let p = path.display().to_string();
+                    let msg = crate::i18n::fill(self.tr().mixer_ir_not_loaded, &[("path", &p)]);
+                    self.say(Tone::Bad, msg);
+                }
             }
         }
         ctx.data_mut(|d| d.insert_temp(id, tried));
@@ -1635,8 +1757,9 @@ impl App {
 
     /// Pick a .wav impulse response for a Convolution slot.
     fn load_ir(&mut self, track: usize, k: usize) {
+        let tr = self.tr();
         let Some(path) = rfd::FileDialog::new()
-            .add_filter("Wave", &["wav"])
+            .add_filter(tr.mixer_dlg_wave, &["wav"])
             .pick_file()
         else {
             return;
@@ -1645,10 +1768,9 @@ impl App {
             .ok()
             .and_then(|b| crate::import::read_wav(&b).ok());
         let Some((rate, frames)) = loaded else {
-            self.say(
-                Tone::Bad,
-                format!("Not a readable wave file: {}", path.display()),
-            );
+            let p = path.display().to_string();
+            let msg = crate::i18n::fill(tr.mixer_ir_unreadable, &[("path", &p)]);
+            self.say(Tone::Bad, msg);
             return;
         };
         let mono: Vec<f32> = frames.iter().map(|f| (f[0] + f[1]) * 0.5).collect();
@@ -1661,13 +1783,9 @@ impl App {
             a.invalidate_fx(track, k);
         }
         self.publish();
-        self.say(
-            Tone::Done,
-            format!(
-                "Impulse loaded: {}. Ctrl+Z undoes.",
-                path.file_name().unwrap_or_default().to_string_lossy()
-            ),
-        );
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        let msg = crate::i18n::fill(tr.mixer_ir_loaded, &[("name", &name)]);
+        self.say(Tone::Done, msg);
     }
 
     pub(crate) fn fx_windows_ui(&mut self, ctx: &egui::Context) {
@@ -1742,6 +1860,7 @@ impl App {
                 .constrain_to(bounds)
                 .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
+                    let tr = self.tr();
                     ui.horizontal(|ui| {
                         // The title bar names the effect; here: on/off, where it comes from, reset.
                         let mut on = slot.enabled;
@@ -1752,17 +1871,29 @@ impl App {
                         }
                         let b = slot.kind.builtin();
                         ui.label(
-                            egui::RichText::new(if on { "On" } else { "Bypassed" })
-                                .font(t::sans(13.0))
-                                .color(if on { t::text() } else { t::wait() }),
+                            egui::RichText::new(if on {
+                                tr.mixer_fx_on
+                            } else {
+                                tr.mixer_fx_bypassed
+                            })
+                            .font(t::sans(13.0))
+                            .color(if on {
+                                t::text()
+                            } else {
+                                t::wait()
+                            }),
                         );
                         ui.label(
-                            egui::RichText::new(format!("{} · {}", b.vendor, b.category))
-                                .font(t::sans(12.0))
-                                .color(t::faint()),
+                            egui::RichText::new(format!(
+                                "{} · {}",
+                                b.vendor,
+                                tr.fx_category_label(b.category)
+                            ))
+                            .font(t::sans(12.0))
+                            .color(t::faint()),
                         );
-                        if kit::tool_button(ui, "Reset", kit::Kind::Ghost, true)
-                            .on_hover_text("All parameters to their defaults")
+                        if kit::tool_button(ui, tr.mixer_fx_reset, kit::Kind::Ghost, true)
+                            .on_hover_text(tr.mixer_fx_reset_tip)
                             .clicked()
                         {
                             self.checkpoint();
@@ -1778,19 +1909,29 @@ impl App {
                         .unwrap_or_else(|| (slot.params.clone(), slot.params.clone(), 0));
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new("A/B").font(t::sans(11.0)).color(t::faint()),
+                            egui::RichText::new("A/B")
+                                .font(t::sans(11.0))
+                                .color(t::faint()),
                         );
                         let a = kit::tool_button(
                             ui,
                             "A",
-                            if ab.2 == 0 { kit::Kind::Normal } else { kit::Kind::Ghost },
+                            if ab.2 == 0 {
+                                kit::Kind::Normal
+                            } else {
+                                kit::Kind::Ghost
+                            },
                             true,
                         )
-                        .on_hover_text("Tweak A, switch to B, tweak B, switch back");
+                        .on_hover_text(tr.mixer_fx_ab_tip);
                         let b = kit::tool_button(
                             ui,
                             "B",
-                            if ab.2 == 1 { kit::Kind::Normal } else { kit::Kind::Ghost },
+                            if ab.2 == 1 {
+                                kit::Kind::Normal
+                            } else {
+                                kit::Kind::Ghost
+                            },
                             true,
                         );
                         let mut pick = None;
@@ -1808,16 +1949,19 @@ impl App {
                                 ab.1 = current;
                             }
                             ab.2 = pick;
-                            self.song.mixer[track].fx[k].params =
-                                if pick == 0 { ab.0.clone() } else { ab.1.clone() };
+                            self.song.mixer[track].fx[k].params = if pick == 0 {
+                                ab.0.clone()
+                            } else {
+                                ab.1.clone()
+                            };
                             self.publish();
                         }
                         ui.add_space(10.0);
                         let presets = keyframexl::fx::presets::for_kind(slot.kind);
                         if presets.is_empty() {
-                            ui.add_enabled(false, egui::Button::new("Presets"));
+                            ui.add_enabled(false, egui::Button::new(tr.mixer_fx_presets));
                         } else {
-                            ui.menu_button("Presets", |ui| {
+                            ui.menu_button(tr.mixer_fx_presets, |ui| {
                                 for p in &presets {
                                     if ui.button(p.name).clicked() {
                                         self.checkpoint();
@@ -1828,18 +1972,15 @@ impl App {
                                 }
                             })
                             .response
-                            .on_hover_text("Factory settings for this effect");
+                            .on_hover_text(tr.mixer_fx_presets_tip);
                         }
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                ui.label(
-                                    egui::RichText::new("Two settings to compare")
-                                        .font(t::sans(11.0))
-                                        .color(t::faint()),
-                                );
-                            },
-                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                egui::RichText::new(tr.mixer_fx_ab_hint)
+                                    .font(t::sans(11.0))
+                                    .color(t::faint()),
+                            );
+                        });
                     });
                     ctx.data_mut(|d| d.insert_temp(ab_id, ab));
                     if slot.kind == FxKind::Convolution {
@@ -1849,27 +1990,31 @@ impl App {
                                 .as_ref()
                                 .and_then(|p| p.file_name())
                                 .map(|n| n.to_string_lossy().to_string())
-                                .unwrap_or_else(|| "Studio (built-in)".into());
+                                .unwrap_or_else(|| tr.mixer_ir_studio_builtin.into());
                             ui.label(
-                                egui::RichText::new("Impulse").font(t::sans(12.0)).color(t::faint()),
+                                egui::RichText::new(tr.mixer_ir_label)
+                                    .font(t::sans(12.0))
+                                    .color(t::faint()),
                             );
                             ui.label(
-                                egui::RichText::new(name).font(t::sans(13.0)).color(t::text()),
+                                egui::RichText::new(name)
+                                    .font(t::sans(13.0))
+                                    .color(t::text()),
                             )
                             .on_hover_text(
                                 slot.ir
                                     .as_ref()
                                     .map(|p| p.display().to_string())
-                                    .unwrap_or_else(|| {
-                                        "The built-in studio impulse: load a .wav for your own space"
-                                            .into()
-                                    }),
+                                    .unwrap_or_else(|| tr.mixer_ir_builtin_tip.into()),
                             );
-                            if kit::button(ui, "Load IR…", kit::Kind::Normal, true).clicked() {
+                            if kit::button(ui, tr.mixer_ir_load_btn, kit::Kind::Normal, true)
+                                .clicked()
+                            {
                                 self.load_ir(track, k);
                             }
                             if slot.ir.is_some()
-                                && kit::button(ui, "Built-in", kit::Kind::Ghost, true).clicked()
+                                && kit::button(ui, tr.mixer_ir_builtin_btn, kit::Kind::Ghost, true)
+                                    .clicked()
                             {
                                 self.checkpoint();
                                 self.song.mixer[track].fx[k].ir = None;
@@ -2003,17 +2148,27 @@ impl App {
     /// The detector's input (FL: sidechain): this insert, or another one
     /// whose output drives the gain (a kick ducking a bass).
     fn sidechain_row(&mut self, ui: &mut Ui, track: usize, k: usize) {
+        let tr = self.tr();
         let now = self.song.mixer[track].fx[k].sidechain.map(|s| s as usize);
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            kit::caps(ui.painter(), ui.cursor().min + vec2(0.0, 12.0), Align2::LEFT_CENTER, "Sidechain", 11.0, t::faint());
+            kit::caps(
+                ui.painter(),
+                ui.cursor().min + vec2(0.0, 12.0),
+                Align2::LEFT_CENTER,
+                tr.mixer_sc_caps,
+                11.0,
+                t::faint(),
+            );
             ui.add_space(78.0);
             let mut pick: Option<Option<usize>> = None;
-            let shown = now.map(|i| self.insert_label(i)).unwrap_or_else(|| "Off · own signal".into());
+            let shown = now
+                .map(|i| self.insert_label(i))
+                .unwrap_or_else(|| tr.mixer_sc_off_own.into());
             kit::dropdown(ui, &format!("sc-{track}-{k}"), &shown, 200.0, |ui| {
-                pick = self.sidechain_choices(ui, track, now, "Off · own signal");
+                pick = self.sidechain_choices(ui, track, now, tr.mixer_sc_off_own);
             })
-            .on_hover_text("Which insert feeds the sidechain: the kick to duck this one under it, or a voice to drive the vocoder");
+            .on_hover_text(tr.mixer_sc_tip);
             if let Some(to) = pick {
                 self.set_sidechain(track, k, to);
             }
@@ -2033,6 +2188,7 @@ impl App {
         now: Option<usize>,
         off: &str,
     ) -> Option<Option<usize>> {
+        let tr = self.tr();
         let mut pick = None;
         if ui.selectable_label(now.is_none(), off).clicked() {
             pick = Some(None);
@@ -2048,9 +2204,7 @@ impl App {
             let r = if ok {
                 r
             } else {
-                r.on_disabled_hover_text(
-                    "This insert already feeds this one: it would close a loop",
-                )
+                r.on_disabled_hover_text(tr.mixer_sc_loop_tip)
             };
             if r.clicked() {
                 pick = Some(Some(i));
@@ -2071,27 +2225,22 @@ impl App {
         self.checkpoint();
         self.song.mixer[track].fx[k].sidechain = to.map(|i| i as u16);
         self.publish();
-        let what = match (to, plugin) {
-            (Some(i), false) => format!(
-                "{} now ducks under {}.",
-                self.mixer_name(track),
-                self.insert_label(i)
+        let tr = self.tr();
+        let track_name = self.mixer_name(track);
+        let fx_name = self.song.mixer[track].fx[k].label().to_string();
+        let msg = match (to, plugin) {
+            (Some(i), false) => crate::i18n::fill(
+                tr.mixer_sc_ducks_status,
+                &[("track", &track_name), ("src", &self.insert_label(i))],
             ),
-            (Some(i), true) => format!(
-                "{} reaches {}'s sidechain input.",
-                self.insert_label(i),
-                self.song.mixer[track].fx[k].label()
+            (Some(i), true) => crate::i18n::fill(
+                tr.mixer_sc_plugin_status,
+                &[("src", &self.insert_label(i)), ("fx", &fx_name)],
             ),
-            (None, false) => format!(
-                "{} compresses on its own signal again.",
-                self.mixer_name(track)
-            ),
-            (None, true) => format!(
-                "{} has no sidechain now.",
-                self.song.mixer[track].fx[k].label()
-            ),
+            (None, false) => crate::i18n::fill(tr.mixer_sc_own_status, &[("track", &track_name)]),
+            (None, true) => crate::i18n::fill(tr.mixer_sc_none_status, &[("fx", &fx_name)]),
         };
-        self.say(Tone::Quiet, format!("{what} Ctrl+Z undoes."));
+        self.say(Tone::Quiet, msg);
     }
 
     /// The analysed spectrum of insert `track` (dB per bin), smoothed for
@@ -2129,8 +2278,9 @@ impl App {
     /// Parametric EQ 2's band strip under the graph: a column per band with
     /// Freq · Gain · Q (FL's band table, turned upright).
     fn param_eq_bands(&mut self, ui: &mut Ui, track: usize, k: usize, slot: &FxSlot) {
+        let tr = self.tr();
         let specs = slot.kind.params();
-        let names = ["Low", "2", "3", "4", "5", "6", "High"];
+        let names = [tr.mixer_eq_low, "2", "3", "4", "5", "6", tr.mixer_eq_high];
         let focus: Option<usize> = ui
             .data(|d| d.get_temp(egui::Id::new(("eq-focus", track, k))))
             .unwrap_or(None);
@@ -2177,7 +2327,7 @@ impl App {
                 let y = c.top() + 42.0 + j as f32 * 36.0;
                 let kr = Rect::from_center_size(pos2(c.left() + 16.0, y), vec2(22.0, 22.0));
                 let fmt = |v: f64| keyframexl::fx::format(spec, v as f32);
-                let label = ["Freq", "Gain", "Q"][j];
+                let label = [tr.mixer_peq_freq, tr.mixer_peq_gain, tr.mixer_peq_q][j];
                 let knob = kit::Knob {
                     label,
                     color,
@@ -2269,6 +2419,7 @@ impl App {
     }
 
     fn fx_params(&mut self, ui: &mut Ui, track: usize, k: usize) {
+        let tr = self.tr();
         let Some(slot) = self.song.mixer[track].fx.get(k).cloned() else {
             return;
         };
@@ -2283,7 +2434,7 @@ impl App {
                 egui::RichText::new(format!(
                     "{} · {fmt}",
                     if p.vendor.is_empty() {
-                        "Plugin"
+                        tr.inst_kind_plugin
                     } else {
                         &p.vendor
                     }
@@ -2295,7 +2446,11 @@ impl App {
             let open = self.plugins.live.get(&p.id).is_some_and(|l| l.editor);
             if kit::button(
                 ui,
-                if open { "Hide editor" } else { "Open plugin" },
+                if open {
+                    tr.mixer_hide_editor
+                } else {
+                    tr.mixer_open_plugin
+                },
                 kit::Kind::Normal,
                 true,
             )
@@ -2332,16 +2487,6 @@ impl App {
             self.param_eq_bands(ui, track, k, &slot);
             return;
         }
-        let groups: &[&str] = match slot.kind {
-            FxKind::Compressor => &["Dynamics", "Timing / output"],
-            FxKind::Limiter => &["Level", "Release"],
-            FxKind::Delay => &["Echo", "Tone / mix"],
-            FxKind::Reverb => &["Space", "Filter / mix"],
-            FxKind::Squeeze => &["Squarize", "Puncher", "Filter", "Output"],
-            FxKind::HyperChorus => &["Delay line", "Movement", "Filters", "Output"],
-            FxKind::StereoShaper => &["Left & right", "Delay / phase"],
-            _ => &["Controls", "Output"],
-        };
         for (group, specs) in slot.kind.params().chunks(3).enumerate() {
             ui.add_space(4.0);
             let (head, _) =
@@ -2350,10 +2495,7 @@ impl App {
                 ui.painter(),
                 head.left_center(),
                 Align2::LEFT_CENTER,
-                groups
-                    .get(group)
-                    .copied()
-                    .unwrap_or(groups[groups.len() - 1]),
+                tr.fx_param_group_label(slot.kind, group),
                 10.5,
                 t::faint(),
             );
@@ -2420,11 +2562,12 @@ impl App {
     }
 
     fn sends_ui(&mut self, ui: &mut Ui, track: usize) {
+        let tr = self.tr();
         kit::caps(
             ui.painter(),
             ui.cursor().min + vec2(0.0, 6.0),
             Align2::LEFT_CENTER,
-            "sends",
+            tr.mixer_sends_caps,
             11.0,
             t::faint(),
         );
@@ -2439,14 +2582,14 @@ impl App {
                 let (r, _) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::hover());
                 let mut lv = s.level as f64;
                 let spec = kit::Knob {
-                    label: "Send",
+                    label: tr.mixer_send_label,
                     color: t::enc_blue(),
                     min: 0.0,
                     max: 1.0,
                     default: 1.0,
                     log: false,
                     fmt: &|v| format!("{:.0}%", v * 100.0),
-                    hint: "Send level",
+                    hint: tr.mixer_send_hint,
                 };
                 let (_, started, changed) =
                     kit::mini_knob(ui, r, ui.id().with(("send", track, si)), &spec, &mut lv);
@@ -2458,7 +2601,7 @@ impl App {
                     self.publish();
                 }
                 if kit::tool_button(ui, "×", kit::Kind::Ghost, true)
-                    .on_hover_text("Remove send")
+                    .on_hover_text(tr.mixer_remove_send)
                     .clicked()
                 {
                     self.checkpoint();
@@ -2472,14 +2615,20 @@ impl App {
             .collect();
         if !targets.is_empty() {
             let mut pick = None;
-            kit::dropdown(ui, &format!("send-{track}"), "Add send", 140.0, |ui| {
-                for t in &targets {
-                    if ui.button(self.mixer_name(*t)).clicked() {
-                        pick = Some(*t);
+            kit::dropdown(
+                ui,
+                &format!("send-{track}"),
+                tr.mixer_add_send,
+                140.0,
+                |ui| {
+                    for t in &targets {
+                        if ui.button(self.mixer_name(*t)).clicked() {
+                            pick = Some(*t);
+                        }
                     }
-                }
-            })
-            .on_hover_text("Send this track to a later insert (a bus); sends go after the fader");
+                },
+            )
+            .on_hover_text(tr.mixer_add_send_tip);
             if let Some(to) = pick {
                 self.checkpoint();
                 self.song.mixer[track].sends.push(Send {
