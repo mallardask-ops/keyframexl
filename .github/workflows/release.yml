@@ -42,6 +42,8 @@ jobs:
         run: cargo test --lib && cargo test --bin keyframexl
 
       - name: Build release binary
+        env:
+          KFXL_CHANNEL: stable
         run: cargo build --release --locked
 
       - name: Package

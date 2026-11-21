@@ -107,7 +107,7 @@ pub fn export_bundle(
     let mut manifest = BundleManifest {
         format: BUNDLE_FORMAT,
         app: project_io::APP_ID.to_string(),
-        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        app_version: crate::version::VERSION.to_string(),
         project_file: project_file.clone(),
         irs: vec![],
         missing_irs: vec![],

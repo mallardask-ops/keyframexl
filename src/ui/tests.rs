@@ -1832,3 +1832,110 @@ fn dragging_a_tab_group_by_its_grip_does_not_crash() {
     let tabs: usize = dock.iter_all_tabs().count();
     assert_eq!(tabs, 3, "no tab lost");
 }
+
+#[test]
+fn window_geometry_recording_handles_wayland_fullscreen_and_startup_maximize() {
+    let (ctx, mut app) = setup();
+    app.settings.general.window_size = Some([1440.0, 900.0]);
+    app.settings.general.window_maximized = true;
+    app.startup_maximized = true;
+
+    let step = |app: &mut App,
+                size: [f32; 2],
+                with_inner_rect: bool,
+                maximized: Option<bool>,
+                fullscreen: Option<bool>,
+                z: f32,
+                time: f64| {
+        let mut raw = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(size[0], size[1]))),
+            time: Some(time),
+            ..Default::default()
+        };
+        let vp = raw.viewports.entry(egui::ViewportId::ROOT).or_default();
+        vp.inner_rect = with_inner_rect
+            .then(|| Rect::from_min_size(pos2(10.0, 20.0), Vec2::new(size[0], size[1])));
+        vp.maximized = maximized;
+        vp.fullscreen = fullscreen;
+        let mut out = (false, false, 0.0);
+        let full = ctx.run(raw, |ctx| {
+            out = app.record_window_geometry(ctx, z);
+        });
+        (
+            out,
+            full.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .clone(),
+        )
+    };
+
+    // Frame 1: WM hasn't mapped/maximized yet -> must not clobber startup maximize.
+    let ((dirty, _, _), cmds) = step(
+        &mut app,
+        [1440.0, 900.0],
+        true,
+        Some(false),
+        None,
+        1.0,
+        0.01,
+    );
+    assert!(!dirty);
+    assert!(app.settings.general.window_maximized);
+    assert!(!cmds.contains(&egui::ViewportCommand::Maximized(true)));
+
+    // Frame 2: still reporting unmaximized after mapping -> nudges maximize once.
+    let ((dirty, _, _), cmds) = step(
+        &mut app,
+        [1440.0, 900.0],
+        true,
+        Some(false),
+        None,
+        1.0,
+        0.03,
+    );
+    assert!(!dirty);
+    assert!(app.settings.general.window_maximized);
+    assert!(cmds.contains(&egui::ViewportCommand::Maximized(true)));
+
+    // Frame 3: WM confirms maximize -> clears startup flag and preserves normal window_size.
+    let ((dirty, _, _), _) = step(
+        &mut app,
+        [2560.0, 1440.0],
+        true,
+        Some(true),
+        None,
+        1.0,
+        0.05,
+    );
+    assert!(!dirty);
+    assert!(!app.startup_maximized);
+    assert!(app.settings.general.window_maximized);
+    assert_eq!(app.settings.general.window_size, Some([1440.0, 900.0]));
+
+    // User restores window on Wayland (inner_rect == None) with ui_scale 1.25 -> records logical size.
+    let ((dirty, _, _), _) = step(
+        &mut app,
+        [1280.0, 720.0],
+        false,
+        Some(false),
+        Some(false),
+        1.25,
+        0.2,
+    );
+    assert!(dirty);
+    assert!(!app.settings.general.window_maximized);
+    assert_eq!(app.settings.general.window_size, Some([1600.0, 900.0]));
+
+    // Fullscreen does not overwrite the restored window size.
+    let ((dirty, _, _), _) = step(
+        &mut app,
+        [2560.0, 1440.0],
+        true,
+        Some(false),
+        Some(true),
+        1.0,
+        0.4,
+    );
+    assert!(!dirty);
+    assert_eq!(app.settings.general.window_size, Some([1600.0, 900.0]));
+}

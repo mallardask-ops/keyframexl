@@ -82,6 +82,8 @@ jobs:
         if: steps.ver.outputs.skip != 'true'
         env:
           KFXL_BUILD_VERSION: ${{ steps.ver.outputs.version }}
+          KFXL_VERSION: ${{ steps.ver.outputs.version }}
+          KFXL_CHANNEL: nightly
         run: cargo build --release --locked
 
       - name: Package

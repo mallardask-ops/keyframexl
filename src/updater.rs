@@ -12,12 +12,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const REPO: &str = "mallardask-ops/keyframexl";
 pub const RELEASES_URL: &str = "https://github.com/mallardask-ops/keyframexl/releases";
-/// Nightly builds set `KFXL_BUILD_VERSION` (e.g. `0.1.3-nightly.202611201530`)
-/// at compile time; stable builds use the crate version.
-pub const CURRENT_VERSION: &str = match option_env!("KFXL_BUILD_VERSION") {
-    Some(v) => v,
-    None => env!("CARGO_PKG_VERSION"),
-};
+/// Nightly builds set `KFXL_BUILD_VERSION` / `KFXL_VERSION` (e.g.
+/// `0.1.3-nightly.202611201530`) at compile time; stable builds use the crate version.
+pub const CURRENT_VERSION: &str = keyframexl::version::VERSION;
 
 /// Automatic background checks run at most once every 24 hours.
 pub const AUTO_CHECK_INTERVAL_SECS: u64 = 24 * 60 * 60;

@@ -56,7 +56,7 @@ fn log_to_file() {
         .unwrap_or(0);
     eprintln!(
         "KeyFrameXL {} started (unix time {stamp})",
-        env!("CARGO_PKG_VERSION")
+        keyframexl::version::display()
     );
 }
 
@@ -290,16 +290,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let (w, h) = s.split_once('x')?;
                     Some([w.parse::<f32>().ok()?, h.parse::<f32>().ok()?])
                 })
-                .or_else(|| {
-                    (!capture)
-                        .then_some(prefs.general.window_size)
-                        .flatten()
-                        .filter(|[w, h]| {
-                            w.is_finite() && h.is_finite() && *w >= 600.0 && *h >= 400.0
-                        })
-                        .map(|[w, h]| [w.clamp(1180.0, 7680.0), h.clamp(680.0, 4320.0)])
-                })
-                .unwrap_or([1366.0, 768.0]);
+                .unwrap_or_else(|| {
+                    if capture {
+                        settings::DEFAULT_WINDOW_SIZE
+                    } else {
+                        prefs.general.restored_window_size()
+                    }
+                });
             let x11 = env::var("KFXL_X11")
                 .map(|v| v == "1")
                 .unwrap_or(!capture && prefs.general.x11);
@@ -312,7 +309,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .with_inner_size(size)
                 .with_maximized(!capture && prefs.general.window_maximized)
                 .with_decorations(!capture && prefs.general.system_title_bar)
-                .with_min_inner_size([1180.0, 680.0]);
+                .with_min_inner_size(settings::MIN_WINDOW_SIZE);
             if let Some(icon) = app_icon() {
                 viewport = viewport.with_icon(icon);
             }

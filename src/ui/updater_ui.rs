@@ -85,6 +85,9 @@ impl App {
                             .font(t::mono(12.5))
                             .color(t::muted()),
                     );
+                    if keyframexl::version::is_nightly() {
+                        super::settings_ui::nightly_badge(ui);
+                    }
                 });
 
                 match self.updater.state.clone() {

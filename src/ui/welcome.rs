@@ -345,13 +345,39 @@ fn header(
         t::semibold(20.0),
         t::text(),
     );
+    let ver_text = format!("v{}", keyframexl::version::VERSION);
+    let ver_x = x + title_w + 10.0;
     p.text(
-        pos2(x + title_w + 10.0, h.top() + 33.0),
+        pos2(ver_x, h.top() + 33.0),
         Align2::LEFT_BOTTOM,
-        format!("v{}", env!("CARGO_PKG_VERSION")),
+        &ver_text,
         t::mono(12.0),
         t::muted(),
     );
+    if keyframexl::version::is_nightly() {
+        let ver_w = kit::text_width(&p, &ver_text, t::mono(12.0));
+        let badge_label = keyframexl::version::Channel::Nightly.label();
+        let badge_font = t::medium(10.5);
+        let badge_w = kit::text_width(&p, badge_label, badge_font.clone()) + 12.0;
+        let badge_rect = Rect::from_min_size(
+            pos2(ver_x + ver_w + 8.0, h.top() + 16.0),
+            vec2(badge_w, 18.0),
+        );
+        p.rect_filled(badge_rect, 4.0, t::brand_soft());
+        p.rect_stroke(
+            badge_rect,
+            4.0,
+            Stroke::new(1.0_f32, t::brand_edge()),
+            egui::StrokeKind::Inside,
+        );
+        p.text(
+            badge_rect.center(),
+            Align2::CENTER_CENTER,
+            badge_label,
+            badge_font,
+            t::brand(),
+        );
+    }
     p.text(
         pos2(x, h.top() + 40.0),
         Align2::LEFT_TOP,

@@ -50,6 +50,8 @@ pub struct SharedState {
     pub(crate) fullscreen: Option<Fullscreen>,
     // Set when application calls `set_fullscreen` when window is not visible
     pub(crate) desired_fullscreen: Option<Option<Fullscreen>>,
+    // Set when application calls `set_maximized` when window is not visible
+    pub(crate) desired_maximized: Option<bool>,
     // Used to restore position after exiting fullscreen
     pub restore_position: Option<(i32, i32)>,
     // Used to restore video mode after exiting fullscreen
@@ -92,6 +94,7 @@ impl SharedState {
             dpi_adjusted: None,
             fullscreen: None,
             desired_fullscreen: None,
+            desired_maximized: None,
             restore_position: None,
             desktop_video_mode: None,
             frame_extents: None,
@@ -534,7 +537,7 @@ impl UnownedWindow {
 
             // These properties must be set after mapping
             if window_attrs.maximized {
-                leap!(window.set_maximized_inner(window_attrs.maximized)).ignore_error();
+                window.set_maximized(window_attrs.maximized);
             }
             if window_attrs.fullscreen.is_some() {
                 if let Some(flusher) =
@@ -840,9 +843,15 @@ impl UnownedWindow {
             Visibility::YesWait => {
                 shared_state.visibility = Visibility::Yes;
 
-                if let Some(fullscreen) = shared_state.desired_fullscreen.take() {
-                    drop(shared_state);
+                let desired_fullscreen = shared_state.desired_fullscreen.take();
+                let desired_maximized = shared_state.desired_maximized.take();
+                drop(shared_state);
+
+                if let Some(fullscreen) = desired_fullscreen {
                     self.set_fullscreen(fullscreen);
+                }
+                if let Some(maximized) = desired_maximized {
+                    self.set_maximized(maximized);
                 }
             },
         }
@@ -993,6 +1002,16 @@ impl UnownedWindow {
 
     #[inline]
     pub fn set_maximized(&self, maximized: bool) {
+        {
+            let mut shared_state = self.shared_state_lock();
+            match shared_state.visibility {
+                Visibility::No | Visibility::YesWait => {
+                    shared_state.desired_maximized = Some(maximized);
+                    return;
+                },
+                Visibility::Yes => {},
+            }
+        }
         self.set_maximized_inner(maximized)
             .expect_then_ignore_error("Failed to change window maximization");
         self.xconn.flush_requests().expect("Failed to change window maximization");

@@ -1408,10 +1408,13 @@ fn general_page(ui: &mut egui::Ui, s: &mut Settings, checking_updates: bool) -> 
         });
         row(ui, tr.set_current_version, None, |ui| {
             ui.label(
-                RichText::new(format!("v{}", crate::updater::CURRENT_VERSION))
+                RichText::new(format!("v{}", keyframexl::version::VERSION))
                     .font(t::mono(12.5))
                     .color(t::text()),
             );
+            if keyframexl::version::is_nightly() {
+                nightly_badge(ui);
+            }
             if kit::tool_button(
                 ui,
                 if checking_updates {
@@ -1525,6 +1528,22 @@ fn badge(ui: &mut egui::Ui, text: &str, ink: egui::Color32) {
         .inner_margin(egui::Margin::symmetric(6, 2))
         .show(ui, |ui| {
             ui.label(RichText::new(text).font(t::mono(12.0)).color(ink));
+        });
+}
+
+/// Small channel pill shown next to the version on nightly builds.
+pub(crate) fn nightly_badge(ui: &mut egui::Ui) {
+    egui::Frame::new()
+        .fill(t::brand_soft())
+        .stroke(egui::Stroke::new(1.0_f32, t::brand_edge()))
+        .corner_radius(4.0)
+        .inner_margin(egui::Margin::symmetric(6, 2))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(keyframexl::version::Channel::Nightly.label())
+                    .font(t::medium(11.0))
+                    .color(t::brand()),
+            );
         });
 }
 
