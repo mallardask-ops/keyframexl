@@ -429,7 +429,7 @@ fn apply_regions(frame: HWND, clip: [i32; 4], regions: &[[i32; 4]]) {
         return;
     }
     unsafe {
-        let mut combined = ptr::null_mut();
+        let mut combined: HRGN = ptr::null_mut();
         for r in regions {
             let x1 = r[0] - clip[0];
             let y1 = r[1] - clip[1];
