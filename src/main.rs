@@ -1,7 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio;
-#[cfg(target_os = "linux")]
 mod bridge;
 mod clap;
 mod dwp;
@@ -24,7 +23,7 @@ mod updater;
 mod vst2;
 
 #[cfg(not(target_os = "linux"))]
-use platform::stubs::{bridge, fl_link, fl_native, flp_freeze};
+use platform::stubs::{fl_link, fl_native, flp_freeze};
 
 use std::{env, error::Error};
 #[cfg(target_os = "linux")]

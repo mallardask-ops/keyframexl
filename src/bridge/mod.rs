@@ -9,6 +9,7 @@
 #![allow(dead_code)]
 
 mod host;
+mod ipc;
 mod protocol;
 mod shm;
 mod supervisor;
@@ -17,12 +18,12 @@ pub use host::start_bridged_host;
 
 pub use supervisor::Fault;
 
+use ipc::ControlStream;
 use keyframexl::plugin::{PluginEvent, Processor, Transport};
 use protocol::{Message, VERSION, read_message, write_message};
-use shm::{RawEvent, Shm, futex_wait, futex_wake};
+use shm::{RawEvent, Shm};
 use std::{
-    io::{self, Read},
-    os::unix::net::UnixStream,
+    io,
     process::Command,
     sync::{
         Arc,
@@ -244,7 +245,7 @@ impl BridgeProc {
         self.pending_frames = frames;
         self.published = self.published.wrapping_add(1);
         h.in_seq.store(self.published, Ordering::Release);
-        futex_wake(&h.in_seq);
+        shm.wake_child();
         if offline {
             let ok = self.wait_idle();
             // Nothing is pending for the live pipeline after an offline block.
@@ -434,11 +435,11 @@ impl Mode {
     }
 }
 
-/// `keyframexl plugin-host`: the child's whole life. The control socket path
-/// comes in `KFXL_BRIDGE_SOCKET`.
+/// `keyframexl plugin-host`: the child's whole life. The control endpoint comes
+/// in `KFXL_BRIDGE_SOCKET`.
 pub(crate) fn child_main() -> Result<(), Box<dyn std::error::Error>> {
     let path = std::env::var("KFXL_BRIDGE_SOCKET")?;
-    let mut socket = UnixStream::connect(path)?;
+    let mut socket = ControlStream::connect(&path)?;
     let rate = match read_message(&mut socket)? {
         Message::Hello {
             version,
@@ -467,67 +468,58 @@ pub(crate) fn child_main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     let (mut mode, shm) = match read_message(&mut socket)? {
-        // A real plugin host: requests over the socket, audio through the block.
-        Message::Load { mode, shm } if mode == "host" => {
-            match Shm::open(std::path::Path::new(&shm)) {
-                Ok(shm) => {
-                    write_message(&mut socket, &Message::Loaded)?;
-                    host::child_host(socket, shm, rate)
-                }
-                Err(e) => {
-                    write_message(
-                        &mut socket,
-                        &Message::Error {
-                            reason: format!("audio block: {e}"),
-                        },
-                    )?;
-                    return Err(e.into());
-                }
+        // A real plugin host: requests over the control channel, audio through the block.
+        Message::Load { mode, shm } if mode == "host" => match Shm::open(&shm) {
+            Ok(shm) => {
+                write_message(&mut socket, &Message::Loaded)?;
+                host::child_host(socket, shm, rate)
             }
-        }
-        Message::Load { mode, shm } => {
-            match (Mode::parse(&mode), Shm::open(std::path::Path::new(&shm))) {
-                (Some(m), Ok(s)) => (m, s),
-                (None, _) => {
-                    write_message(
-                        &mut socket,
-                        &Message::Error {
-                            reason: format!("unknown plugin {mode}"),
-                        },
-                    )?;
-                    return Err("bad load".into());
-                }
-                (_, Err(e)) => {
-                    write_message(
-                        &mut socket,
-                        &Message::Error {
-                            reason: format!("audio block: {e}"),
-                        },
-                    )?;
-                    return Err(e.into());
-                }
+            Err(e) => {
+                write_message(
+                    &mut socket,
+                    &Message::Error {
+                        reason: format!("audio block: {e}"),
+                    },
+                )?;
+                return Err(e.into());
             }
-        }
+        },
+        Message::Load { mode, shm } => match (Mode::parse(&mode), Shm::open(&shm)) {
+            (Some(m), Ok(s)) => (m, s),
+            (None, _) => {
+                write_message(
+                    &mut socket,
+                    &Message::Error {
+                        reason: format!("unknown plugin {mode}"),
+                    },
+                )?;
+                return Err("bad load".into());
+            }
+            (_, Err(e)) => {
+                write_message(
+                    &mut socket,
+                    &Message::Error {
+                        reason: format!("audio block: {e}"),
+                    },
+                )?;
+                return Err(e.into());
+            }
+        },
         _ => return Err("expected Load".into()),
     };
     write_message(&mut socket, &Message::Loaded)?;
-    socket.set_nonblocking(true)?;
     let h = shm.header();
     // What it last finished, not what is published: a block published before
     // this loop started must still be processed.
     let mut seen = h.out_seq.load(Ordering::Acquire);
     let mut blocks = 0u64;
-    let mut buf = [0u8; 4];
     loop {
         let next = h.in_seq.load(Ordering::Acquire);
         if next == seen {
-            futex_wait(&h.in_seq, seen, 100);
-            // The parent closed the socket or said goodbye: done.
-            match socket.read(&mut buf) {
-                Ok(0) => return Ok(()),
-                Ok(_) => return Ok(()),
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
-                Err(_) => return Ok(()),
+            shm.wait_for_block(seen, 100);
+            // The parent closed the control channel or said goodbye: done.
+            if socket.try_closed() {
+                return Ok(());
             }
             continue;
         }
@@ -568,8 +560,7 @@ pub(crate) fn child_main() -> Result<(), Box<dyn std::error::Error>> {
             Mode::CrashAfter(n) => {
                 if blocks >= *n {
                     // Mid-block, like a plugin dying in process() (no core dump: tests stay fast).
-                    // SAFETY: ends the process at once; nothing is left to run.
-                    unsafe { libc::_exit(134) };
+                    crate::platform::exit_immediately(134);
                 }
                 output.copy_from_slice(input);
             }

@@ -9,6 +9,12 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 See [docs/v0.2.1.md](docs/v0.2.1.md) for the Windows port and 0.2.1 plan.
 
 ### Engine and internals
+- **Out-of-process plugin bridge on Windows (W4)**: abstracted `src/bridge/ipc/`
+  with a native Windows backend using pagefile-backed `CreateFileMappingW` /
+  `MapViewOfFile`, auto-reset named `CreateEventW`, full-duplex overlapped Named
+  Pipes (`\\.\pipe\kfxl-bridge-...`), `CREATE_NO_WINDOW`, and a Job Object
+  (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`), with the full `bridge::tests` suite
+  running on `windows-latest`.
 - **Native Windows plugin hosting (W3)**: modularized `src/plugins/` into
   `mod`, `scan`, `host`, `wine`, `editor_x11`, and `editor_win32`; migrated
   `src/vst2.rs` and `src/clap.rs` to `libloading`; enabled VST3, CLAP (`win32`

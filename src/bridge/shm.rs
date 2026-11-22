@@ -16,10 +16,9 @@
 //! with Release; the parent reads `output` after an Acquire load of `out_seq`.
 //! So the plain (non-atomic) buffers always have a single owner.
 
+use super::ipc::ShmBacking;
 use std::{
-    fs::{File, OpenOptions},
     io,
-    path::Path,
     sync::atomic::{AtomicU32, AtomicU64, Ordering},
 };
 
@@ -32,7 +31,7 @@ pub(crate) struct Header {
     version: u32,
     pub max_frames: u32,
     pub max_events: u32,
-    /// Last block the parent published (the child waits on it with a futex).
+    /// Last block the parent published (the child waits on it).
     pub in_seq: AtomicU32,
     /// Last block the child finished.
     pub out_seq: AtomicU32,
@@ -92,9 +91,8 @@ fn offsets(max_frames: u32, max_events: u32) -> Offsets {
 /// One mapping of the shared block (each process has its own).
 pub(crate) struct Shm {
     ptr: *mut u8,
-    len: usize,
     off: Offsets,
-    _file: File,
+    backing: ShmBacking,
 }
 
 // SAFETY: the mapping is plain shared memory; access discipline is the
@@ -102,37 +100,11 @@ pub(crate) struct Shm {
 unsafe impl Send for Shm {}
 unsafe impl Sync for Shm {}
 
-fn map(file: &File, len: usize) -> io::Result<*mut u8> {
-    use std::os::fd::AsRawFd;
-    // SAFETY: a fresh shared mapping of a file we own, of its full length.
-    let p = unsafe {
-        libc::mmap(
-            std::ptr::null_mut(),
-            len,
-            libc::PROT_READ | libc::PROT_WRITE,
-            libc::MAP_SHARED,
-            file.as_raw_fd(),
-            0,
-        )
-    };
-    if p == libc::MAP_FAILED {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(p as *mut u8)
-    }
-}
-
 impl Shm {
-    /// Parent side: a new zeroed block file at `path`.
-    pub fn create(path: &Path, max_frames: u32, max_events: u32) -> io::Result<Self> {
+    /// Parent side: a new zeroed shared block named `name`.
+    pub fn create(name: &str, max_frames: u32, max_events: u32) -> io::Result<Self> {
         let off = offsets(max_frames, max_events);
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(path)?;
-        file.set_len(off.len as u64)?;
-        let ptr = map(&file, off.len)?;
+        let (backing, ptr) = ShmBacking::create(name, off.len)?;
         // SAFETY: the mapping is at least `size_of::<Header>()` bytes, page aligned, zeroed.
         unsafe {
             let h = ptr as *mut Header;
@@ -141,45 +113,33 @@ impl Shm {
             (*h).max_frames = max_frames;
             (*h).max_events = max_events;
         }
-        Ok(Self {
-            ptr,
-            len: off.len,
-            off,
-            _file: file,
-        })
+        Ok(Self { ptr, off, backing })
     }
 
-    /// Child side: map an existing block and check it.
-    pub fn open(path: &Path) -> io::Result<Self> {
-        let file = OpenOptions::new().read(true).write(true).open(path)?;
-        let len = file.metadata()?.len() as usize;
-        if len < std::mem::size_of::<Header>() {
+    /// Child side: map an existing block and validate its header and size.
+    pub fn open(name: &str) -> io::Result<Self> {
+        let (backing, ptr, mapped_len) = ShmBacking::open(name)?;
+        if mapped_len < std::mem::size_of::<Header>() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "bridge block too short",
             ));
         }
-        let ptr = map(&file, len)?;
         // SAFETY: mapped and at least a header long.
         let (magic, version, mf, me) = unsafe {
             let h = &*(ptr as *const Header);
             (h.magic, h.version, h.max_frames, h.max_events)
         };
         let off = offsets(mf, me);
-        if magic != MAGIC || version != LAYOUT_VERSION || off.len != len {
-            // SAFETY: unmapping what we just mapped.
-            unsafe { libc::munmap(ptr as *mut _, len) };
+        // On Windows `MapViewOfFile` rounds RegionSize up to the page granularity,
+        // so `mapped_len >= off.len` is valid.
+        if magic != MAGIC || version != LAYOUT_VERSION || mapped_len < off.len {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "bridge block layout mismatch",
             ));
         }
-        Ok(Self {
-            ptr,
-            len,
-            off,
-            _file: file,
-        })
+        Ok(Self { ptr, off, backing })
     }
 
     pub fn header(&self) -> &Header {
@@ -193,6 +153,16 @@ impl Shm {
 
     pub fn max_events(&self) -> usize {
         self.header().max_events as usize
+    }
+
+    /// Wake the child after publishing `in_seq` (parent audio thread).
+    pub fn wake_child(&self) {
+        self.backing.wake(&self.header().in_seq);
+    }
+
+    /// Sleep until a new block is published or `timeout_ms` elapses (child side).
+    pub fn wait_for_block(&self, seen: u32, timeout_ms: u64) {
+        self.backing.wait(&self.header().in_seq, seen, timeout_ms);
     }
 
     /// The events area. Callers follow the hand-off: only the current owner touches it.
@@ -239,9 +209,7 @@ impl Shm {
             )
         }
     }
-}
 
-impl Shm {
     /// The extra output lanes, `max_frames * 2` apart (see the layout above).
     #[allow(clippy::mut_from_ref)]
     pub unsafe fn extra(&self) -> &mut [f32] {
@@ -253,37 +221,6 @@ impl Shm {
             )
         }
     }
-}
-
-impl Drop for Shm {
-    fn drop(&mut self) {
-        // SAFETY: unmapping our own mapping once.
-        unsafe { libc::munmap(self.ptr as *mut _, self.len) };
-    }
-}
-
-/// Sleep until `a` differs from `seen` or `timeout_ms` passes (child side only).
-pub(crate) fn futex_wait(a: &AtomicU32, seen: u32, timeout_ms: u64) {
-    let ts = libc::timespec {
-        tv_sec: (timeout_ms / 1000) as libc::time_t,
-        tv_nsec: ((timeout_ms % 1000) * 1_000_000) as libc::c_long,
-    };
-    // SAFETY: a shared (non-private) futex on a 4-byte aligned word in the mapping.
-    unsafe {
-        libc::syscall(
-            libc::SYS_futex,
-            a.as_ptr(),
-            libc::FUTEX_WAIT,
-            seen,
-            &ts as *const libc::timespec,
-        )
-    };
-}
-
-/// Wake the child after a publish: a single non-blocking syscall (audio side).
-pub(crate) fn futex_wake(a: &AtomicU32) {
-    // SAFETY: as for `futex_wait`.
-    unsafe { libc::syscall(libc::SYS_futex, a.as_ptr(), libc::FUTEX_WAKE, 1) };
 }
 
 pub(crate) fn tempo_of(h: &Header) -> f64 {
