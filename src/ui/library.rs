@@ -51,10 +51,16 @@ fn children(dir: &Path) -> Vec<PathBuf> {
 /// Look in the usual places: Image-Line install roots (Wine on Linux, Program
 /// Files on Windows), mounted disks, and the music folder.
 pub fn find(home: &Path, mounts: &[PathBuf]) -> Libraries {
+    find_in_roots(&crate::platform::fl_image_line_roots(home), mounts)
+}
+
+/// Scan explicit Image-Line install roots and library mount folders (pure,
+/// platform-independent so unit tests do not depend on host OS folders).
+fn find_in_roots(il_roots: &[PathBuf], mounts: &[PathBuf]) -> Libraries {
     let mut libs = Libraries::default();
     let mut packs: Vec<PathBuf> = Vec::new();
-    for il in crate::platform::fl_image_line_roots(home) {
-        for fl in children(&il).into_iter().filter(|p| {
+    for il in il_roots {
+        for fl in children(il).into_iter().filter(|p| {
             p.file_name()
                 .is_some_and(|n| n.to_string_lossy().starts_with("FL Studio"))
         }) {
@@ -209,7 +215,8 @@ mod tests {
         std::fs::create_dir_all(sgm.join("Bass")).unwrap();
         std::fs::write(sgm.join("Bass/Fingered Bass.dwp"), b"x").unwrap();
         std::fs::create_dir_all(disk.path().join("Photos")).unwrap();
-        let libs = find(home.path(), &[disk.path().to_path_buf()]);
+        let il_root = home.path().join(".wine/drive_c/Program Files/Image-Line");
+        let libs = find_in_roots(&[il_root], &[disk.path().to_path_buf()]);
         assert!(
             libs.fl_packs
                 .as_ref()
@@ -230,7 +237,7 @@ mod tests {
             "drums are built in; FL's packs are not borrowed"
         );
         assert_eq!(
-            find(disk.path(), &[]),
+            find_in_roots(&[], &[]),
             Libraries::default(),
             "nothing found, nothing changes"
         );

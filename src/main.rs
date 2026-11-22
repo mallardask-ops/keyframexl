@@ -37,6 +37,7 @@ use std::{
 };
 
 fn main() -> Result<(), Box<dyn Error>> {
+    platform::prepare_process();
     let args: Vec<String> = env::args().collect();
     let is_gui_launch = args.len() <= 3
         && args.get(1).is_none_or(|a| {

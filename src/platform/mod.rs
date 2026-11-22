@@ -107,6 +107,13 @@ pub fn setup_log_file() {
     imp::setup_log_file();
 }
 
+/// One-time process-level startup hygiene (e.g. restoring an inherited
+/// soft `RLIMIT_RTTIME` cap on Linux after an in-place updater restart).
+pub fn prepare_process() {
+    #[cfg(target_os = "linux")]
+    imp::prepare_process();
+}
+
 /// Terminate the process immediately after saving/unloading, skipping C/C++
 /// static destructors that buggy plugin libraries can crash or deadlock in.
 pub fn exit_immediately(code: i32) -> ! {

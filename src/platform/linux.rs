@@ -98,6 +98,26 @@ pub fn setup_log_file() {
     );
 }
 
+/// If a parent process (such as an older nightly restarting us after an
+/// in-place update) lowered the soft `RLIMIT_RTTIME` below the hard limit,
+/// restore `rlim_cur = rlim_max` so Wine/yabridge plugins are not killed by
+/// `SIGXCPU` during initialization.
+pub fn prepare_process() {
+    let mut lim = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: valid mutable pointer to rlimit struct.
+    if unsafe { libc::getrlimit(libc::RLIMIT_RTTIME, &mut lim) } == 0 && lim.rlim_cur < lim.rlim_max
+    {
+        lim.rlim_cur = lim.rlim_max;
+        // SAFETY: raising soft limit up to the existing hard limit is always permitted.
+        unsafe {
+            libc::setrlimit(libc::RLIMIT_RTTIME, &lim);
+        }
+    }
+}
+
 pub fn exit_immediately(code: i32) -> ! {
     // SAFETY: nothing is left to run; `_exit` skips C atexit handlers that
     // plugin libraries (yabridge among them) can abort in.
