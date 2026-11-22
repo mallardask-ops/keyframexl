@@ -9,6 +9,14 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 See [docs/v0.2.1.md](docs/v0.2.1.md) for the Windows port and 0.2.1 plan.
 
 ### Engine and internals
+- **Cross-OS `.kfxl` compatibility, native Windows FL Studio lookup & docs (W5)**:
+  `resolve_plugin_path` now resolves hosted plugins across Linux and Windows by
+  CLAP `#id`, cross-OS bundle/library stem (`.dll` ↔ `.so`, `.vst3`, `.clap`),
+  or display name/vendor when opening a project saved on another OS; bundle and
+  convolution IR paths normalize `/` ↔ `\`; `flp::resolve_path` and FLP sample /
+  DirectWave lookup work natively on Windows without a Wine prefix; Steinberg
+  ASIO trademark attribution added to *About* and `README.md`; English and
+  Ukrainian manuals updated for Linux and Windows.
 - **Out-of-process plugin bridge on Windows (W4)**: abstracted `src/bridge/ipc/`
   with a native Windows backend using pagefile-backed `CreateFileMappingW` /
   `MapViewOfFile`, auto-reset named `CreateEventW`, full-duplex overlapped Named

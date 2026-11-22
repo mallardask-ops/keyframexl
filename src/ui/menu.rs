@@ -947,6 +947,12 @@ impl App {
                 if let Some(line) = audio {
                     ui.label(RichText::new(line).font(t::mono(12.0)).color(t::muted()));
                 }
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(tr.about_asio_notice)
+                        .font(t::sans(11.0))
+                        .color(t::muted()),
+                );
                 ui.add_space(8.0);
                 if ui.button(tr.common_close).clicked() {
                     close = true;

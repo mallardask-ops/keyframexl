@@ -13,7 +13,7 @@
 
 Змінні середовища:
 
-- `KFXL_X11=0` — робота на чистому Wayland (редактори плагінів
+- `KFXL_X11=0` — робота на чистому Wayland на Linux (редактори плагінів
   відкриваються в окремих вікнах).
 - `KFXL_NO_BRIDGE=1` — усі плагіни завантажуються всередині програми.
 - `KFXL_LANG=en|uk` — мова інтерфейсу для цього запуску.
@@ -22,12 +22,21 @@
 
 ## Де лежать файли
 
-- Журнал: `~/.local/state/keyframexl/keyframexl.log` (попередній запуск —
-  `keyframexl.log.1`). Додавайте його до звіту про помилку.
-- Налаштування й недавні проєкти: `~/.config/keyframexl/`.
-- Автозбереження й голосові банки: `~/.local/share/keyframexl/`.
-- Кеш аналізу вокалу: `~/.cache/keyframexl/vocal`.
-- Ваші пресети, звуки Forge і записи: `~/Music/KeyFrameXL/`.
+- **Журнал** (додавайте його до звіту про помилку; попередній запуск — `keyframexl.log.1`):
+  - Linux: `~/.local/state/keyframexl/keyframexl.log`
+  - Windows: `%LOCALAPPDATA%\keyframexl\keyframexl.log`
+- **Налаштування й недавні проєкти:**
+  - Linux: `~/.config/keyframexl/`
+  - Windows: `%APPDATA%\keyframexl\`
+- **Автозбереження й голосові банки:**
+  - Linux: `~/.local/share/keyframexl/`
+  - Windows: `%LOCALAPPDATA%\keyframexl\`
+- **Кеш плагінів та аналізу вокалу:**
+  - Linux: `~/.cache/keyframexl/`
+  - Windows: `%LOCALAPPDATA%\keyframexl\`
+- **Ваші пресети, звуки Forge і записи:**
+  - Linux: `~/Music/KeyFrameXL/`
+  - Windows: `%USERPROFILE%\Music\KeyFrameXL\`
 
 ## Проблеми
 

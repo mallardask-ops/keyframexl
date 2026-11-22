@@ -2,7 +2,7 @@
 name = "keyframexl"
 version = "0.2.0"
 edition = "2024"
-description = "Native Linux pattern sequencer prototype"
+description = "Native pattern-based music sequencer and DAW for Linux and Windows"
 license = "MIT"
 
 [features]

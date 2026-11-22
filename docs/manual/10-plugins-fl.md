@@ -7,9 +7,14 @@ effects. *Options → Plugins…* lists them, with a search by name or vendor.
 
 Folders scanned:
 
-- CLAP: `~/.clap`, `/usr/lib/clap`, `/usr/local/lib/clap`, `$CLAP_PATH`.
-- VST3: `~/.vst3`, `/usr/lib/vst3`, and more in the list.
-- VST2: `~/.vst`, `/usr/lib/vst`, and more in the list.
+- **Linux:**
+  - CLAP: `~/.clap`, `/usr/lib/clap`, `/usr/local/lib/clap`, `$CLAP_PATH`.
+  - VST3: `~/.vst3`, `/usr/lib/vst3`, `/usr/local/lib/vst3`, `/opt/vst3`, `$VST3_PATH`.
+  - VST2 (`.so`): `~/.vst`, `/usr/lib/vst`, `/usr/local/lib/vst`, `$VST_PATH`.
+- **Windows:**
+  - CLAP: `%COMMONPROGRAMFILES%\CLAP`, `%LOCALAPPDATA%\Programs\Common\CLAP`, `%CLAP_PATH%`.
+  - VST3: `%COMMONPROGRAMFILES%\VST3`, `%LOCALAPPDATA%\Programs\Common\VST3`, `%VST3_PATH%`.
+  - VST2 (`.dll`): `Program Files\Steinberg\VstPlugins`, `Program Files\VstPlugins`, `Common Files\VST2`, `C:\VstPlugins`, `Image-Line\FL Studio *\Plugins\VST`, `%VST_PATH%`.
 
 *Add folder…* adds your own. *Rescan all* checks every plugin again;
 *Rescan this plugin* probes only one. A plugin that failed is listed under
@@ -20,18 +25,19 @@ a plugin that crashes goes silent but the program keeps running. *Inside
 the program* is faster to load but a crash closes KeyFrameXL. Set it per
 plugin or in the settings.
 
-**Editors** open embedded in the channel window (X11 or XWayland). On
-pure Wayland (`KFXL_X11=0`) an editor opens in its own window. *Show
-editor* / *Hide editor* toggle it.
+**Editors** open embedded in the channel window (X11/XWayland on Linux, native
+Win32 child window on Windows). On pure Wayland (`KFXL_X11=0`) an editor opens
+in its own window. *Show editor* / *Hide editor* toggle it.
 
-A plugin's state is saved in the project. *Reload* loads it again from
-its last saved state; *Reset to defaults* forgets its settings.
-A plugin with several outputs can give every output pair its own mixer
-insert (*Map to inserts*).
+A plugin's state is saved in the project. Opening a `.kfxl` saved on another
+OS matches installed plugins automatically by CLAP ID, bundle filename, or
+plugin name. *Reload* loads it again from its last saved state; *Reset to
+defaults* forgets its settings. A plugin with several outputs can give every
+output pair its own mixer insert (*Map to inserts*).
 
-## Windows plugins (Wine, yabridge)
+## Windows plugins on Linux (Wine, yabridge)
 
-Windows VST2 and VST3 plugins run through yabridge and Wine. Install
+On Linux, Windows VST2 and VST3 plugins run through yabridge and Wine. Install
 yabridge, run `yabridgectl sync`, and the bridged plugins appear in the
 normal folders. *Options → Plugins → Wine* picks which Wine to use:
 *System Wine* or a folder with a `wine` binary (a Proton or Wine-GE
@@ -48,7 +54,8 @@ brings in:
 
 - channels with their notes, patterns and the playlist (pattern, audio and
   automation clips, with clip mute, fades and audio offsets);
-- samples, with the channel's stretch pitch;
+- samples (found natively in your FL Studio installation on Windows, or inside
+  the Wine prefix on Linux), with the channel's stretch pitch;
 - the mixer: inserts, routing, levels and the built-in effects that have a
   KeyFrameXL counterpart;
 - the tempo;
@@ -56,9 +63,9 @@ brings in:
 
 The status bar and the import report say what could not come across.
 FL Studio's own generators and FLEX are not native KeyFrameXL
-instruments; see below.
+instruments; on Linux, see below.
 
-## FL Studio live link
+## FL Studio live link (Linux)
 
 For Image-Line instruments that do not run inside FL Studio VSTi (such
 as FLEX), a channel can play FL Studio itself: *FL Studio (live link)* in

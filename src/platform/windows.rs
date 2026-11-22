@@ -203,6 +203,31 @@ pub fn fl_image_line_roots(_home: &Path) -> Vec<PathBuf> {
     roots
 }
 
+/// Find the newest native Windows `FL Studio *` installation directory.
+pub fn fl_install_dir() -> Option<PathBuf> {
+    let home = dirs::home_dir().unwrap_or_default();
+    let mut installs: Vec<PathBuf> = fl_image_line_roots(&home)
+        .into_iter()
+        .filter_map(|root| std::fs::read_dir(root).ok())
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_dir()
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.to_ascii_lowercase().starts_with("fl studio"))
+        })
+        .collect();
+    // Prefer newest FL Studio version (e.g. FL Studio 2025 over FL Studio 21).
+    installs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    installs.into_iter().next()
+}
+
+pub fn fl_user_data_dir() -> Option<PathBuf> {
+    dirs::document_dir().map(|d| d.join("Image-Line"))
+}
+
 /// Default sound library roots on Windows.
 pub fn default_mounts(home: &Path) -> Vec<PathBuf> {
     let mut v = Vec::new();

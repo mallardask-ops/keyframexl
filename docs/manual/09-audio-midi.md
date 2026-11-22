@@ -4,14 +4,15 @@ All settings are under *Options*; they apply and save at once.
 
 ## Audio output
 
-*Options → Audio settings…*: the output **device** (or *System default*),
-**buffer** size and **sample rate**. A smaller buffer means less delay
-between a key and its sound, and more work for the computer. *Restart
-audio* reopens the device.
+*Options → Audio settings…*: the **driver** (on Windows: WASAPI or ASIO),
+output **device** (or *System default*), **buffer** size and **sample rate**.
+A smaller buffer means less delay between a key and its sound, and more work
+for the computer. *Restart audio* reopens the device.
 
-KeyFrameXL plays through PipeWire (via its ALSA layer) or plain ALSA. If
-the device disappears (a USB interface unplugged, PipeWire restarted)
-the program reconnects by itself and says so in the status bar.
+On Linux, KeyFrameXL runs as its own native PipeWire node (with ALSA as the
+fallback); on Windows, it uses WASAPI (default) or ASIO for low-latency audio
+interfaces. If the device disappears (a USB interface unplugged, PipeWire
+restarted) the program reconnects by itself and says so in the status bar.
 
 ## MIDI input
 

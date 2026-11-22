@@ -827,50 +827,90 @@ fn wrapper_vst(d: &[u8]) -> Option<FlpVst> {
     })
 }
 
+/// Resolve an FL Studio path natively (without a Wine prefix): expands
+/// `%FLStudioFactoryData%` and `%FLStudioUserData%`, normalizes separators,
+/// and returns the path if it exists on disk.
+pub fn resolve_native_path(
+    fl_path: &str,
+    fl_install: Option<&std::path::Path>,
+    user_data: Option<&std::path::Path>,
+) -> Option<std::path::PathBuf> {
+    let lower = fl_path.to_ascii_lowercase();
+    let candidate = if lower.starts_with("%flstudiofactorydata%") {
+        let mut p = fl_install?.to_path_buf();
+        let rest = &fl_path["%FLStudioFactoryData%".len()..];
+        for seg in rest.split(['\\', '/']).filter(|s| !s.is_empty()) {
+            p.push(seg);
+        }
+        p
+    } else if lower.starts_with("%flstudiouserdata%") {
+        let mut p = user_data?.to_path_buf();
+        let rest = &fl_path["%FLStudioUserData%".len()..];
+        for seg in rest.split(['\\', '/']).filter(|s| !s.is_empty()) {
+            p.push(seg);
+        }
+        p
+    } else if cfg!(target_os = "windows") {
+        std::path::PathBuf::from(fl_path.replace('/', "\\"))
+    } else {
+        std::path::PathBuf::from(fl_path.replace('\\', "/"))
+    };
+    candidate.exists().then_some(candidate)
+}
+
 /// Where a path FL saved lives on this computer: FL's variables
-/// (%FLStudioFactoryData% = the FL install, %FLStudioUserData% = the user's
-/// Image-Line folder) and Windows drives inside the Wine prefix (Z: = /).
+/// (`%FLStudioFactoryData%` = the FL install, `%FLStudioUserData%` = the user's
+/// Image-Line folder) and native Windows drives (or Wine `dosdevices` on Linux).
 pub fn resolve_path(
     fl_path: &str,
     prefix: &std::path::Path,
     fl_install: Option<&std::path::Path>,
 ) -> Option<std::path::PathBuf> {
-    let user = std::env::var("USER").unwrap_or_default();
-    let mut s = fl_path.replace('/', "\\");
-    let lower = s.to_ascii_lowercase();
-    if lower.starts_with("%flstudiofactorydata%") {
-        let install = fl_install?.to_string_lossy().into_owned();
-        s = format!("{install}{}", &s["%FLStudioFactoryData%".len()..]);
-    } else if lower.starts_with("%flstudiouserdata%") {
-        s = format!(
-            "C:\\users\\{user}\\Documents\\Image-Line{}",
-            &s["%FLStudioUserData%".len()..]
-        );
+    #[cfg(target_os = "windows")]
+    {
+        let _ = prefix;
+        let user_data = dirs::document_dir().map(|d| d.join("Image-Line"));
+        resolve_native_path(fl_path, fl_install, user_data.as_deref())
     }
-    let unix = if s.starts_with('/') {
-        std::path::PathBuf::from(s.replace('\\', "/"))
-    } else {
-        let (drive, rest) = s.split_once(':')?;
-        let root = match drive.to_ascii_lowercase().as_str() {
-            "z" => std::path::PathBuf::from("/"),
-            d => prefix.join("dosdevices").join(format!("{d}:")),
+    #[cfg(not(target_os = "windows"))]
+    {
+        let user = std::env::var("USER").unwrap_or_default();
+        let mut s = fl_path.replace('/', "\\");
+        let lower = s.to_ascii_lowercase();
+        if lower.starts_with("%flstudiofactorydata%") {
+            let install = fl_install?.to_string_lossy().into_owned();
+            s = format!("{install}{}", &s["%FLStudioFactoryData%".len()..]);
+        } else if lower.starts_with("%flstudiouserdata%") {
+            s = format!(
+                "C:\\users\\{user}\\Documents\\Image-Line{}",
+                &s["%FLStudioUserData%".len()..]
+            );
+        }
+        let unix = if s.starts_with('/') {
+            std::path::PathBuf::from(s.replace('\\', "/"))
+        } else {
+            let (drive, rest) = s.split_once(':')?;
+            let root = match drive.to_ascii_lowercase().as_str() {
+                "z" => std::path::PathBuf::from("/"),
+                d => prefix.join("dosdevices").join(format!("{d}:")),
+            };
+            root.join(rest.trim_start_matches('\\').replace('\\', "/"))
         };
-        root.join(rest.trim_start_matches('\\').replace('\\', "/"))
-    };
-    if unix.exists() {
-        return Some(unix);
+        if unix.exists() {
+            return Some(unix);
+        }
+        // Wine paths are case-insensitive: find each part ignoring case.
+        let mut found = std::path::PathBuf::from("/");
+        for part in unix.components().skip(1) {
+            let want = part.as_os_str().to_string_lossy().to_lowercase();
+            let next = std::fs::read_dir(&found)
+                .ok()?
+                .flatten()
+                .find(|e| e.file_name().to_string_lossy().to_lowercase() == want)?;
+            found = next.path();
+        }
+        Some(found)
     }
-    // Wine paths are case-insensitive: find each part ignoring case.
-    let mut found = std::path::PathBuf::from("/");
-    for part in unix.components().skip(1) {
-        let want = part.as_os_str().to_string_lossy().to_lowercase();
-        let next = std::fs::read_dir(&found)
-            .ok()?
-            .flatten()
-            .find(|e| e.file_name().to_string_lossy().to_lowercase() == want)?;
-        found = next.path();
-    }
-    Some(found)
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -3741,5 +3781,62 @@ mod corpus_dump {
         for (n, c) in notes {
             println!("{c:5}  {n}");
         }
+    }
+
+    #[test]
+    fn resolve_native_path_expands_fl_variables_and_normalizes_separators() {
+        let dir = tempfile::tempdir().unwrap();
+        let install = dir.path().join("FL Studio 2025");
+        let user = dir.path().join("Image-Line");
+        let kick = install
+            .join("Data")
+            .join("Patches")
+            .join("Packs")
+            .join("Kick.wav");
+        let rec = user.join("FL Studio").join("Audio").join("Take1.wav");
+        std::fs::create_dir_all(kick.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(rec.parent().unwrap()).unwrap();
+        std::fs::write(&kick, b"wav").unwrap();
+        std::fs::write(&rec, b"wav").unwrap();
+
+        assert_eq!(
+            super::resolve_native_path(
+                r"%FLStudioFactoryData%\Data\Patches\Packs\Kick.wav",
+                Some(&install),
+                Some(&user),
+            ),
+            Some(kick.clone()),
+        );
+        // Case-insensitive variable prefix and forward slashes.
+        assert_eq!(
+            super::resolve_native_path(
+                "%flstudiofactorydata%/Data/Patches/Packs/Kick.wav",
+                Some(&install),
+                Some(&user),
+            ),
+            Some(kick),
+        );
+        assert_eq!(
+            super::resolve_native_path(
+                r"%FLStudioUserData%\FL Studio\Audio\Take1.wav",
+                Some(&install),
+                Some(&user),
+            ),
+            Some(rec.clone()),
+        );
+        // Direct native path.
+        assert_eq!(
+            super::resolve_native_path(&rec.to_string_lossy(), Some(&install), Some(&user),),
+            Some(rec),
+        );
+        // Missing file returns None.
+        assert_eq!(
+            super::resolve_native_path(
+                r"%FLStudioFactoryData%\Data\Patches\Packs\Missing.wav",
+                Some(&install),
+                Some(&user),
+            ),
+            None,
+        );
     }
 }

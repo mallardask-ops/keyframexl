@@ -126,7 +126,8 @@ pub const UK: Strings = Strings {
     about_audio_buf: "Аудіо: {rate} Hz · буфер {buf}",
     about_audio_default: "Аудіо: {rate} Hz · типовий буфер",
     about_version: "Версія {ver}",
-    about_desc: "Патерновий музичний секвенсор для Linux.",
+    about_desc: "Патерновий музичний секвенсор для Linux і Windows.",
+    about_asio_notice: "ASIO є торговою маркою та програмним забезпеченням Steinberg Media Technologies GmbH.",
     rename_pattern_title: "Перейменувати патерн",
 
     // Manual chrome
@@ -182,7 +183,7 @@ pub const UK: Strings = Strings {
     deck_cpu_voices: "CPU {load}%   голоси {voices}",
     deck_cpu_voices_hint: "Навантаження аудіопотоку та кількість активних голосів",
     deck_no_audio: "немає аудіо",
-    deck_no_audio_hint: "Немає виходу аудіо: перевірте PipeWire й перезапустіть",
+    deck_no_audio_hint: "Немає виходу аудіо: перевірте налаштування аудіо (F10) й перезапустіть",
     deck_overloads_tip: "Перевантажень аудіо: {count} від запуску. Натисніть, щоб скинути.",
     deck_scope_tip: "Осцилограф майстра · клік — спектр, ПКМ — режим",
     deck_spectrum_tip: "Спектр майстра · клік — осцилограф, ПКМ — режим",
@@ -250,7 +251,7 @@ pub const UK: Strings = Strings {
     theme_system: "Системна",
 
     // Shell status messages, hints, empty dock & drop overlay
-    status_no_audio_init: "Немає виходу аудіо: {err}. Перевірте PipeWire й перезапустіть.",
+    status_no_audio_init: "Немає виходу аудіо: {err}. Перевірте Параметри → Налаштування аудіо (F10).",
     status_wine_conflict: "Інший процес Wine ({name}) утримує префікс Wine, тому Windows-плагіни не запускаються. Налаштування → Плагіни → Зупинити.",
     status_undone: "Скасовано. Ctrl+Shift+Z повторює.",
     status_redone: "Повторено",

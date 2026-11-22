@@ -1731,6 +1731,19 @@ impl App {
                 continue;
             }
             let loaded = std::fs::read(&path)
+                .or_else(|_| {
+                    let s = path.to_string_lossy();
+                    let alt = if cfg!(target_os = "windows") {
+                        s.replace('/', "\\")
+                    } else {
+                        s.replace('\\', "/")
+                    };
+                    if alt != s {
+                        std::fs::read(alt)
+                    } else {
+                        Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+                    }
+                })
                 .ok()
                 .and_then(|b| crate::import::read_wav(&b).ok());
             match loaded {
