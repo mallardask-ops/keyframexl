@@ -843,7 +843,7 @@ mod tests {
         else {
             panic!("vocal channel lost");
         };
-        let extracted = out.path().join("voicebanks/Teto_Bank");
+        let extracted = out.path().join("voicebanks").join("Teto_Bank");
         assert_eq!(voice.bank, extracted.to_string_lossy());
         assert!(extracted.join("oto.ini").is_file());
         assert!(!extracted.join(".hidden").exists());
