@@ -30,6 +30,7 @@ struct Vst3Proc {
     plugin: Arc<Mutex<Plugin>>,
     buf: BusAudioBuffers,
     effect: bool,
+    rate: u32,
     /// Extra stereo pairs, in bus order: (output bus, its left channel, its
     /// right channel), mono buses giving one channel twice.
     pairs: Vec<(usize, usize, usize)>,
@@ -88,6 +89,7 @@ impl Vst3Proc {
             plugin,
             buf,
             effect,
+            rate: rate.round() as u32,
             pairs,
             key_bus,
             tempo: 0.0,
@@ -110,7 +112,13 @@ impl Vst3Proc {
         } else {
             self.pairs.len().min((extra.len() - io.len()) / stride + 1)
         };
-        let Ok(mut plugin) = self.plugin.try_lock() else {
+        let offline = keyframexl::plugin::OFFLINE.load(std::sync::atomic::Ordering::Acquire);
+        let Ok(mut plugin) = (if offline {
+            self.plugin.lock().ok()
+        } else {
+            self.plugin.try_lock().ok()
+        })
+        .ok_or(()) else {
             if !self.effect {
                 io.fill(0.0);
             }
@@ -246,7 +254,72 @@ fn to_midi(e: &PluginEvent) -> MidiEvent {
     }
 }
 
+/// Flush active voices, held MIDI notes, sustain pedal, pitch bend and
+/// residual delay/reverb tails before an offline render begins.
+fn flush_processor(proc: &mut dyn Processor, rate: u32) {
+    let reset = keyframexl::plugin::reset_events();
+    let mut buf = [0.0f32; 512 * 2];
+    let t = Transport {
+        rate: rate.max(8_000),
+        tempo: 120.0,
+        playing: false,
+        frame: 0,
+    };
+    proc.process(&reset, &mut buf, &t);
+    // Drain any residual reverb/release/buffer tail (up to ~250 ms) until silent.
+    let mut silent_blocks = 0u32;
+    for _ in 0..24 {
+        buf.fill(0.0);
+        proc.process(&[], &mut buf, &t);
+        let peak = buf.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        if peak < 1e-5 {
+            silent_blocks += 1;
+            if silent_blocks >= 2 {
+                break;
+            }
+        } else {
+            silent_blocks = 0;
+        }
+    }
+}
+
 impl Processor for Vst3Proc {
+    fn prepare_offline(&mut self) {
+        if let Ok(mut plugin) = self.plugin.lock() {
+            let _ = plugin.stop_processing();
+            let _ = plugin.set_process_mode(vst3_host::ProcessMode::Offline);
+            let _ = plugin.set_playing(false);
+            let _ = plugin.set_transport_position(vst3_host::TransportPosition {
+                samples: 0,
+                quarter_notes: 0.0,
+            });
+            let _ = plugin.start_processing();
+        }
+        self.playing = false;
+        self.tempo = 0.0;
+        let rate = self.rate;
+        flush_processor(self, rate);
+        if let Ok(mut plugin) = self.plugin.lock() {
+            let _ = plugin.set_transport_position(vst3_host::TransportPosition {
+                samples: 0,
+                quarter_notes: 0.0,
+            });
+        }
+        self.playing = false;
+        self.tempo = 0.0;
+    }
+
+    fn finish_offline(&mut self) {
+        if let Ok(mut plugin) = self.plugin.lock() {
+            let _ = plugin.stop_processing();
+            let _ = plugin.set_process_mode(vst3_host::ProcessMode::Realtime);
+            let _ = plugin.set_playing(false);
+            let _ = plugin.start_processing();
+        }
+        self.playing = false;
+        self.tempo = 0.0;
+    }
+
     fn latency(&self, _frames: usize) -> usize {
         self.delay
     }
@@ -340,6 +413,14 @@ fn midi_bytes(e: &PluginEvent) -> [u8; 3] {
 }
 
 impl Processor for Vst2Proc {
+    fn prepare_offline(&mut self) {
+        if let Ok(mut plugin) = self.plugin.lock() {
+            plugin.stop();
+            plugin.start();
+        }
+        flush_processor(self, 48_000);
+    }
+
     fn process(&mut self, events: &[PluginEvent], io: &mut [f32], t: &Transport) {
         self.run(events, io, None, &mut [], 0, t);
     }
@@ -388,7 +469,13 @@ impl Vst2Proc {
             .len()
             .checked_div(stride)
             .map_or(0, |n| self.extra.min(n));
-        let Ok(mut plugin) = self.plugin.try_lock() else {
+        let offline = keyframexl::plugin::OFFLINE.load(std::sync::atomic::Ordering::Acquire);
+        let Ok(mut plugin) = (if offline {
+            self.plugin.lock().ok()
+        } else {
+            self.plugin.try_lock().ok()
+        })
+        .ok_or(()) else {
             io.fill(0.0);
             return 0;
         };
@@ -544,7 +631,13 @@ impl ClapProc {
         } else {
             self.pairs.len().min((extra.len() - io.len()) / stride + 1)
         };
-        let Ok(mut plugin) = self.plugin.try_lock() else {
+        let offline = keyframexl::plugin::OFFLINE.load(std::sync::atomic::Ordering::Acquire);
+        let Ok(mut plugin) = (if offline {
+            self.plugin.lock().ok()
+        } else {
+            self.plugin.try_lock().ok()
+        })
+        .ok_or(()) else {
             if !self.effect {
                 io.fill(0.0);
             }
@@ -611,6 +704,14 @@ impl ClapProc {
 }
 
 impl Processor for ClapProc {
+    fn prepare_offline(&mut self) {
+        if let Ok(mut plugin) = self.plugin.lock() {
+            plugin.stop_processing();
+            let _ = plugin.start_processing();
+        }
+        flush_processor(self, 48_000);
+    }
+
     fn latency(&self, _frames: usize) -> usize {
         self.delay
     }
@@ -808,6 +909,9 @@ impl Handle {
 
     /// Editor upkeep (run loop / idle); a size the editor asked for.
     pub(super) fn service(&self) -> Option<(i32, i32)> {
+        if keyframexl::plugin::OFFLINE.load(std::sync::atomic::Ordering::Acquire) {
+            return None;
+        }
         match self {
             Handle::V3(p) => {
                 let mut p = p.try_lock().ok()?;

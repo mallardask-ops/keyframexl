@@ -20,6 +20,9 @@ use std::{
 /// editors opening) can stall a few seconds and recover; silence is better
 /// than closing them.
 pub(crate) const HANG_AFTER: Duration = Duration::from_secs(5);
+/// Generous limit while an offline export runs (e.g. drum samplers streaming
+/// synchronously from disk or switching `ProcessMode::Offline`).
+pub(crate) const OFFLINE_HANG_AFTER: Duration = Duration::from_secs(60);
 
 /// Why an instance stopped.
 #[derive(Clone, Debug, PartialEq)]
@@ -178,9 +181,14 @@ fn watch(
         waiting_since = if i == o {
             None
         } else {
+            let limit = if h.offline.load(Ordering::Acquire) != 0 {
+                OFFLINE_HANG_AFTER
+            } else {
+                HANG_AFTER
+            };
             match waiting_since {
                 Some((seq, since)) if seq == i => {
-                    if since.elapsed() >= HANG_AFTER {
+                    if since.elapsed() >= limit {
                         *fault.lock().unwrap_or_else(|e| e.into_inner()) = Some(Fault::Hung);
                         crashed.store(true, Ordering::Release);
                         let _ = child.kill();

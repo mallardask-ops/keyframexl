@@ -224,11 +224,19 @@ impl App {
         }
     }
 
-    /// The channel a MIDI keyboard plays: the focused piano roll's, else the
-    /// rack selection, else the last roll's (FL: the selected channel).
+    /// The channel a MIDI keyboard plays: the focused piano roll or instrument
+    /// window, else the rack selection, else the leading channel.
     pub(crate) fn midi_target(&self) -> u64 {
-        if let Some(super::Tab::Roll { instrument }) = &self.focus {
-            return *instrument;
+        match &self.focus {
+            Some(super::Tab::Roll { instrument })
+                if self.song.instrument(*instrument).is_some() =>
+            {
+                return *instrument;
+            }
+            Some(super::Tab::Instrument { id }) if self.song.instrument(*id).is_some() => {
+                return *id;
+            }
+            _ => {}
         }
         self.rack_sel
             .last()

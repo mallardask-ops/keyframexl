@@ -20,6 +20,7 @@ impl App {
         self.checkpoint();
         let name = self.song.next_sampler_name();
         let id = self.song.add_sampler(&name);
+        self.set_lead_channel(id);
         self.publish();
         self.win(Cmd::Show(Tab::Instrument { id }));
         let msg = fill(self.tr().inst_sampler_added, &[("name", &name)]);
@@ -32,6 +33,7 @@ impl App {
         self.checkpoint();
         let name = self.song.free_name(DRUM_VOICES[voice as usize]);
         let id = self.song.add_channel(&name, InstrumentKind::Drum { voice });
+        self.set_lead_channel(id);
         self.publish();
         let msg = fill(self.tr().inst_drum_added, &[("name", &name)]);
         self.say(Tone::Quiet, msg);

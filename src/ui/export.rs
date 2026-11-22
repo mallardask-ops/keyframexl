@@ -235,16 +235,31 @@ impl App {
         let (tx, rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let c = cancel.clone();
+        // Release any held live note and pause live transport so no live note
+        // or callback races with the offline render.
+        self.release_note();
+        if self.is_playing() {
+            self.stop();
+        }
         // The live output goes quiet and leaves the plugins to the render.
         let hold = self
             .audio
             .as_ref()
             .filter(|_| jobs.iter().any(|j| !j.plugins.0.is_empty()))
-            .map(|a| a.hold_plugins.clone());
-        if let Some(h) = &hold {
-            h.store(true, Ordering::Relaxed);
-        }
+            .map(|a| (a.hold_plugins.clone(), a.callbacks.clone()));
+        let before_cb = hold.as_ref().map(|(h, cb)| {
+            h.store(true, Ordering::Release);
+            cb.load(Ordering::Acquire)
+        });
         std::thread::spawn(move || {
+            // Wait for any in-flight live audio callback to observe `hold_plugins`
+            // so the live thread is guaranteed idle before we flush/render plugins.
+            if let (Some((_, cb)), Some(before)) = (&hold, before_cb) {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(60);
+                while cb.load(Ordering::Acquire) == before && std::time::Instant::now() < deadline {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+            }
             // Jobs one after another; progress spans all of them, files add up.
             let n = jobs.len() as f32;
             let mut files = Vec::new();
@@ -277,8 +292,8 @@ impl App {
             if let Some(stats) = total.filter(|_| !files.is_empty()) {
                 let _ = tx.send(Progress::Done(files, stats));
             }
-            if let Some(h) = hold {
-                h.store(false, Ordering::Relaxed);
+            if let Some((h, _)) = hold {
+                h.store(false, Ordering::Release);
             }
         });
         if let Some(d) = &mut self.export {

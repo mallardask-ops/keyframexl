@@ -290,6 +290,19 @@ impl App {
         }
     }
 
+    /// Build a new clip for `self.selected` at `(start, track)`, preserving the
+    /// length & trim offset of the last clicked/resized/trimmed clip of that pattern (FL).
+    pub(crate) fn make_playlist_clip(&self, start: Tick, track: u32) -> Clip {
+        let mut clip = Clip::new(self.selected, start, track);
+        if let Some((pid, offset, length)) = self.last_clip
+            && pid == self.selected
+        {
+            clip.offset = offset;
+            clip.length = length;
+        }
+        clip
+    }
+
     pub(crate) fn delete_clip(&mut self, i: usize) {
         if i >= self.song.clips.len() {
             return;
@@ -1816,6 +1829,7 @@ impl App {
         // - A quick right-click on a clip (no drag) still deletes that clip.
         if can_edit_grid
             && right_pressed
+            && ui.rect_contains_pointer(grid_seen)
             && let Some(pos) = right_pos
             && grid_seen.contains(pos)
             && !marker_used.iter().enumerate().any(|(i, used)| {
@@ -1876,6 +1890,7 @@ impl App {
         }
         if can_edit_grid
             && down
+            && ui.rect_contains_pointer(grid_seen)
             && matches!(tool, Tool::Delete | Tool::Mute | Tool::Slice)
             && let Some(pos) = ui.input(|i| i.pointer.interact_pos())
             && grid_seen.contains(pos)
@@ -1912,6 +1927,7 @@ impl App {
                                     .unwrap_or(1);
                             right.length = Some(right_len);
                             self.song.clips[i].length = Some(left);
+                            self.last_clip = Some((c.pattern, c.offset, Some(left)));
                             self.song.clips.push(right);
                             self.publish();
                             self.say(Tone::Quiet, self.tr().pl_clip_sliced);
@@ -2056,6 +2072,7 @@ impl App {
         if can_edit_grid
             && tool == Tool::Paint
             && pressed
+            && ui.rect_contains_pointer(grid_seen)
             && let Some(pos) = press_origin.filter(|p| grid_seen.contains(*p))
         {
             painting = Some((
@@ -2080,7 +2097,8 @@ impl App {
                         false,
                         false,
                     );
-                    let len = self.pattern().length.max(1);
+                    let proto = self.make_playlist_clip(0, track);
+                    let len = self.song.clip_len(&proto).max(1);
                     for at in paint_positions(start, end, len) {
                         if at + len <= keyframexl::sequence::MAX_BARS * BAR
                             && !self.song.clips.iter().any(|c| {
@@ -2093,7 +2111,8 @@ impl App {
                                 self.checkpoint();
                                 changed = true;
                             }
-                            self.song.clips.push(Clip::new(self.selected, at, track));
+                            let clip = self.make_playlist_clip(at, track);
+                            self.song.clips.push(clip);
                             self.publish();
                         }
                     }
@@ -2172,7 +2191,8 @@ impl App {
                 let track = track_at(pos.y, grid.top(), lane_h).min(999);
                 let start = start.min(keyframexl::sequence::MAX_BARS * BAR - BAR);
                 self.checkpoint();
-                self.song.clips.push(Clip::new(self.selected, start, track));
+                let clip = self.make_playlist_clip(start, track);
+                self.song.clips.push(clip);
                 self.clip = Some(self.song.clips.len() - 1);
                 self.publish();
                 let tr = self.tr();
@@ -2521,7 +2541,8 @@ impl App {
                             self.clip = if tool == Tool::Select { None } else { Some(i) };
                             selection = vec![i];
                         }
-                        self.select_pattern(clips[i].pattern);
+                        self.select_pattern_keep_clip(clips[i].pattern);
+                        self.last_clip = Some((clips[i].pattern, clips[i].offset, clips[i].length));
                     }
                 }
                 Pending::Open(i)
@@ -2597,6 +2618,8 @@ impl App {
                         } else {
                             self.song.clips[i].start = start;
                             self.song.clips[i].track = track;
+                            let moved = self.song.clips[i];
+                            self.last_clip = Some((moved.pattern, moved.offset, moved.length));
                             selection = vec![i];
                             self.clip = if tool == Tool::Select { None } else { Some(i) };
                             self.publish();
@@ -2618,6 +2641,9 @@ impl App {
                     if i < self.song.clips.len() {
                         self.checkpoint();
                         self.song.clips[i].length = Some(len.max(1));
+                        let c = self.song.clips[i];
+                        self.select_pattern_keep_clip(c.pattern);
+                        self.last_clip = Some((c.pattern, c.offset, c.length));
                         self.clip = Some(i);
                         self.publish();
                         let tr = self.tr();
@@ -2647,6 +2673,9 @@ impl App {
                         self.song.clips[i].start = start;
                         self.song.clips[i].offset = offset;
                         self.song.clips[i].length = Some(len.max(1));
+                        let c = self.song.clips[i];
+                        self.select_pattern_keep_clip(c.pattern);
+                        self.last_clip = Some((c.pattern, c.offset, c.length));
                         self.clip = Some(i);
                         self.publish();
                         let tr = self.tr();
@@ -2751,6 +2780,7 @@ impl App {
                                 .find(|p| p.id == clips[i].pattern)
                                 .and_then(|p| p.audio_clip)
                             {
+                                self.set_lead_channel(inst);
                                 self.win(Cmd::Show(Tab::Instrument { id: inst }));
                             }
                         }

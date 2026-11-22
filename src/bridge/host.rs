@@ -110,6 +110,23 @@ fn audio_loop(shm: &Shm, proc: &Mutex<Option<Shared>>, done: &AtomicBool, rate: 
             shm.wait_for_block(seen, 100);
             continue;
         }
+        let is_offline = h.offline.load(Ordering::Acquire) != 0;
+        keyframexl::plugin::OFFLINE.store(is_offline, Ordering::Release);
+        let cmd = h.cmd.load(Ordering::Acquire);
+        if cmd == super::shm::CMD_PREPARE_OFFLINE || cmd == super::shm::CMD_FINISH_OFFLINE {
+            if let Some(p) = proc.lock().ok().and_then(|g| g.clone())
+                && let Ok(mut p) = p.lock()
+            {
+                if cmd == super::shm::CMD_PREPARE_OFFLINE {
+                    p.prepare_offline();
+                } else {
+                    p.finish_offline();
+                }
+            }
+            seen = next;
+            h.out_seq.store(next, Ordering::Release);
+            continue;
+        }
         let frames = (h.frames.load(Ordering::Relaxed) as usize).min(shm.max_frames());
         let n = (h.n_events.load(Ordering::Relaxed) as usize).min(shm.max_events());
         // SAFETY: published by the parent (Release / Acquire); ours until out_seq.

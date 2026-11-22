@@ -1704,7 +1704,8 @@ impl Engine {
         } else {
             (0, u64::MAX)
         };
-        let transport = (song_mode, pattern, length);
+        let active_pat = if song_mode { 0 } else { pattern };
+        let transport = (song_mode, active_pat, length);
         if transport != self.transport {
             // Pattern switched or tempo changed: let ringing voices fade, not click.
             for v in &mut self.voices {
@@ -6623,5 +6624,32 @@ mod plugin_tests {
         song.validate().unwrap();
         assert!(song.clips.is_empty());
         assert!(!song.patterns.iter().any(|p| p.id == pat_id));
+    }
+
+    #[test]
+    fn switching_pattern_in_song_mode_keeps_voices_ringing() {
+        let rate = 48_000u32;
+        let mut song = Song::default();
+        let inst_id = song.instruments[3].id;
+        song.add_note(1, Note::new(inst_id, 0, BAR, 60, 110));
+        song.patterns.push(Pattern::new(2, "Pattern 2").into());
+        song.clips = vec![crate::sequence::Clip::new(1, 0, 0)];
+
+        let mut e = Engine::new(rate);
+        let mut buf = vec![0.0f32; 512 * 2];
+        // Start playing in Song mode while pattern 1 is selected in the UI.
+        e.process(&song, 1, true, 0, &mut buf, true);
+        let voices_before = e.active_voices();
+        assert!(voices_before > 0, "note should be ringing");
+
+        // Scroll/switch UI pattern to pattern 2 while Song mode continues playing.
+        e.process(&song, 2, true, 512, &mut buf, true);
+        assert_eq!(
+            e.active_voices(),
+            voices_before,
+            "switching UI pattern in Song mode must not kill active voices"
+        );
+        let peak = buf.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        assert!(peak > 0.01, "song audio must stay continuous, got {peak}");
     }
 }

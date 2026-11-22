@@ -1105,9 +1105,10 @@ impl App {
                     let shown = rect.intersect(ui.clip_rect());
                     pads.push((id, i, shown));
                     // The press point, not where the pointer got to by this frame.
-                    // Never trigger through disabled/background UI or modal overlays (e.g. Welcome Screen).
+                    // Never trigger through disabled/background UI, modal overlays, or floating windows on top.
                     if ui.is_enabled()
                         && !self.welcome_open
+                        && ui.rect_contains_pointer(shown)
                         && origin.is_some_and(|p| shown.contains(p))
                         && (pp || sp)
                         && !(shift && pp)
@@ -1179,9 +1180,11 @@ impl App {
             let mut hits: Vec<(u64, usize)> = Vec::new();
             for k in 0..=n {
                 let q = from + (now - from) * (k as f32 / n as f32);
-                if let Some((id, i, _)) = pads.iter().find(|(_, _, r)| r.contains(q))
+                if let Some((id, i, r)) = pads.iter().find(|(_, _, r)| r.contains(q))
+                    && ui.ctx().layer_id_at(q) == Some(ui.layer_id())
                     && !st.visited.contains(&(*id, *i))
                 {
+                    let _ = r;
                     st.visited.push((*id, *i));
                     hits.push((*id, *i));
                 }
@@ -1369,6 +1372,9 @@ impl App {
             self.rack_sel = vec![id];
         }
         self.rack_sel.retain(|x| ids.contains(x));
+        if let Some(&lead) = self.rack_sel.last() {
+            self.instrument = lead;
+        }
     }
 
     /// Move the selected channels one row up (-1) or down (+1).
@@ -1985,6 +1991,7 @@ impl App {
             &[("name", name)],
         ));
         if r.clicked() {
+            self.set_lead_channel(id);
             match plugin {
                 // FL: a plugin channel's button opens the plugin itself.
                 Some(pid) => self.open_plugin(pid),
@@ -1995,6 +2002,7 @@ impl App {
             kit::menu_style(ui);
             let tr = self.tr();
             if ui.button(tr.rack_menu_inst_win).clicked() {
+                self.set_lead_channel(id);
                 self.win(Cmd::Show(Tab::Instrument { id }));
                 ui.close_menu();
             }

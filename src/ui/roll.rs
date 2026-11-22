@@ -178,6 +178,14 @@ pub(crate) enum MoveMode {
     ResizeLeft,
 }
 
+/// Open double-click Note Properties dialog (FL: Note properties).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct NotePropsDialog {
+    pub pattern: u64,
+    pub note_id: u64,
+    pub orig: Note,
+}
+
 /// A pointer gesture in the grid, from press to release.
 #[derive(Clone, Debug)]
 pub(crate) enum Gesture {
@@ -210,8 +218,14 @@ pub(crate) enum Gesture {
         pitch: u8,
         orig: Glide,
     },
-    /// Paint tool: notes of `len` follow the pointer from `next` on.
-    Paint { len: Tick, next: Tick },
+    /// Paint (Brush) tool: paints notes along the pointer in any direction.
+    Paint {
+        len: Tick,
+        anchor: Tick,
+        last_step: i64,
+        last_pitch: u8,
+        lock_pitch: bool,
+    },
     /// Mute tool: notes the pointer touches become `to`.
     Mute { to: bool },
     /// Slice tool: a cut line from the press point.
@@ -517,9 +531,42 @@ impl App {
             vec2(body.width(), body.height() - lane_h - lane_gap),
         ));
         if hover_grid {
+            // Compute current grid geometry before scroll so hovering a note
+            // with plain mouse wheel adjusts its velocity instead of scrolling.
+            let pre_h_avail = (body.height() - fixed).max(v.row * 4.0);
+            let pre_rows =
+                ((pre_h_avail / v.row).floor() as usize).clamp(4, (HIGHEST - LOWEST + 1) as usize);
+            let pre_span = pre_rows as f32 - 1.0;
+            let pre_well = Rect::from_min_size(
+                body.min + vec2(0.0, 4.0),
+                vec2(body.width(), RULER_H + v.row * pre_rows as f32 + 3.0),
+            );
+            let pre_inner = pre_well.shrink(1.5);
+            let pre_grid = Rect::from_min_max(
+                pos2(pre_inner.left() + KEYS_W, pre_inner.top() + RULER_H),
+                pos2(
+                    pre_inner.right(),
+                    pre_inner.top() + RULER_H + v.row * pre_rows as f32,
+                ),
+            );
+            let pre_top = v
+                .top
+                .clamp(LOWEST as f32 + pre_span, HIGHEST as f32)
+                .round() as u8;
+            let pre_g = Geom {
+                grid: pre_grid,
+                cell: v.cell,
+                row: v.row,
+                lane: Rect::NOTHING,
+                top: pre_top,
+                bottom: pre_top - pre_span as u8,
+                len: plen,
+                x0: v.x0 as Tick,
+            };
             self.roll_wheel(
                 ui,
                 &mut v,
+                &pre_g,
                 body.left() + 3.0 + KEYS_W,
                 body.top() + 4.0 + RULER_H,
             );
@@ -740,15 +787,27 @@ impl App {
             ui.data_mut(|d| d.insert_temp(ghost_key, (self.selected, me, id, target, now)));
         }
         self.paint_notes(&p.with_clip_rect(grid), &g);
-        if self.is_vocal(me) {
-            if resp.double_clicked()
-                && !scrollbar_busy
-                && let Some(q) = resp.interact_pointer_pos()
-                && let Some(n) = self.note_at(&g, q)
-            {
-                self.roll_gesture = None;
-                self.start_lyric_edit(n.id);
+        if resp.double_clicked()
+            && !scrollbar_busy
+            && let Some(q) = resp.interact_pointer_pos()
+            && let Some(n) = self.note_at(&g, q)
+        {
+            if self.roll_gesture.take().is_some() {
+                self.history.pop();
             }
+            self.release_note();
+            if self.is_vocal(me) {
+                self.start_lyric_edit(n.id);
+            } else {
+                self.roll_sel = vec![n.id];
+                self.note_props = Some(NotePropsDialog {
+                    pattern: self.selected,
+                    note_id: n.id,
+                    orig: n,
+                });
+            }
+        }
+        if self.is_vocal(me) {
             self.lyric_overlay(ui, &g);
         }
         if let Some((
@@ -1622,7 +1681,14 @@ impl App {
         busy
     }
 
-    fn roll_wheel(&mut self, ui: &mut Ui, v: &mut RollView, grid_left: f32, grid_top: f32) {
+    fn roll_wheel(
+        &mut self,
+        ui: &mut Ui,
+        v: &mut RollView,
+        pre_g: &Geom,
+        grid_left: f32,
+        grid_top: f32,
+    ) {
         let (d, m, at, zoom) = ui.input_mut(|i| {
             let raw = i.raw_scroll_delta;
             let smooth = i.smooth_scroll_delta;
@@ -1633,6 +1699,57 @@ impl App {
             (d, i.modifiers, i.pointer.hover_pos(), i.zoom_delta())
         });
         if d == egui::Vec2::ZERO && zoom == 1.0 {
+            return;
+        }
+        // Hovering a note + plain mouse wheel adjusts its velocity instead of scrolling.
+        if !m.command
+            && !m.shift
+            && !m.alt
+            && zoom == 1.0
+            && d.y != 0.0
+            && let Some(q) = at
+            && let Some(hit) = self.note_at(pre_g, q)
+        {
+            let delta = if d.y > 0.0 {
+                (d.y / 10.0).ceil().clamp(1.0, 12.0) as i16
+            } else {
+                (d.y / 10.0).floor().clamp(-12.0, -1.0) as i16
+            };
+            let wheel_key = ui.id().with("roll-vel-wheel");
+            let now = ui.input(|i| i.time);
+            let prev: Option<(u64, f64)> = ui.data(|d| d.get_temp(wheel_key));
+            if prev.is_none_or(|(id, t)| id != hit.id || now - t > 0.6) {
+                self.checkpoint();
+            }
+            ui.data_mut(|d| d.insert_temp(wheel_key, (hit.id, now)));
+            let targets: Vec<u64> = if self.roll_sel.len() > 1 && self.roll_sel.contains(&hit.id) {
+                self.roll_sel.clone()
+            } else {
+                vec![hit.id]
+            };
+            let mut shown_vel = hit.velocity;
+            for id in targets {
+                if let Some(n) = self.note_mut(id) {
+                    n.velocity = (n.velocity as i16 + delta).clamp(1, 127) as u8;
+                    if id == hit.id {
+                        shown_vel = n.velocity;
+                    }
+                }
+            }
+            self.velocity = shown_vel;
+            self.publish();
+            let tr = self.tr();
+            let msg = crate::i18n::fill(
+                tr.roll_lane_set_status,
+                &[
+                    ("note", &note_name(hit.pitch)),
+                    ("pos", &bar_pos(hit.start)),
+                    ("label", tr.lane_target_label(LaneTarget::Velocity)),
+                    ("val", &shown_vel.to_string()),
+                ],
+            );
+            self.say(Tone::Quiet, msg);
+            ui.ctx().request_repaint();
             return;
         }
         if m.command || zoom != 1.0 {
@@ -2414,7 +2531,10 @@ impl App {
                 if self.tool == Tool::Paint {
                     Some(Gesture::Paint {
                         len,
-                        next: start + len,
+                        anchor: start,
+                        last_step: 0,
+                        last_pitch: pitch,
+                        lock_pitch: shift,
                     })
                 } else {
                     Some(Gesture::Edit {
@@ -2559,28 +2679,69 @@ impl App {
                     *slot = s;
                 }
             }
-            Gesture::Paint { len, next } if down => {
-                let target = snap_floor(at, grid, alt);
-                let mut nx = *next;
+            Gesture::Paint {
+                len,
+                anchor,
+                last_step,
+                last_pitch,
+                lock_pitch,
+            } if down => {
+                let p_cur = if *lock_pitch || shift {
+                    *last_pitch
+                } else {
+                    self.scale_pitch(pitch)
+                };
+                let step_len = (*len).max(1);
+                let cur_step = (at - *anchor).div_euclid(step_len);
                 let pid = self.selected;
-                while nx <= target && nx + len <= MAX_BARS * BAR {
-                    let note = Note {
-                        color: self.note_color,
-                        porta: self.porta_new,
-                        ..Note::new(me, nx, *len, pitch, self.velocity)
+                let mut added = false;
+                let mut place_at =
+                    |this: &mut Self, nx: Tick, note_pitch: u8| {
+                        if nx >= 0
+                            && nx + step_len <= MAX_BARS * BAR
+                            && !this.pattern().notes.iter().any(|n| {
+                                n.instrument == me && n.pitch == note_pitch && n.start == nx
+                            })
+                        {
+                            let note = Note {
+                                color: this.note_color,
+                                porta: this.porta_new,
+                                ..Note::new(me, nx, step_len, note_pitch, this.velocity)
+                            };
+                            this.song.add_note(pid, note);
+                            added = true;
+                        }
                     };
-                    self.song.add_note(pid, note);
-                    nx += len;
+                if cur_step != *last_step {
+                    let dir = (cur_step - *last_step).signum();
+                    let mut s = *last_step + dir;
+                    loop {
+                        place_at(self, *anchor + s * step_len, p_cur);
+                        if s == cur_step {
+                            break;
+                        }
+                        s += dir;
+                    }
+                } else if p_cur != *last_pitch {
+                    place_at(self, *anchor + cur_step * step_len, p_cur);
                 }
-                if nx != *next {
+                if p_cur != *last_pitch {
+                    self.hold_note(me, p_cur, self.velocity);
+                }
+                if cur_step != *last_step || p_cur != *last_pitch {
                     self.roll_gesture = Some((
                         me,
                         Gesture::Paint {
                             len: *len,
-                            next: nx,
+                            anchor: *anchor,
+                            last_step: cur_step,
+                            last_pitch: p_cur,
+                            lock_pitch: *lock_pitch,
                         },
                     ));
-                    self.fit_pattern();
+                    if added {
+                        self.fit_pattern();
+                    }
                 }
             }
             Gesture::Mute { to } if down => {
@@ -2827,13 +2988,20 @@ impl App {
                     self.say(Tone::Quiet, msg);
                 }
             }
-            Gesture::Paint { len, next } => {
+            Gesture::Paint {
+                len,
+                anchor,
+                last_step,
+                last_pitch,
+                ..
+            } => {
                 self.fit_pattern();
                 self.publish();
                 self.last_len = Some(len);
+                let end_pos = (anchor + (last_step + 1) * len).max(0);
                 let msg = crate::i18n::fill(
                     self.tr().roll_painted,
-                    &[("note", &note_name(pitch)), ("pos", &bar_pos(next))],
+                    &[("note", &note_name(last_pitch)), ("pos", &bar_pos(end_pos))],
                 );
                 self.say(Tone::Quiet, msg);
             }
@@ -3376,7 +3544,7 @@ impl App {
         {
             let x = g.x(n.start) + 3.0;
             let y = area.bottom() - target.get(n) * area.height();
-            let on = sel.is_empty() || sel.contains(&n.id);
+            let on = sel.len() <= 1 || sel.contains(&n.id);
             let col = if on { t::brand() } else { t::strong() };
             lp.line_segment([pos2(x, base), pos2(x, y)], Stroke::new(2.0_f32, col));
             lp.circle_filled(pos2(x, y), 4.0, col);
@@ -3410,14 +3578,16 @@ impl App {
                 (area.bottom() - pos.y) / area.height()
             };
             // Notes stacked on the same start (a chord) change together.
+            // If multiple notes are selected and the hovered stem belongs to the
+            // selection, restrict to selected notes at this start; otherwise edit
+            // any note stem under the pointer (even when another single note is selected).
+            let filter_sel = sel.len() > 1 && sel.contains(&n.id);
             let ids: Vec<u64> = self
                 .pattern()
                 .notes
                 .iter()
                 .filter(|x| {
-                    x.instrument == me
-                        && x.start == n.start
-                        && (sel.is_empty() || sel.contains(&x.id))
+                    x.instrument == me && x.start == n.start && (!filter_sel || sel.contains(&x.id))
                 })
                 .map(|x| x.id)
                 .collect();
@@ -3778,19 +3948,26 @@ impl App {
         }
     }
 
-    /// The stem nearest to `x` (within 10 px), among selected notes when there is a selection.
+    /// The stem nearest to `x` (within 10 px). With a multi-note selection,
+    /// selected stems take priority; otherwise any note stem of this channel is
+    /// directly editable even when another single note stays selected.
     fn lane_note_near(&self, g: &Geom, x: f32) -> Option<Note> {
         let me = self.roll_inst;
-        self.pattern()
-            .notes
-            .iter()
-            .filter(|n| {
-                n.instrument == me && (self.roll_sel.is_empty() || self.roll_sel.contains(&n.id))
-            })
-            .map(|n| ((g.x(n.start) + 3.0 - x).abs(), *n))
-            .filter(|(d, _)| *d < 10.0)
-            .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, n)| n)
+        let find = |only_selected: bool| {
+            self.pattern()
+                .notes
+                .iter()
+                .filter(|n| n.instrument == me && (!only_selected || self.roll_sel.contains(&n.id)))
+                .map(|n| ((g.x(n.start) + 3.0 - x).abs(), *n))
+                .filter(|(d, _)| *d < 10.0)
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .map(|(_, n)| n)
+        };
+        if self.roll_sel.len() > 1 {
+            find(true).or_else(|| find(false))
+        } else {
+            find(false)
+        }
     }
 }
 
@@ -3807,9 +3984,22 @@ fn tool_icon(p: &egui::Painter, c: Pos2, tool: Tool, col: egui::Color32) {
             p.line_segment([c + vec2(-6.0, 6.0), c + vec2(-4.5, 4.5)], st);
         }
         Tool::Paint => {
-            // Brush: handle and a wide tip.
-            p.line_segment([c + vec2(-1.0, 1.0), c + vec2(5.0, -5.0)], st);
-            p.circle_filled(c + vec2(-3.0, 3.0), 3.0, col);
+            // Paintbrush: angled handle, ferrule, and tapered bristle tip.
+            p.line_segment(
+                [c + vec2(0.0, 0.0), c + vec2(5.5, -5.5)],
+                Stroke::new(2.2_f32, col),
+            );
+            p.add(egui::Shape::convex_polygon(
+                vec![
+                    c + vec2(-1.5, -0.5),
+                    c + vec2(0.5, 1.5),
+                    c + vec2(-2.5, 5.0),
+                    c + vec2(-5.5, 5.5),
+                    c + vec2(-5.0, 2.5),
+                ],
+                col,
+                Stroke::NONE,
+            ));
         }
         Tool::Delete => {
             p.line_segment([c + vec2(-5.0, -5.0), c + vec2(5.0, 5.0)], st);
@@ -4055,6 +4245,336 @@ impl App {
                 .roll_quantize_pct_n
                 .fmt_with(tr.lang, n, &[("pct", &pct)]);
             self.say(Tone::Quiet, msg);
+        }
+    }
+
+    /// Double-click Note Properties dialog (FL: Note properties).
+    pub(crate) fn note_props_window(&mut self, ctx: &egui::Context) {
+        let Some(dlg) = self.note_props else {
+            return;
+        };
+        let Some(cur) = self
+            .song
+            .pattern(dlg.pattern)
+            .and_then(|p| p.notes.iter().find(|n| n.id == dlg.note_id).copied())
+        else {
+            self.note_props = None;
+            return;
+        };
+        let tr = self.tr();
+        let mut note = cur;
+        let mut open = true;
+        let mut accept = false;
+        let mut cancel = false;
+        let mut reset = false;
+        let title = format!("{} · {}", tr.roll_note_props_title, note_name(note.pitch));
+        egui::Window::new(title)
+            .id(egui::Id::new("roll-note-props-window"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(390.0)
+            .anchor(Align2::CENTER_CENTER, vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
+                // --- Levels knobs (Pan, Velocity, Release, Fine pitch, Mod X, Mod Y)
+                ui.label(
+                    egui::RichText::new(tr.roll_note_props_levels)
+                        .font(t::semibold(11.0))
+                        .color(t::faint()),
+                );
+                ui.horizontal(|ui| {
+                    let mut pan = note.pan as f64;
+                    let (_, _, c) = kit::knob(
+                        ui,
+                        &kit::Knob {
+                            label: tr.lane_pan_short,
+                            color: t::enc_blue(),
+                            min: -1.0,
+                            max: 1.0,
+                            default: 0.0,
+                            log: false,
+                            fmt: &|v| {
+                                if v.abs() < 0.01 {
+                                    "C".into()
+                                } else {
+                                    format!(
+                                        "{}{:.0}",
+                                        if v < 0.0 { "L" } else { "R" },
+                                        v.abs() * 100.0
+                                    )
+                                }
+                            },
+                            hint: tr.lane_pan,
+                        },
+                        &mut pan,
+                    );
+                    if c {
+                        note.pan = pan as f32;
+                    }
+
+                    let mut vel = note.velocity as f64;
+                    let (_, _, c) = kit::knob(
+                        ui,
+                        &kit::Knob {
+                            label: tr.lane_velocity_short,
+                            color: t::brand(),
+                            min: 1.0,
+                            max: 127.0,
+                            default: 100.0,
+                            log: false,
+                            fmt: &|v| format!("{v:.0}"),
+                            hint: tr.lane_velocity,
+                        },
+                        &mut vel,
+                    );
+                    if c {
+                        note.velocity = vel.round().clamp(1.0, 127.0) as u8;
+                    }
+
+                    let mut rel = note.release as f64;
+                    let (_, _, c) = kit::knob(
+                        ui,
+                        &kit::Knob {
+                            label: tr.lane_release_short,
+                            color: t::enc_green(),
+                            min: 0.0,
+                            max: 1.0,
+                            default: 0.5,
+                            log: false,
+                            fmt: &|v| format!("{:.0}%", v * 100.0),
+                            hint: tr.lane_release,
+                        },
+                        &mut rel,
+                    );
+                    if c {
+                        note.release = rel as f32;
+                    }
+
+                    let mut fine = note.fine as f64;
+                    let (_, _, c) = kit::knob(
+                        ui,
+                        &kit::Knob {
+                            label: tr.lane_fine_short,
+                            color: t::enc_orange(),
+                            min: -100.0,
+                            max: 100.0,
+                            default: 0.0,
+                            log: false,
+                            fmt: &|v| format!("{v:+.0} ct"),
+                            hint: tr.lane_fine,
+                        },
+                        &mut fine,
+                    );
+                    if c {
+                        note.fine = fine as f32;
+                    }
+
+                    let mut mx = note.mod_x as f64;
+                    let (_, _, c) = kit::knob(
+                        ui,
+                        &kit::Knob {
+                            label: tr.lane_mod_x_short,
+                            color: t::enc_white(),
+                            min: 0.0,
+                            max: 1.0,
+                            default: 0.5,
+                            log: false,
+                            fmt: &|v| format!("{:.0}%", v * 100.0),
+                            hint: tr.lane_mod_x,
+                        },
+                        &mut mx,
+                    );
+                    if c {
+                        note.mod_x = mx as f32;
+                    }
+
+                    let mut my = note.mod_y as f64;
+                    let (_, _, c) = kit::knob(
+                        ui,
+                        &kit::Knob {
+                            label: tr.lane_mod_y_short,
+                            color: t::enc_white(),
+                            min: 0.0,
+                            max: 1.0,
+                            default: 0.5,
+                            log: false,
+                            fmt: &|v| format!("{:.0}%", v * 100.0),
+                            hint: tr.lane_mod_y,
+                        },
+                        &mut my,
+                    );
+                    if c {
+                        note.mod_y = my as f32;
+                    }
+                });
+
+                ui.separator();
+                // --- Time & Pitch
+                ui.label(
+                    egui::RichText::new(tr.roll_note_props_time)
+                        .font(t::semibold(11.0))
+                        .color(t::faint()),
+                );
+                egui::Grid::new("note-props-grid")
+                    .num_columns(3)
+                    .spacing(vec2(10.0, 6.0))
+                    .show(ui, |ui| {
+                        ui.label(tr.roll_note_props_pitch);
+                        ui.horizontal(|ui| {
+                            if ui.small_button("−").clicked() && note.pitch > 0 {
+                                note.pitch -= 1;
+                            }
+                            ui.add(
+                                egui::DragValue::new(&mut note.pitch)
+                                    .range(0..=127)
+                                    .speed(0.2),
+                            );
+                            if ui.small_button("+").clicked() && note.pitch < 127 {
+                                note.pitch += 1;
+                            }
+                        });
+                        ui.label(
+                            egui::RichText::new(note_name(note.pitch))
+                                .font(t::mono(13.0))
+                                .color(t::text()),
+                        );
+                        ui.end_row();
+
+                        ui.label(tr.roll_note_props_start);
+                        let max_start = MAX_BARS * BAR - 1;
+                        ui.add(
+                            egui::DragValue::new(&mut note.start)
+                                .range(0..=max_start)
+                                .speed(10.0)
+                                .suffix(" t"),
+                        );
+                        ui.label(
+                            egui::RichText::new(bar_pos(note.start))
+                                .font(t::mono(12.0))
+                                .color(t::muted()),
+                        );
+                        ui.end_row();
+
+                        ui.label(tr.roll_note_props_duration);
+                        let max_len = (MAX_BARS * BAR - note.start).max(1);
+                        ui.add(
+                            egui::DragValue::new(&mut note.length)
+                                .range(1..=max_len)
+                                .speed(10.0)
+                                .suffix(" t"),
+                        );
+                        ui.label(
+                            egui::RichText::new(tr.length_text(note.length))
+                                .font(t::mono(12.0))
+                                .color(t::muted()),
+                        );
+                        ui.end_row();
+                    });
+
+                ui.separator();
+                // --- Color & Flags
+                ui.horizontal(|ui| {
+                    ui.label(tr.roll_note_props_color);
+                    ui.spacing_mut().item_spacing.x = 3.0;
+                    for c in 0u8..(NOTE_COLOR_COUNT as u8) {
+                        let (top, _, _) = note_colors(c);
+                        let (r, resp) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::click());
+                        ui.painter().rect_filled(r, 3.0, top);
+                        if note.color == c {
+                            ui.painter().rect_stroke(
+                                r.expand(1.0),
+                                3.0,
+                                Stroke::new(1.5_f32, t::text()),
+                                egui::StrokeKind::Outside,
+                            );
+                        }
+                        if resp.on_hover_text(tr.note_color_name(c)).clicked() {
+                            note.color = c;
+                        }
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut note.porta, tr.roll_note_props_porta);
+                    ui.checkbox(&mut note.muted, tr.roll_note_props_muted);
+                });
+
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if kit::button(ui, tr.roll_note_props_reset, kit::Kind::Normal, true).clicked()
+                    {
+                        reset = true;
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if kit::button(ui, tr.roll_note_props_accept, kit::Kind::Primary, true)
+                            .clicked()
+                            || ui.input(|i| i.key_pressed(egui::Key::Enter))
+                        {
+                            accept = true;
+                        }
+                        if kit::button(ui, tr.common_cancel, kit::Kind::Normal, true).clicked()
+                            || ui.input(|i| i.key_pressed(egui::Key::Escape))
+                        {
+                            cancel = true;
+                        }
+                    });
+                });
+            });
+
+        if reset {
+            note.pan = 0.0;
+            note.velocity = 100;
+            note.release = 0.5;
+            note.fine = 0.0;
+            note.mod_x = 0.5;
+            note.mod_y = 0.5;
+            note.porta = false;
+            note.muted = false;
+        }
+        if cancel || !open {
+            if let Some(p) = self.song.pattern_mut(dlg.pattern)
+                && let Some(n) = p.notes.iter_mut().find(|n| n.id == dlg.note_id)
+            {
+                *n = dlg.orig;
+            }
+            self.publish();
+            self.note_props = None;
+            return;
+        }
+        if note != cur {
+            if let Some(p) = self.song.pattern_mut(dlg.pattern)
+                && let Some(n) = p.notes.iter_mut().find(|n| n.id == dlg.note_id)
+            {
+                *n = note;
+            }
+            self.velocity = note.velocity;
+            self.publish();
+        }
+        if accept {
+            if note != dlg.orig {
+                // Record a single clean undo step from `dlg.orig` -> `note`.
+                if let Some(p) = self.song.pattern_mut(dlg.pattern)
+                    && let Some(n) = p.notes.iter_mut().find(|n| n.id == dlg.note_id)
+                {
+                    *n = dlg.orig;
+                }
+                self.checkpoint();
+                if let Some(p) = self.song.pattern_mut(dlg.pattern)
+                    && let Some(n) = p.notes.iter_mut().find(|n| n.id == dlg.note_id)
+                {
+                    *n = note;
+                }
+                if self.selected == dlg.pattern {
+                    self.fit_pattern();
+                }
+                self.publish();
+                let msg = crate::i18n::fill(
+                    tr.roll_note_props_saved,
+                    &[("note", &note_name(note.pitch))],
+                );
+                self.say(Tone::Quiet, msg);
+            }
+            self.note_props = None;
         }
     }
 }

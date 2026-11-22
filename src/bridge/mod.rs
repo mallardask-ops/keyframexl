@@ -239,6 +239,8 @@ impl BridgeProc {
         h.frames.store(frames as u32, Ordering::Relaxed);
         h.rate.store(transport.rate, Ordering::Relaxed);
         h.playing.store(transport.playing as u32, Ordering::Relaxed);
+        h.offline.store(offline as u32, Ordering::Relaxed);
+        h.cmd.store(shm::CMD_PROCESS, Ordering::Relaxed);
         h.tempo_bits
             .store(transport.tempo.to_bits(), Ordering::Relaxed);
         h.frame.store(transport.frame, Ordering::Relaxed);
@@ -276,7 +278,12 @@ impl BridgeProc {
     /// the hang limit). `false` when it died or hung meanwhile.
     fn wait_idle(&self) -> bool {
         let h = self.sup.shm.header();
-        let until = std::time::Instant::now() + supervisor::HANG_AFTER;
+        let limit = if keyframexl::plugin::OFFLINE.load(Ordering::Acquire) {
+            supervisor::OFFLINE_HANG_AFTER
+        } else {
+            supervisor::HANG_AFTER
+        };
+        let until = std::time::Instant::now() + limit;
         while h.out_seq.load(Ordering::Acquire) != self.published {
             if self.crashed() || std::time::Instant::now() >= until {
                 return false;
@@ -285,9 +292,39 @@ impl BridgeProc {
         }
         true
     }
+
+    fn send_cmd(&mut self, offline: bool, cmd: u32) {
+        if self.crashed() {
+            return;
+        }
+        let shm = &*self.sup.shm;
+        let h = shm.header();
+        h.offline.store(offline as u32, Ordering::Release);
+        if !self.wait_idle() {
+            return;
+        }
+        self.fifo_len = 0;
+        self.pending_frames = 0;
+        h.cmd.store(cmd, Ordering::Relaxed);
+        h.frames.store(0, Ordering::Relaxed);
+        h.n_events.store(0, Ordering::Relaxed);
+        self.published = self.published.wrapping_add(1);
+        h.in_seq.store(self.published, Ordering::Release);
+        shm.wake_child();
+        let _ = self.wait_idle();
+        h.cmd.store(shm::CMD_PROCESS, Ordering::Relaxed);
+    }
 }
 
 impl Processor for BridgeProc {
+    fn prepare_offline(&mut self) {
+        self.send_cmd(true, shm::CMD_PREPARE_OFFLINE);
+    }
+
+    fn finish_offline(&mut self) {
+        self.send_cmd(false, shm::CMD_FINISH_OFFLINE);
+    }
+
     fn process(&mut self, events: &[PluginEvent], io: &mut [f32], transport: &Transport) {
         self.run(events, io, None, &mut [], 0, transport);
     }
@@ -521,6 +558,17 @@ pub(crate) fn child_main() -> Result<(), Box<dyn std::error::Error>> {
             if socket.try_closed() {
                 return Ok(());
             }
+            continue;
+        }
+        let cmd = h.cmd.load(Ordering::Acquire);
+        if cmd == shm::CMD_PREPARE_OFFLINE || cmd == shm::CMD_FINISH_OFFLINE {
+            if cmd == shm::CMD_PREPARE_OFFLINE
+                && let Mode::Synth { notes } = &mut mode
+            {
+                notes.fill(None);
+            }
+            seen = next;
+            h.out_seq.store(next, Ordering::Release);
             continue;
         }
         let frames = (h.frames.load(Ordering::Relaxed) as usize).min(shm.max_frames());

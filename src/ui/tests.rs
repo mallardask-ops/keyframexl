@@ -2221,3 +2221,192 @@ fn audio_clip_adds_to_playlist_and_renders_waveform_cleanly() {
     });
     assert!(app.playlist_drop.is_some());
 }
+
+#[test]
+fn floating_window_blocks_rack_pad_click_through() {
+    let (ctx, mut app) = setup();
+    // Initial frame records pad 0's rect.
+    run(&ctx, &mut app, View::Rack, vec![]);
+    let pad = app.probe.pad.expect("pad rect");
+    let before = app.song.patterns[0].notes.len();
+
+    // Draw a floating egui::Window covering pad 0, then click right on pad 0.
+    let center = pad.center();
+    let frame_with_overlay = |ctx: &egui::Context, app: &mut App, events: Vec<Event>| {
+        let mut tab = Tab::Rack;
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1366.0, 768.0))),
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| app.tab_ui(ui, &mut tab));
+            egui::Window::new("Floating Sampler")
+                .fixed_pos(pad.min - Vec2::new(20.0, 20.0))
+                .fixed_size(Vec2::new(260.0, 200.0))
+                .show(ctx, |ui| {
+                    ui.label("Sampler controls");
+                });
+        });
+    };
+    frame_with_overlay(&ctx, &mut app, vec![Event::PointerMoved(center)]);
+    frame_with_overlay(
+        &ctx,
+        &mut app,
+        vec![Event::PointerMoved(center), button(center, true, true)],
+    );
+    frame_with_overlay(&ctx, &mut app, vec![button(center, true, false)]);
+    assert_eq!(
+        app.song.patterns[0].notes.len(),
+        before,
+        "clicking a floating window must not click through to Channel Rack pads"
+    );
+}
+
+#[test]
+fn roll_velocity_lane_edits_unselected_note_and_wheel_over_note_changes_velocity() {
+    let (ctx, mut app) = setup();
+    let id1 = app
+        .song
+        .add_note(1, keyframexl::sequence::Note::new(4, 0, STEP * 2, 52, 100));
+    let id2 = app.song.add_note(
+        1,
+        keyframexl::sequence::Note::new(4, STEP * 4, STEP * 2, 52, 80),
+    );
+    // Keep note 1 selected (just like after placing a note).
+    app.roll_sel = vec![id1];
+    run(&ctx, &mut app, View::Roll, vec![]);
+    let g = app.probe.roll.expect("roll geom");
+
+    // 1. Click note 2's velocity stem in the event lane even though note 1 is selected!
+    let stem_x = g.x(STEP * 4) + 3.0;
+    let stem_y = g.lane.top() + 18.0;
+    click(&ctx, &mut app, View::Roll, pos2(stem_x, stem_y));
+    let v2_after_lane = app
+        .pattern()
+        .notes
+        .iter()
+        .find(|n| n.id == id2)
+        .unwrap()
+        .velocity;
+    assert!(
+        v2_after_lane > 95,
+        "event lane should edit unselected note 2's velocity, got {v2_after_lane}"
+    );
+
+    // 2. Hover over note 2 and scroll mouse wheel -> changes note 2's velocity without scrolling pitch!
+    let top_before = app.roll_view.get(&4).unwrap().top;
+    let note2_pos = g.point(4.5, 52);
+    run(
+        &ctx,
+        &mut app,
+        View::Roll,
+        vec![
+            Event::PointerMoved(note2_pos),
+            Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: Vec2::new(0.0, -40.0),
+                modifiers: Modifiers::default(),
+            },
+        ],
+    );
+    let v2_after_wheel = app
+        .pattern()
+        .notes
+        .iter()
+        .find(|n| n.id == id2)
+        .unwrap()
+        .velocity;
+    let top_after = app.roll_view.get(&4).unwrap().top;
+    assert!(
+        v2_after_wheel < v2_after_lane,
+        "wheel down over note should lower its velocity ({v2_after_lane} -> {v2_after_wheel})"
+    );
+    assert!(
+        (top_after - top_before).abs() < 1e-4,
+        "scrolling over a note must not scroll the piano roll viewport"
+    );
+}
+
+#[test]
+fn roll_double_click_opens_note_properties_and_paint_tool_paints_freely() {
+    let (ctx, mut app) = setup();
+    let id = app
+        .song
+        .add_note(1, keyframexl::sequence::Note::new(4, 0, STEP * 2, 52, 100));
+    run(&ctx, &mut app, View::Roll, vec![]);
+    let g = app.probe.roll.expect("roll geom");
+    let p = g.point(0.5, 52);
+    // Double-click the note -> opens Note Properties dialog.
+    click(&ctx, &mut app, View::Roll, p);
+    click(&ctx, &mut app, View::Roll, p);
+    assert_eq!(app.note_props.map(|d| d.note_id), Some(id));
+    // Render the dialog cleanly without panicking, then return to the roll.
+    let _ = ctx.run(egui::RawInput::default(), |ctx| app.note_props_window(ctx));
+    app.note_props = None;
+    run(&ctx, &mut app, View::Roll, vec![]);
+
+    // Brush tool (Tool::Paint) paints both leftward and across pitches!
+    app.tool = Tool::Paint;
+    app.last_len = Some(STEP);
+    let start = g.point(6.5, 54);
+    let mid = g.point(4.5, 54);
+    let end = g.point(4.5, 56);
+    run(
+        &ctx,
+        &mut app,
+        View::Roll,
+        vec![Event::PointerMoved(start), button(start, true, true)],
+    );
+    run(&ctx, &mut app, View::Roll, vec![Event::PointerMoved(mid)]);
+    run(&ctx, &mut app, View::Roll, vec![Event::PointerMoved(end)]);
+    run(&ctx, &mut app, View::Roll, vec![button(end, true, false)]);
+    let painted: Vec<(i64, u8)> = app
+        .pattern()
+        .notes
+        .iter()
+        .filter(|n| n.id != id)
+        .map(|n| (n.start, n.pitch))
+        .collect();
+    assert!(
+        painted.contains(&(6 * STEP, 54)) && painted.contains(&(4 * STEP, 54)),
+        "brush tool should paint leftward: {painted:?}"
+    );
+    assert!(
+        painted.contains(&(4 * STEP, 56)),
+        "brush tool should paint across pitches: {painted:?}"
+    );
+}
+
+#[test]
+fn selecting_instrument_sets_lead_for_midi_and_piano_roll() {
+    let mut app = app();
+    let ch = app.song.instruments[1].id;
+    assert_ne!(app.instrument, ch);
+    app.set_lead_channel(ch);
+    assert_eq!(app.instrument, ch);
+    assert_eq!(app.rack_sel, vec![ch]);
+    assert_eq!(app.midi_target(), ch);
+
+    // Focusing another channel's Instrument window routes MIDI straight to it.
+    let ch2 = app.song.instruments[2].id;
+    app.focus = Some(Tab::Instrument { id: ch2 });
+    assert_eq!(app.midi_target(), ch2);
+}
+
+#[test]
+fn playlist_remembers_resized_clip_length_when_placing() {
+    let mut app = app();
+    app.select_pattern(1);
+    app.last_clip = Some((1, STEP * 4, Some(STEP * 8)));
+    let placed = app.make_playlist_clip(BAR, 2);
+    assert_eq!(placed.pattern, 1);
+    assert_eq!(placed.offset, STEP * 4);
+    assert_eq!(placed.length, Some(STEP * 8));
+
+    // Selecting a different pattern from the pattern selector resets to default length.
+    app.new_pattern();
+    let fresh = app.make_playlist_clip(0, 0);
+    assert_eq!(fresh.offset, 0);
+    assert_eq!(fresh.length, None);
+}

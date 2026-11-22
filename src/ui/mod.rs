@@ -184,6 +184,14 @@ pub struct App {
     pub(crate) drop_pointer: Option<egui::Pos2>,
     /// Length of the last note drawn, moved or resized (FL: new notes take it).
     pub(crate) last_len: Option<keyframexl::sequence::Tick>,
+    /// Last clicked/resized/trimmed clip on the playlist: `(pattern_id, offset, length)`.
+    pub(crate) last_clip: Option<(
+        u64,
+        keyframexl::sequence::Tick,
+        Option<keyframexl::sequence::Tick>,
+    )>,
+    /// Open double-click Note Properties dialog in the piano roll.
+    pub(crate) note_props: Option<roll::NotePropsDialog>,
     /// What the piano roll's event lane edits.
     pub(crate) lane_target: roll::LaneTarget,
     /// Copied notes (Ctrl+C), positions as copied.
@@ -1238,6 +1246,8 @@ impl App {
             playlist_drop: None,
             drop_pointer: None,
             last_len: None,
+            last_clip: None,
+            note_props: None,
             lane_target: roll::LaneTarget::Velocity,
             note_clip: Vec::new(),
             ghosts: true,
@@ -1443,8 +1453,20 @@ impl App {
     }
 
     pub(crate) fn select_pattern(&mut self, id: u64) {
+        self.last_clip = None;
+        self.select_pattern_keep_clip(id);
+    }
+
+    /// Switch the selected pattern without cloning/re-publishing `Song`
+    /// (so scrolling patterns while Song mode plays never glitches audio).
+    pub(crate) fn select_pattern_keep_clip(&mut self, id: u64) {
+        if self.selected == id {
+            return;
+        }
         self.selected = id;
-        self.publish();
+        if let Some(a) = &self.audio {
+            a.pattern.store(self.selected, Ordering::Relaxed);
+        }
     }
 
     pub(crate) fn new_pattern(&mut self) {
@@ -1512,6 +1534,7 @@ impl App {
         let (id, name) = (p.id, p.name.clone());
         self.song.patterns.insert(at, p.into());
         self.select_pattern(id);
+        self.publish();
         self.say(
             Tone::Quiet,
             crate::i18n::fill(tr.status_pattern_copy_added, &[("name", &name)]),
@@ -1780,8 +1803,17 @@ impl App {
         }
     }
 
+    /// Make `id` the leading channel: rack selection indicator, MIDI input
+    /// target, and default channel when opening the Piano Roll (F7).
+    pub(crate) fn set_lead_channel(&mut self, id: u64) {
+        if self.song.instrument(id).is_some() {
+            self.instrument = id;
+            self.rack_sel = vec![id];
+        }
+    }
+
     pub(crate) fn open_roll(&mut self, instrument: u64) {
-        self.instrument = instrument;
+        self.set_lead_channel(instrument);
         self.win(Cmd::Show(Tab::Roll { instrument }));
     }
 
@@ -3653,13 +3685,27 @@ impl eframe::App for App {
         kit::track_keyboard_nav(ctx);
         let was = self.focus.take();
         self.focus = workspace::focused(self.ws.dock());
-        if let Some(Tab::Roll { instrument }) = &self.focus {
-            self.instrument = *instrument;
-            // A roll that just got the focus owns the selection and Paste.
-            if was != self.focus && self.roll_inst != *instrument {
-                self.roll_inst = *instrument;
-                self.roll_sel.clear();
+        match &self.focus {
+            Some(Tab::Roll { instrument }) => {
+                self.instrument = *instrument;
+                // A roll that just got the focus becomes the leading channel
+                // and owns the selection and Paste.
+                if was != self.focus {
+                    self.rack_sel = vec![*instrument];
+                    if self.roll_inst != *instrument {
+                        self.roll_inst = *instrument;
+                        self.roll_sel.clear();
+                    }
+                }
             }
+            Some(Tab::Instrument { id }) => {
+                if was != self.focus {
+                    self.set_lead_channel(*id);
+                } else if self.song.instrument(*id).is_some() {
+                    self.instrument = *id;
+                }
+            }
+            _ => {}
         }
         if let Some(a) = &self.audio {
             a.tick();
@@ -3797,6 +3843,7 @@ impl eframe::App for App {
         self.automation_window(ctx);
         self.plugin_picker(ctx);
         self.quantize_window(ctx);
+        self.note_props_window(ctx);
         self.lyrics_window(ctx);
         self.project_frame(ctx);
         self.updater_frame(ctx);

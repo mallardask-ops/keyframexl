@@ -280,29 +280,37 @@ pub fn render_range(
             crate::vocal::host::render_all(song, rate).0,
         ));
     }
-    for (id, p) in &plugins.0 {
-        if song
-            .instruments
-            .iter()
-            .any(|i| i.muted && i.plugin().is_some_and(|r| r.id == *id))
-        {
-            continue;
-        }
-        if let Ok(mut processor) = p.lock() {
-            processor.prepare_offline();
-        }
-        engine.adopt_plugin(crate::plugin::Instance::new(*id, p.clone()));
-    }
-    // Plugins may take their time while rendering (cleared on every way out).
-    struct Offline;
+    // Plugins may take their time while rendering and switch to offline mode
+    // (restored on every way out, including cancel).
+    struct Offline(Vec<crate::plugin::Shared>);
     impl Drop for Offline {
         fn drop(&mut self) {
+            for p in &self.0 {
+                if let Ok(mut processor) = p.lock() {
+                    processor.finish_offline();
+                }
+            }
             crate::plugin::OFFLINE.store(false, std::sync::atomic::Ordering::Release);
         }
     }
+    let mut prepared: Vec<crate::plugin::Shared> = Vec::new();
     let _offline = (!plugins.0.is_empty()).then(|| {
         crate::plugin::OFFLINE.store(true, std::sync::atomic::Ordering::Release);
-        Offline
+        for (id, p) in &plugins.0 {
+            if song
+                .instruments
+                .iter()
+                .any(|i| i.muted && i.plugin().is_some_and(|r| r.id == *id))
+            {
+                continue;
+            }
+            if let Ok(mut processor) = p.lock() {
+                processor.prepare_offline();
+            }
+            prepared.push(p.clone());
+            engine.adopt_plugin(crate::plugin::Instance::new(*id, p.clone()));
+        }
+        Offline(prepared)
     });
     let realtime = plugins
         .0
@@ -1115,6 +1123,107 @@ mod tests {
         assert!(
             render_audio(&Song::demo(), 1, false, Tail::Leave, &cancel, &mut |_| {}).is_none()
                 || main_frames(&Song::demo(), 1, false) < 64 * BLOCK as u64
+        );
+    }
+
+    #[test]
+    fn offline_render_prepares_flushes_and_restores_plugins() {
+        use crate::plugin::{OFFLINE, PluginEvent, Processor, Transport, share};
+        use crate::sequence::{InstrumentKind, Note, PluginRef};
+        use std::sync::{Arc, Mutex};
+
+        struct StickySynth {
+            stuck: bool,
+            prepared_while_offline: Arc<Mutex<bool>>,
+            finished: Arc<Mutex<bool>>,
+        }
+        impl Processor for StickySynth {
+            fn prepare_offline(&mut self) {
+                *self.prepared_while_offline.lock().unwrap() = OFFLINE.load(Ordering::Acquire);
+                self.stuck = false;
+            }
+            fn finish_offline(&mut self) {
+                *self.finished.lock().unwrap() = true;
+            }
+            fn process(&mut self, events: &[PluginEvent], io: &mut [f32], _t: &Transport) {
+                for e in events {
+                    if matches!(e, PluginEvent::NoteOn { .. }) {
+                        self.stuck = true;
+                    }
+                }
+                if self.stuck {
+                    io.fill(0.5);
+                }
+            }
+        }
+
+        let prepared_while_offline = Arc::new(Mutex::new(false));
+        let finished = Arc::new(Mutex::new(false));
+        let proc = share(StickySynth {
+            // Simulate a leftover live MIDI key held/ringing before export starts.
+            stuck: true,
+            prepared_while_offline: prepared_while_offline.clone(),
+            finished: finished.clone(),
+        });
+
+        let mut song = Song::default();
+        let pid = song.next_plugin_id();
+        let ch = song.add_channel(
+            "Plug",
+            InstrumentKind::Plugin {
+                plugin: PluginRef {
+                    id: pid,
+                    format: "vst3".into(),
+                    path: "plug.vst3".into(),
+                    name: "Plug".into(),
+                    vendor: String::new(),
+                    state: String::new(),
+                    outs: vec![],
+                },
+            },
+        );
+        // First note starts at beat 2 — beat 1 MUST be completely silent (no leftover bleed).
+        song.add_note(
+            1,
+            Note::new(ch, crate::sequence::PPQ, crate::sequence::STEP, 60, 100),
+        );
+
+        let never = AtomicBool::new(false);
+        let frames = render_with(
+            &song,
+            1,
+            false,
+            Tail::Cut,
+            RATE,
+            &Plugins(vec![(pid, proc)]),
+            &never,
+            &mut |_| {},
+        )
+        .unwrap();
+
+        assert!(
+            *prepared_while_offline.lock().unwrap(),
+            "prepare_offline must run with OFFLINE=true"
+        );
+        assert!(
+            *finished.lock().unwrap(),
+            "finish_offline must restore realtime mode after render"
+        );
+        assert!(
+            !OFFLINE.load(Ordering::Acquire),
+            "OFFLINE flag must be cleared after render"
+        );
+        // Beat 1 (first 0.33s) has no notes yet -> must be pure silence (zero bleed from stuck note).
+        let beat1_peak = peak(&frames[..16_000]);
+        assert!(
+            beat1_peak < 1e-5,
+            "leftover live note bled into export start: peak={beat1_peak}"
+        );
+        // Beat 2 onwards plays the scheduled note.
+        let later_peak = peak(&frames[24_000..]);
+        assert!(
+            later_peak > 0.1,
+            "scheduled note should sound: {later_peak}"
         );
     }
 }

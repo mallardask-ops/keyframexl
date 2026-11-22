@@ -799,6 +799,7 @@ impl App {
             .find(|i| i.plugin().is_some_and(|p| p.id == id))
             .map(|i| i.id)
         {
+            self.set_lead_channel(ch);
             self.win(super::Cmd::Show(super::Tab::Instrument { id: ch }));
             return;
         }

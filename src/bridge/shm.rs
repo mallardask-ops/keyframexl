@@ -23,7 +23,12 @@ use std::{
 };
 
 const MAGIC: u32 = 0x4b46_4252; // "KFBR"
-pub(crate) const LAYOUT_VERSION: u32 = 3;
+pub(crate) const LAYOUT_VERSION: u32 = 4;
+
+/// Block command in `Header::cmd`.
+pub(crate) const CMD_PROCESS: u32 = 0;
+pub(crate) const CMD_PREPARE_OFFLINE: u32 = 1;
+pub(crate) const CMD_FINISH_OFFLINE: u32 = 2;
 
 #[repr(C)]
 pub(crate) struct Header {
@@ -45,6 +50,10 @@ pub(crate) struct Header {
     pub latency: AtomicU32,
     /// 1: the block has a sidechain key (`key`), for the plugin's aux input.
     pub keyed: AtomicU32,
+    /// 1: offline export in progress (child switches to blocking lock & offline mode).
+    pub offline: AtomicU32,
+    /// Command for the next published sequence (`CMD_*`).
+    pub cmd: AtomicU32,
     pub tempo_bits: AtomicU64,
     pub frame: AtomicU64,
 }

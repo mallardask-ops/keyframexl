@@ -103,6 +103,44 @@ pub trait Processor: Send {
     }
 
     fn prepare_offline(&mut self) {}
+
+    fn finish_offline(&mut self) {}
+}
+
+/// MIDI reset events (Sustain Off, All Sound Off, Reset All Controllers,
+/// All Notes Off, Pitch Bend Center) across all 16 MIDI channels, sent when
+/// flushing live voices/tails before an offline export.
+pub fn reset_events() -> [PluginEvent; 80] {
+    let mut out = [PluginEvent::Midi {
+        at: 0,
+        bytes: [0, 0, 0],
+    }; 80];
+    let mut i = 0;
+    for ch in 0u8..16 {
+        let cc = 0xB0 | ch;
+        out[i] = PluginEvent::Midi {
+            at: 0,
+            bytes: [cc, 64, 0],
+        };
+        out[i + 1] = PluginEvent::Midi {
+            at: 0,
+            bytes: [cc, 120, 0],
+        };
+        out[i + 2] = PluginEvent::Midi {
+            at: 0,
+            bytes: [cc, 121, 0],
+        };
+        out[i + 3] = PluginEvent::Midi {
+            at: 0,
+            bytes: [cc, 123, 0],
+        };
+        out[i + 4] = PluginEvent::Midi {
+            at: 0,
+            bytes: [0xE0 | ch, 0, 64],
+        };
+        i += 5;
+    }
+    out
 }
 
 /// The longest delay latency compensation will add, in frames.
