@@ -9,6 +9,12 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 See [docs/v0.2.1.md](docs/v0.2.1.md) for the Windows port and 0.2.1 plan.
 
 ### Engine and internals
+- **Native Windows plugin hosting (W3)**: modularized `src/plugins/` into
+  `mod`, `scan`, `host`, `wine`, `editor_x11`, and `editor_win32`; migrated
+  `src/vst2.rs` and `src/clap.rs` to `libloading`; enabled VST3, CLAP (`win32`
+  GUI + DPI scale), and VST2 (`.dll`) scanning and hosting on Windows with
+  embedded child `HWND` editors (`SetWindowRgn` clipping under egui popups,
+  Per-Monitor v2 DPI tracking, and DAW hotkey forwarding).
 - **Windows self-updater & packaging (W2)**: `src/updater.rs` now picks the
   target-OS archive (`keyframexl-windows-x86_64.zip` + `.sha256` on Windows,
   ignoring `-setup.exe`), extracts `.zip` archives with the `zip` crate, checks

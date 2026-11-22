@@ -1,19 +1,20 @@
 #![allow(dead_code)]
-//! Native Linux CLAP 1.2 plugin host.
+//! Native CLAP 1.2 plugin host (Linux and Windows).
 //!
-//! `libc::dlopen` / `dlsym` load the `.clap` shared object, the `#[repr(C)]`
-//! structs below mirror the CLAP 1.2 C headers, and `libc::poll` serves
-//! `clap.posix-fd-support`. No extra crate is involved. One `ClapPlugin` is one
-//! plugin instance, driven from one thread at a time (behind a mutex), the
-//! same contract as `Vst2Plugin`.
+//! `libloading` loads the `.clap` dynamic library, the `#[repr(C)]` structs
+//! below mirror the CLAP 1.2 C headers, and on Unix `libc::poll` serves
+//! `clap.posix-fd-support`. One `ClapPlugin` is one plugin instance, driven
+//! from one thread at a time (behind a mutex), the same contract as
+//! `Vst2Plugin`.
 //!
 //! A `.clap` file may hold several plugins: `Bundle.clap#org.example.synth`
 //! names one of them (`split_path` / `join_path`).
 
+#[cfg(unix)]
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::{
     collections::HashMap,
-    ffi::{CStr, CString, OsStr, c_char, c_int, c_ulong, c_void},
-    os::unix::ffi::{OsStrExt, OsStringExt},
+    ffi::{CStr, CString, c_char, c_int, c_ulong, c_void},
     path::{Path, PathBuf},
     ptr,
     sync::{
@@ -22,6 +23,11 @@ use std::{
     },
     time::{Duration, Instant},
 };
+
+#[cfg(target_os = "windows")]
+const GUI_API: &CStr = c"win32";
+#[cfg(not(target_os = "windows"))]
+const GUI_API: &CStr = c"x11";
 
 // ---------------------------------------------------------------------------
 // CLAP 1.2 C ABI
@@ -314,10 +320,16 @@ struct PluginLatency {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
+union WindowHandle {
+    x11: c_ulong,
+    win32: *mut c_void,
+}
+
+#[repr(C)]
 struct Window {
     api: *const c_char,
-    /// The `clap_window` union; only the X11 window id (`unsigned long`) is used.
-    x11: c_ulong,
+    handle: WindowHandle,
 }
 
 #[repr(C)]
@@ -429,39 +441,41 @@ fn thread_token() -> usize {
     TOKEN.with(|t| t as *const u8 as usize)
 }
 
-fn dl_error() -> String {
-    unsafe {
-        let e = libc::dlerror();
-        if e.is_null() {
-            "dlopen failed".into()
-        } else {
-            CStr::from_ptr(e).to_string_lossy().into_owned()
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Paths: `Plain.clap` or `Bundle.clap#plugin.id`
-// ---------------------------------------------------------------------------
-
 /// Splits `file.clap#plugin.id` at the last `#`, but only when the part before
 /// it is a `.clap` file. Anything else is a plain path.
 pub fn split_path(path: &Path) -> (PathBuf, Option<String>) {
-    let bytes = path.as_os_str().as_bytes();
-    if let Some(i) = bytes.iter().rposition(|&c| c == b'#') {
-        let file = Path::new(OsStr::from_bytes(&bytes[..i]));
-        let id = &bytes[i + 1..];
-        let is_clap = file
-            .extension()
-            .is_some_and(|e| e.as_bytes().eq_ignore_ascii_case(b"clap"));
-        if is_clap && !id.is_empty() {
-            return (
-                file.to_path_buf(),
-                Some(String::from_utf8_lossy(id).into_owned()),
-            );
+    #[cfg(unix)]
+    {
+        let bytes = path.as_os_str().as_bytes();
+        if let Some(i) = bytes.iter().rposition(|&c| c == b'#') {
+            let file = Path::new(std::ffi::OsStr::from_bytes(&bytes[..i]));
+            let id = &bytes[i + 1..];
+            let is_clap = file
+                .extension()
+                .is_some_and(|e| e.as_bytes().eq_ignore_ascii_case(b"clap"));
+            if is_clap && !id.is_empty() {
+                return (
+                    file.to_path_buf(),
+                    Some(String::from_utf8_lossy(id).into_owned()),
+                );
+            }
         }
+        (path.to_path_buf(), None)
     }
-    (path.to_path_buf(), None)
+    #[cfg(not(unix))]
+    {
+        let s = path.to_string_lossy();
+        if let Some((head, id)) = s.rsplit_once('#') {
+            let file = Path::new(head);
+            let is_clap = file
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("clap"));
+            if is_clap && !id.is_empty() {
+                return (file.to_path_buf(), Some(id.to_string()));
+            }
+        }
+        (path.to_path_buf(), None)
+    }
 }
 
 /// `<file>#<plugin_id>`: the path form of one plugin inside a multi-plugin bundle.
@@ -469,10 +483,20 @@ pub fn join_path(file: &Path, plugin_id: &str) -> PathBuf {
     if plugin_id.is_empty() {
         return file.to_path_buf();
     }
-    let mut bytes = file.as_os_str().as_bytes().to_vec();
-    bytes.push(b'#');
-    bytes.extend_from_slice(plugin_id.as_bytes());
-    PathBuf::from(std::ffi::OsString::from_vec(bytes))
+    #[cfg(unix)]
+    {
+        let mut bytes = file.as_os_str().as_bytes().to_vec();
+        bytes.push(b'#');
+        bytes.extend_from_slice(plugin_id.as_bytes());
+        PathBuf::from(std::ffi::OsString::from_vec(bytes))
+    }
+    #[cfg(not(unix))]
+    {
+        let mut os = file.as_os_str().to_os_string();
+        os.push("#");
+        os.push(plugin_id);
+        PathBuf::from(os)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -554,32 +578,43 @@ fn read_desc(d: &Descriptor) -> (ClapDesc, Vec<String>) {
 // Library and entry bookkeeping
 // ---------------------------------------------------------------------------
 
-fn open_library(file: &Path) -> Result<(*mut c_void, *const Entry), String> {
-    let cpath = CString::new(file.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
+fn open_library(file: &Path) -> Result<(libloading::Library, *const Entry), String> {
     unsafe {
-        let library = libc::dlopen(cpath.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL);
-        if library.is_null() {
-            return Err(dl_error());
-        }
-        let entry = libc::dlsym(library, c"clap_entry".as_ptr());
+        let library = libloading::Library::new(file).map_err(|e| e.to_string())?;
+        let sym: libloading::Symbol<'_, *const Entry> = library
+            .get(b"clap_entry\0")
+            .map_err(|_| "clap_entry missing: not a CLAP plugin".to_string())?;
+        // `libloading::Symbol<T>` reinterprets the raw symbol address as `T`, so
+        // `*sym` is the exported `clap_entry` struct's address on both Unix and Windows.
+        let entry: *const Entry = *sym;
         if entry.is_null() {
-            libc::dlclose(library);
             return Err("clap_entry missing: not a CLAP plugin".into());
         }
-        Ok((library, entry as *const Entry))
+        Ok((library, entry))
     }
 }
 
 /// How many instances (and listings) hold each entry, so `init` runs once on
 /// the first and `deinit` once on the last, even when the same `.clap` is
-/// loaded several times (dlopen hands back the same handle).
+/// loaded several times (the OS loader hands back the same module).
 fn registry() -> &'static Mutex<HashMap<usize, usize>> {
     static REGISTRY: OnceLock<Mutex<HashMap<usize, usize>>> = OnceLock::new();
     REGISTRY.get_or_init(Default::default)
 }
 
+fn path_to_c_utf8(file: &Path) -> Result<CString, String> {
+    #[cfg(unix)]
+    {
+        CString::new(file.as_os_str().as_bytes()).map_err(|e| e.to_string())
+    }
+    #[cfg(not(unix))]
+    {
+        CString::new(file.to_string_lossy().as_bytes()).map_err(|e| e.to_string())
+    }
+}
+
 fn acquire(entry: *const Entry, file: &Path) -> Result<(), String> {
-    let cpath = CString::new(file.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
+    let cpath = path_to_c_utf8(file)?;
     let mut reg = lock(registry());
     let key = entry as usize;
     let count = reg.get(&key).copied().unwrap_or(0);
@@ -659,10 +694,8 @@ fn enumerate(entry: *const Entry, file: &Path) -> Result<Vec<ClapDesc>, String> 
 
 /// Every plugin in a `.clap` file.
 pub fn list_plugins(file: &Path) -> Result<Vec<ClapDesc>, String> {
-    let (library, entry) = open_library(file)?;
-    let result = enumerate(entry, file);
-    unsafe { libc::dlclose(library) };
-    result
+    let (_library, entry) = open_library(file)?;
+    enumerate(entry, file)
 }
 
 // ---------------------------------------------------------------------------
@@ -794,6 +827,7 @@ unsafe extern "C" fn host_get_extension(_host: *const RawHost, id: *const c_char
         b"clap.log" => (&HOST_LOG as *const HostLog).cast(),
         b"clap.thread-check" => (&HOST_THREAD_CHECK as *const HostThreadCheck).cast(),
         b"clap.timer-support" => (&HOST_TIMER as *const HostTimerSupport).cast(),
+        #[cfg(unix)]
         b"clap.posix-fd-support" => (&HOST_FD as *const HostPosixFdSupport).cast(),
         b"clap.state" => (&HOST_STATE as *const HostState).cast(),
         _ => ptr::null(),
@@ -1118,8 +1152,8 @@ unsafe extern "C" fn istream_read(stream: *const IStream, buf: *mut c_void, size
 // ---------------------------------------------------------------------------
 
 pub struct ClapPlugin {
-    /// Null for an in-memory entry (tests).
-    library: *mut c_void,
+    /// `None` for an in-memory entry (tests).
+    library: Option<libloading::Library>,
     entry: *const Entry,
     plugin: *const RawPlugin,
     /// Boxed: the plugin keeps the pointer to its `RawHost`.
@@ -1170,13 +1204,7 @@ impl ClapPlugin {
     pub fn load(path: &Path) -> Result<Self, String> {
         let (file, id) = split_path(path);
         let (library, entry) = open_library(&file)?;
-        match Self::open(library, entry, &file, id.as_deref()) {
-            Ok(plugin) => Ok(plugin),
-            Err(e) => {
-                unsafe { libc::dlclose(library) };
-                Err(e)
-            }
-        }
+        Self::open(Some(library), entry, &file, id.as_deref())
     }
 
     /// A plugin from an in-memory entry (no shared object), for unit tests.
@@ -1186,11 +1214,11 @@ impl ClapPlugin {
         path: &Path,
         id: Option<&str>,
     ) -> Result<Self, String> {
-        Self::open(ptr::null_mut(), entry, path, id)
+        Self::open(None, entry, path, id)
     }
 
     fn open(
-        library: *mut c_void,
+        library: Option<libloading::Library>,
         entry: *const Entry,
         file: &Path,
         id: Option<&str>,
@@ -1206,7 +1234,7 @@ impl ClapPlugin {
     }
 
     fn instantiate(
-        library: *mut c_void,
+        library: Option<libloading::Library>,
         entry: *const Entry,
         id: Option<&str>,
     ) -> Result<Self, String> {
@@ -1871,11 +1899,11 @@ impl ClapPlugin {
 
     // ----- editor -----
 
-    /// Whether the plugin can embed its editor into an X11 window.
+    /// Whether the plugin can embed its editor into the current platform's native window.
     pub fn has_editor(&self) -> bool {
         unsafe { self.gui_ext.as_ref() }
             .and_then(|g| g.is_api_supported)
-            .is_some_and(|f| unsafe { f(self.plugin, c"x11".as_ptr(), false) })
+            .is_some_and(|f| unsafe { f(self.plugin, GUI_API.as_ptr(), false) })
     }
 
     fn editor_size(&self) -> Option<(i32, i32)> {
@@ -1885,8 +1913,18 @@ impl ClapPlugin {
             .then_some((w.min(i32::MAX as u32) as i32, h.min(i32::MAX as u32) as i32))
     }
 
-    /// Embed the editor into the X11 window `x11_window`. Returns its size.
-    pub fn editor_open(&mut self, x11_window: u32) -> Result<(i32, i32), String> {
+    /// Embed the editor into the platform window (`X11` window ID on Linux, `HWND` on Windows).
+    /// Returns its size in pixels.
+    pub fn editor_open(&mut self, parent_window: u64) -> Result<(i32, i32), String> {
+        self.editor_open_with_scale(parent_window, 1.0)
+    }
+
+    /// Embed the editor into `parent_window` with an explicit DPI scale factor.
+    pub fn editor_open_with_scale(
+        &mut self,
+        parent_window: u64,
+        scale: f64,
+    ) -> Result<(i32, i32), String> {
         if self.editor {
             return self
                 .editor_size()
@@ -1898,24 +1936,35 @@ impl ClapPlugin {
             let create = gui.create.ok_or("gui.create missing")?;
             if !gui
                 .is_api_supported
-                .is_some_and(|f| f(plugin, c"x11".as_ptr(), false))
+                .is_some_and(|f| f(plugin, GUI_API.as_ptr(), false))
             {
-                return Err("editor does not support X11".into());
+                return Err(format!(
+                    "editor does not support {}",
+                    GUI_API.to_string_lossy()
+                ));
             }
-            if !create(plugin, c"x11".as_ptr(), false) {
+            if !create(plugin, GUI_API.as_ptr(), false) {
                 return Err("gui.create failed".into());
             }
             self.editor = true;
             if let Some(set_scale) = gui.set_scale {
                 // Plugins that scale themselves refuse: nothing to do.
-                set_scale(plugin, 1.0);
+                set_scale(plugin, scale.max(0.25));
             }
         }
         let attach = || -> Result<(i32, i32), String> {
             let size = self.editor_size().ok_or("gui.get_size failed")?;
+            #[cfg(target_os = "windows")]
+            let handle = WindowHandle {
+                win32: parent_window as usize as *mut c_void,
+            };
+            #[cfg(not(target_os = "windows"))]
+            let handle = WindowHandle {
+                x11: parent_window as c_ulong,
+            };
             let window = Window {
-                api: c"x11".as_ptr(),
-                x11: x11_window as c_ulong,
+                api: GUI_API.as_ptr(),
+                handle,
             };
             unsafe {
                 let set_parent = gui.set_parent.ok_or("gui.set_parent missing")?;
@@ -1935,6 +1984,18 @@ impl ClapPlugin {
             Err(e) => {
                 self.editor_close();
                 Err(e)
+            }
+        }
+    }
+
+    /// Inform an open editor that the monitor DPI scale changed.
+    pub fn editor_set_scale(&mut self, scale: f64) {
+        if !self.editor {
+            return;
+        }
+        if let Some(set_scale) = unsafe { self.gui_ext.as_ref() }.and_then(|g| g.set_scale) {
+            unsafe {
+                set_scale(self.plugin, scale.max(0.25));
             }
         }
     }
@@ -2016,6 +2077,7 @@ impl ClapPlugin {
             }
         }
 
+        #[cfg(unix)]
         if let Some(on_fd) = unsafe { self.fd_ext.as_ref() }.and_then(|e| e.on_fd) {
             let watched: Vec<FdEntry> = lock(&self.host.fds).clone();
             if !watched.is_empty() {
@@ -2071,9 +2133,8 @@ impl Drop for ClapPlugin {
             }
         }
         release(self.entry);
-        if !self.library.is_null() {
-            unsafe { libc::dlclose(self.library) };
-        }
+        // Drop the dynamic library only after `destroy` and `entry.deinit`.
+        drop(self.library.take());
     }
 }
 
@@ -2141,7 +2202,7 @@ mod tests {
         thread_audio: Vec<bool>,
         // editor
         api: String,
-        parent: c_ulong,
+        parent: u64,
         size: (u32, u32),
         visible: bool,
         created: bool,
@@ -2698,7 +2759,7 @@ mod tests {
         api: *const c_char,
         floating: bool,
     ) -> bool {
-        cstr(api) == "x11" && !floating
+        cstr(api) == GUI_API.to_string_lossy() && !floating
     }
     unsafe extern "C" fn gui_create(
         p: *const RawPlugin,
@@ -2749,8 +2810,18 @@ mod tests {
     unsafe extern "C" fn gui_set_parent(p: *const RawPlugin, window: *const Window) -> bool {
         let m = unsafe { mock(p) };
         let window = unsafe { &*window };
-        m.parent = window.x11;
-        cstr(window.api) == "x11"
+        #[cfg(target_os = "windows")]
+        {
+            m.parent = unsafe { window.handle.win32 as usize as u64 };
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            #[allow(clippy::unnecessary_cast)]
+            {
+                m.parent = unsafe { window.handle.x11 as u64 };
+            }
+        }
+        cstr(window.api) == GUI_API.to_string_lossy()
     }
     unsafe extern "C" fn gui_show(p: *const RawPlugin) -> bool {
         let m = unsafe { mock(p) };
@@ -2957,8 +3028,12 @@ mod tests {
     fn load_failures_are_errors() {
         assert!(list_plugins(Path::new("/nonexistent/none.clap")).is_err());
         assert!(ClapPlugin::load(Path::new("/nonexistent/none.clap#x")).is_err());
-        // A real shared object that is not a CLAP plugin.
-        let err = list_plugins(Path::new("libc.so.6")).unwrap_err();
+        // A real shared library that is not a CLAP plugin.
+        #[cfg(target_os = "windows")]
+        let non_clap = Path::new("kernel32.dll");
+        #[cfg(not(target_os = "windows"))]
+        let non_clap = Path::new("libc.so.6");
+        let err = list_plugins(non_clap).unwrap_err();
         assert!(err.contains("clap_entry"), "{err}");
     }
 
@@ -3356,7 +3431,7 @@ mod tests {
         assert_eq!(p.editor_open(0x4200_0001), Ok((640, 480)));
         {
             let m = state(&p);
-            assert_eq!(m.api, "x11");
+            assert_eq!(m.api, GUI_API.to_string_lossy());
             assert_eq!(m.parent, 0x4200_0001);
             assert!(m.created && m.visible);
             // A refused set_scale is not an error.
@@ -3427,6 +3502,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn posix_fd_support_polls_registered_fds() {
         let mut p = load(ID_SYNTH);
         let mut fds = [0 as c_int; 2];
@@ -3473,10 +3549,13 @@ mod tests {
             c"clap.log",
             c"clap.thread-check",
             c"clap.timer-support",
+            #[cfg(unix)]
             c"clap.posix-fd-support",
         ] {
             assert!(!get(id).is_null(), "{id:?}");
         }
+        #[cfg(not(unix))]
+        assert!(get(c"clap.posix-fd-support").is_null());
         assert!(get(c"clap.nonexistent").is_null());
 
         // Off the audio thread, the main thread answers true.

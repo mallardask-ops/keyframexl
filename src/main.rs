@@ -3,7 +3,6 @@
 mod audio;
 #[cfg(target_os = "linux")]
 mod bridge;
-#[cfg(target_os = "linux")]
 mod clap;
 mod dwp;
 #[cfg(target_os = "linux")]
@@ -17,17 +16,15 @@ mod import;
 mod midi_in;
 mod midi_out;
 mod platform;
-#[cfg(target_os = "linux")]
 mod plugins;
 mod settings;
 mod theme;
 mod ui;
 mod updater;
-#[cfg(target_os = "linux")]
 mod vst2;
 
 #[cfg(not(target_os = "linux"))]
-use platform::stubs::{bridge, fl_link, fl_native, flp_freeze, plugins};
+use platform::stubs::{bridge, fl_link, fl_native, flp_freeze};
 
 use std::{env, error::Error};
 #[cfg(target_os = "linux")]

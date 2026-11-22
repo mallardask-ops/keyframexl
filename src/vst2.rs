@@ -1,10 +1,5 @@
 #![allow(dead_code)]
-use std::os::unix::ffi::OsStrExt;
-use std::{
-    ffi::{CStr, CString, c_void},
-    path::Path,
-    ptr,
-};
+use std::{ffi::c_void, path::Path, ptr};
 
 type Dispatch = unsafe extern "C" fn(*mut AEffect, i32, i32, isize, *mut c_void, f32) -> isize;
 type Host = unsafe extern "C" fn(*mut AEffect, i32, i32, isize, *mut c_void, f32) -> isize;
@@ -134,7 +129,8 @@ unsafe extern "C" fn host(
 }
 pub struct Vst2Plugin {
     effect: *mut AEffect,
-    library: *mut c_void,
+    /// Kept alive until after `Drop::drop` finishes `effClose` (struct fields drop after `Drop::drop`).
+    _library: libloading::Library,
     context: Box<Context>,
     active: bool,
     editor: bool,
@@ -161,27 +157,17 @@ struct EventList {
 }
 impl Vst2Plugin {
     pub fn load(path: &Path) -> Result<Self, String> {
-        let path = CString::new(path.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
         unsafe {
-            let library = libc::dlopen(path.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL);
-            if library.is_null() {
-                return Err(CStr::from_ptr(libc::dlerror())
-                    .to_string_lossy()
-                    .into_owned());
-            }
-            let entry = libc::dlsym(library, c"VSTPluginMain".as_ptr());
-            if entry.is_null() {
-                libc::dlclose(library);
-                return Err("VSTPluginMain missing".into());
-            }
-            let entry: unsafe extern "C" fn(Host) -> *mut AEffect = std::mem::transmute(entry);
+            let library = libloading::Library::new(path).map_err(|e| e.to_string())?;
+            let entry: libloading::Symbol<'_, unsafe extern "C" fn(Host) -> *mut AEffect> = library
+                .get(b"VSTPluginMain\0")
+                .or_else(|_| library.get(b"main\0"))
+                .map_err(|_| "VSTPluginMain missing".to_string())?;
             let effect = entry(host);
             if effect.is_null() {
-                libc::dlclose(library);
                 return Err("VSTPluginMain returned null".into());
             }
             if (*effect).magic != 0x56737450 || (*effect).dispatcher.is_none() {
-                libc::dlclose(library);
                 return Err("invalid AEffect".into());
             }
             let mut context = Box::new(Context {
@@ -205,7 +191,7 @@ impl Vst2Plugin {
             );
             let mut plugin = Self {
                 effect,
-                library,
+                _library: library,
                 context,
                 active: false,
                 editor: false,
@@ -505,11 +491,9 @@ impl Drop for Vst2Plugin {
         self.stop();
         self.call(1, 0, 0, ptr::null_mut(), 0.0);
         contexts().lock().unwrap().remove(&(self.effect as usize));
-        unsafe {
-            libc::dlclose(self.library);
-        }
     }
 }
+#[cfg(target_os = "linux")]
 pub fn probe(path: &Path) -> Result<(), String> {
     let mut p = Vst2Plugin::load(path)?;
     let (synth, ni, no, np) = p.info();

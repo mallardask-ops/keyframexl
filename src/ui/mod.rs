@@ -3562,14 +3562,18 @@ impl eframe::App for App {
         self.sync_convolution_irs(ctx);
         self.capture_export(ctx);
         self.capture_forge_bounce();
-        // On X11 plugin editors are placed inside our window (FL's wrapper).
+        // On X11 and Windows plugin editors are embedded inside our host window.
         if self.plugins.parent.is_none() {
+            use crate::plugins::NativeWindow;
             use raw_window_handle::{HasWindowHandle, RawWindowHandle};
             #[allow(clippy::unnecessary_cast)]
             {
                 self.plugins.parent = match frame.window_handle().map(|h| h.as_raw()) {
-                    Ok(RawWindowHandle::Xlib(h)) => Some(h.window as u32),
-                    Ok(RawWindowHandle::Xcb(h)) => Some(h.window.get()),
+                    Ok(RawWindowHandle::Xlib(h)) => Some(NativeWindow::X11(h.window as u32)),
+                    Ok(RawWindowHandle::Xcb(h)) => Some(NativeWindow::X11(h.window.get())),
+                    Ok(RawWindowHandle::Win32(h)) => {
+                        Some(NativeWindow::Win32(h.hwnd.get() as usize as u64))
+                    }
                     _ => None,
                 };
             }
