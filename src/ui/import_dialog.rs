@@ -3,10 +3,18 @@ use crate::theme as t;
 use eframe::egui::{self, RichText};
 use std::path::PathBuf;
 
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum AudioDest {
+    #[default]
+    AudioClip,
+    NewSampler,
+    SelectedSampler,
+}
+
 #[derive(Default)]
 pub(super) struct ImportDialog {
     path: Option<PathBuf>,
-    new_channel: bool,
+    dest: AudioDest,
 }
 
 impl App {
@@ -71,11 +79,35 @@ impl App {
                         "mid" | "midi" => {
                             ui.label(tr.imp_dest_midi);
                         }
-                        _ => {
-                            ui.radio_value(&mut dialog.new_channel, true, tr.imp_dest_new_sampler);
+                        "dwp" => {
+                            if dialog.dest == AudioDest::AudioClip {
+                                dialog.dest = AudioDest::NewSampler;
+                            }
                             ui.radio_value(
-                                &mut dialog.new_channel,
-                                false,
+                                &mut dialog.dest,
+                                AudioDest::NewSampler,
+                                tr.imp_dest_new_sampler,
+                            );
+                            ui.radio_value(
+                                &mut dialog.dest,
+                                AudioDest::SelectedSampler,
+                                tr.imp_dest_selected_sampler,
+                            );
+                        }
+                        _ => {
+                            ui.radio_value(
+                                &mut dialog.dest,
+                                AudioDest::AudioClip,
+                                tr.imp_dest_audio_clip,
+                            );
+                            ui.radio_value(
+                                &mut dialog.dest,
+                                AudioDest::NewSampler,
+                                tr.imp_dest_new_sampler,
+                            );
+                            ui.radio_value(
+                                &mut dialog.dest,
+                                AudioDest::SelectedSampler,
                                 tr.imp_dest_selected_sampler,
                             );
                         }
@@ -95,22 +127,41 @@ impl App {
             && let Some(path) = rfd::FileDialog::new()
                 .add_filter(
                     tr.imp_filter_all,
-                    &["wav", "flac", "ogg", "dwp", "mid", "midi", "flp", "zip"],
+                    &[
+                        "wav", "flac", "ogg", "mp3", "m4a", "aac", "aif", "aiff", "dwp", "mid",
+                        "midi", "flp", "zip",
+                    ],
                 )
-                .add_filter(tr.imp_filter_audio, &["wav", "flac", "ogg", "dwp"])
+                .add_filter(
+                    tr.imp_filter_audio,
+                    &[
+                        "wav", "flac", "ogg", "mp3", "m4a", "aac", "aif", "aiff", "dwp",
+                    ],
+                )
                 .add_filter("MIDI", &["mid", "midi"])
                 .add_filter(tr.imp_filter_project, &["flp", "zip"])
                 .pick_file()
         {
+            dialog.dest = if files::is_audio(&path) {
+                AudioDest::AudioClip
+            } else {
+                AudioDest::NewSampler
+            };
             dialog.path = Some(path);
-            dialog.new_channel = true;
         }
         if import && let Some(path) = dialog.path.take() {
             match files::ext(&path).as_str() {
                 "flp" | "zip" => self.request(Pending::Open(Some(path))),
-                "wav" | "flac" | "ogg" | "dwp" | "mid" | "midi" => {
-                    self.load_file(path, dialog.new_channel)
-                }
+                "mid" | "midi" => self.load_file(path, true),
+                "dwp" => self.load_file(path, dialog.dest != AudioDest::SelectedSampler),
+                _ if files::is_audio(&path) => match dialog.dest {
+                    AudioDest::AudioClip => {
+                        let track = self.next_free_audio_track();
+                        self.load_audio_clip(path, 0, track);
+                    }
+                    AudioDest::NewSampler => self.load_file(path, true),
+                    AudioDest::SelectedSampler => self.load_file(path, false),
+                },
                 _ => self.say(Tone::Bad, tr.imp_unsupported_err),
             }
         } else if open && !cancel && !ctx.input(|i| i.key_pressed(egui::Key::Escape)) {

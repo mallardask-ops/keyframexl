@@ -1850,6 +1850,23 @@ impl App {
                         super::automation::paint_clip(
                             &ap, body, env, &self.song, c.offset, len, plen, ink,
                         );
+                    } else if let Some(inst_id) = pat.audio_clip {
+                        let ap =
+                            clip_painter.with_clip_rect(body.intersect(clip_painter.clip_rect()));
+                        let bar_w = layout.grid.width() * BAR as f32
+                            / (layout.end_tick - layout.start_tick).max(1) as f32;
+                        super::playlist::paint_audio_clip_wave(
+                            &ap,
+                            body,
+                            layout.grid,
+                            &self.song,
+                            inst_id,
+                            c.offset,
+                            plen,
+                            bar_w,
+                            base,
+                            muted,
+                        );
                     } else {
                         paint_clip_note_preview(
                             &clip_painter,

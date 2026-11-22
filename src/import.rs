@@ -70,7 +70,7 @@ struct WavSpec {
     sample_rate: u32,
 }
 
-/// Decode a WAV, FLAC or Ogg Vorbis file to stereo frames.
+/// Decode a WAV, FLAC, Ogg Vorbis, MP3, M4A/AAC, or AIFF file to stereo frames.
 pub fn read_audio(path: &Path) -> Result<(u32, Vec<[f32; 2]>), String> {
     let ext = path
         .extension()
@@ -95,8 +95,103 @@ pub fn read_audio(path: &Path) -> Result<(u32, Vec<[f32; 2]>), String> {
         }
         "ogg" => decode_ogg(&std::fs::read(path).map_err(|e| unreadable(&e))?)
             .map_err(|e| unreadable(&e)),
-        _ => Err(format!("{} is not WAV, FLAC or Ogg", path.display())),
+        "mp3" | "m4a" | "aac" | "aif" | "aiff" => {
+            decode_symphonia(path, &ext).map_err(|e| unreadable(&e))
+        }
+        _ => Err(format!(
+            "{} is not a supported audio format (WAV, FLAC, Ogg, MP3, M4A, AAC, AIFF)",
+            path.display()
+        )),
     }
+}
+
+/// Decode MP3, M4A/AAC, or AIFF to stereo f32 frames via pure-Rust `symphonia`.
+fn decode_symphonia(path: &Path, ext: &str) -> Result<(u32, Vec<[f32; 2]>), String> {
+    use symphonia::core::audio::SampleBuffer;
+    use symphonia::core::codecs::{CODEC_TYPE_NULL, DecoderOptions};
+    use symphonia::core::errors::Error;
+    use symphonia::core::formats::FormatOptions;
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::probe::Hint;
+
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if !ext.is_empty() {
+        hint.with_extension(ext);
+    }
+    let probed = symphonia::default::get_probe()
+        .format(
+            &hint,
+            mss,
+            &FormatOptions {
+                enable_gapless: true,
+                ..Default::default()
+            },
+            &MetadataOptions::default(),
+        )
+        .map_err(|e| e.to_string())?;
+    let mut format = probed.format;
+    let track = format
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+        .ok_or_else(|| "no audio track found".to_string())?;
+    let track_id = track.id;
+    let mut rate = track.codec_params.sample_rate.unwrap_or(0);
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&track.codec_params, &DecoderOptions::default())
+        .map_err(|e| e.to_string())?;
+    let mut frames: Vec<[f32; 2]> = Vec::new();
+    let mut sample_buf: Option<SampleBuffer<f32>> = None;
+
+    loop {
+        let packet = match format.next_packet() {
+            Ok(p) => p,
+            Err(Error::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            Err(Error::ResetRequired) => {
+                decoder.reset();
+                continue;
+            }
+            Err(_) if !frames.is_empty() => break,
+            Err(e) => return Err(e.to_string()),
+        };
+        if packet.track_id() != track_id {
+            continue;
+        }
+        let decoded = match decoder.decode(&packet) {
+            Ok(d) => d,
+            Err(Error::DecodeError(_)) => continue,
+            Err(Error::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            Err(_) if !frames.is_empty() => break,
+            Err(e) => return Err(e.to_string()),
+        };
+        let spec = *decoded.spec();
+        if rate == 0 {
+            rate = spec.rate;
+        }
+        let ch = spec.channels.count();
+        let cap = decoded.capacity() as u64;
+        let need_new = sample_buf
+            .as_ref()
+            .is_none_or(|b| b.capacity() < decoded.frames() * ch.max(1));
+        if need_new {
+            sample_buf = Some(SampleBuffer::<f32>::new(cap, spec));
+        }
+        let buf = sample_buf.as_mut().unwrap();
+        buf.copy_interleaved_ref(decoded);
+        let samples = buf.samples();
+        match ch {
+            0 => {}
+            1 => frames.extend(samples.iter().map(|&v| [v, v])),
+            _ => frames.extend(samples.chunks_exact(ch).map(|f| [f[0], f[1]])),
+        }
+    }
+    if rate == 0 || frames.is_empty() {
+        return Err("no decoded audio frames".into());
+    }
+    Ok((rate, frames))
 }
 
 /// Decode an Ogg Vorbis stream to stereo frames: lewton (pure Rust) first,
@@ -1100,5 +1195,33 @@ mod ogg_in_wav_tests {
         eprintln!("FL drum samples decoded: {ok}, failed: {}", bad.len());
         assert!(bad.is_empty(), "{bad:#?}");
         assert!(ok > 200);
+    }
+
+    #[test]
+    fn mp3_decodes_to_stereo_frames_via_symphonia() {
+        let rate = 44_100u32;
+        let frames: Vec<[f32; 2]> = (0..rate as usize / 2)
+            .map(|i| {
+                let s = (i as f32 * 440.0 * std::f32::consts::TAU / rate as f32).sin() * 0.5;
+                [s, s * 0.5]
+            })
+            .collect();
+        let bytes = keyframexl::mp3::encode(&frames, rate, 192, &Default::default()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("track.mp3");
+        std::fs::write(&path, &bytes).unwrap();
+
+        let (dec_rate, dec_frames) = super::read_audio(&path).unwrap();
+        assert_eq!(dec_rate, rate);
+        assert!(
+            dec_frames.len() >= frames.len() - 2048,
+            "expected ~{} frames, got {}",
+            frames.len(),
+            dec_frames.len()
+        );
+        let peak = dec_frames
+            .iter()
+            .fold(0.0f32, |m, [l, r]| m.max(l.abs()).max(r.abs()));
+        assert!(peak > 0.35, "expected audible sine peak, got {peak}");
     }
 }

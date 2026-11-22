@@ -262,6 +262,10 @@ pub struct Pattern {
     /// An automation clip: this envelope instead of notes (FL).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub automation: Option<crate::automation::Envelope>,
+    /// An audio clip (FL): plays this sampler channel's sample directly across
+    /// the timeline with full seeking, slicing, trimming and waveform preview.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_clip: Option<u64>,
     /// Playlist / pattern-picker colour as 0xRRGGBB; `None` = by id (FL).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<u32>,
@@ -302,6 +306,7 @@ impl Pattern {
             notes: vec![],
             slides: vec![],
             automation: None,
+            audio_clip: None,
             color: None,
             loop_range: None,
             lyrics: Default::default(),
@@ -1300,6 +1305,7 @@ impl Song {
             }
             if p.notes.iter().any(|n| !known(n.instrument))
                 || p.slides.iter().any(|s| !known(s.instrument))
+                || p.audio_clip.is_some_and(|id| !known(id))
             {
                 return Err("Unknown instrument");
             }
@@ -1455,12 +1461,25 @@ impl Song {
         }
     }
 
-    /// Remove a channel with every note and slide it plays.
+    /// Remove a channel with every note, slide and audio-clip pattern it plays.
     pub fn remove_instrument(&mut self, id: u64) -> Result<(), &'static str> {
         if !self.instruments.iter().any(|i| i.id == id) {
             return Err("Channel missing");
         }
         self.instruments.retain(|i| i.id != id);
+        let dead_pats: Vec<u64> = self
+            .patterns
+            .iter()
+            .filter(|p| p.audio_clip == Some(id))
+            .map(|p| p.id)
+            .collect();
+        if !dead_pats.is_empty() {
+            self.clips.retain(|c| !dead_pats.contains(&c.pattern));
+            self.patterns.retain(|p| !dead_pats.contains(&p.id));
+            if self.patterns.is_empty() {
+                self.patterns.push(Pattern::new(1, "Pattern 1").into());
+            }
+        }
         for p in self.patterns.iter_mut().filter(|p| {
             p.notes.iter().any(|n| n.instrument == id)
                 || p.slides.iter().any(|s| s.instrument == id)
@@ -1470,6 +1489,46 @@ impl Song {
             p.slides.retain(|s| s.instrument != id);
         }
         Ok(())
+    }
+
+    /// Whole-step pattern length covering `seconds` at the song's tempo,
+    /// clamped to `STEP ..= MAX_BARS * BAR`.
+    pub fn ticks_for_seconds(&self, seconds: f64) -> Tick {
+        let sps = seconds_per_step(self.tempo);
+        let steps_needed = (seconds.max(0.0) / sps).ceil() as Tick;
+        (steps_needed.max(1) * STEP).min(MAX_BARS * BAR)
+    }
+
+    /// Create an audio clip (FL-style): a sampler channel holding `preset`,
+    /// a dedicated audio-clip pattern sized to the audio duration, and a
+    /// playlist clip at `(start, track)`. Returns `(inst_id, pattern_id, clip_index)`.
+    pub fn add_audio_clip(
+        &mut self,
+        name: &str,
+        preset: SamplePreset,
+        start: Tick,
+        track: u32,
+    ) -> Result<(u64, u64, usize), &'static str> {
+        let seconds = preset.zones.first().map_or(0.0, |z| {
+            z.end.saturating_sub(z.offset) as f64 / z.sample_rate.max(1) as f64
+        });
+        let base_name = if name.trim().is_empty() {
+            "Audio clip"
+        } else {
+            name.trim()
+        };
+        let chan_name = self.free_name(base_name);
+        let inst_id = self.add_sampler(&chan_name);
+        self.set_sampler_preset(inst_id, preset)?;
+        let pat_id = self.patterns.iter().map(|p| p.id).max().unwrap_or(0) + 1;
+        let mut pat = Pattern::new(pat_id, &chan_name);
+        pat.length = self.ticks_for_seconds(seconds);
+        pat.audio_clip = Some(inst_id);
+        self.patterns.push(std::sync::Arc::new(pat));
+        let start = start.clamp(0, MAX_BARS * BAR - STEP);
+        let track = track.min(999);
+        self.clips.push(Clip::new(pat_id, start, track));
+        Ok((inst_id, pat_id, self.clips.len() - 1))
     }
 
     /// FL solo: hear only this channel; soloing it again unmutes everything.

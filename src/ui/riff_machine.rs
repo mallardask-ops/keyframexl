@@ -350,7 +350,10 @@ impl App {
             self.win(Cmd::Show(Tab::Riff));
             return;
         }
-        if self.pattern().automation.is_some() || self.song.instrument(inst).is_none() {
+        if self.pattern().automation.is_some()
+            || self.pattern().audio_clip.is_some()
+            || self.song.instrument(inst).is_none()
+        {
             self.say(Tone::Wait, tr.riff_select_first);
             return;
         }
@@ -559,7 +562,7 @@ impl App {
             for n in &mut current {
                 n.start -= origin;
             }
-            if pattern.automation.is_some() {
+            if pattern.automation.is_some() || pattern.audio_clip.is_some() {
                 self.end_riff_preview(&mut s);
                 self.win(Cmd::Close(Tab::Riff));
                 return;

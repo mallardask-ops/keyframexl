@@ -115,6 +115,90 @@ pub(crate) fn song_bar_pos(meters: &[Meter], t: Tick) -> String {
     }
 }
 
+/// Paint the stereo/mono audio waveform of an audio-clip pattern inside `area`,
+/// aligned to `offset`..`offset + len` at `bar_w` px/bar (clipped to `view`).
+/// O(visible_width) with stride sampling so multi-minute tracks stay at 60 FPS.
+pub(super) fn paint_audio_clip_wave(
+    p: &egui::Painter,
+    area: Rect,
+    view: Rect,
+    song: &keyframexl::sequence::Song,
+    inst_id: u64,
+    offset: Tick,
+    plen: Tick,
+    bar_w: f32,
+    code: egui::Color32,
+    faded: bool,
+) {
+    let Some(preset) = song.instrument(inst_id).and_then(|i| i.sampler_preset()) else {
+        return;
+    };
+    let Some(z) = preset.zones.first() else {
+        return;
+    };
+    let zv = z.view();
+    if zv.end <= zv.offset || zv.frames.is_empty() || bar_w <= 0.0 {
+        return;
+    }
+    let x0 = area.left().max(view.left());
+    let x1 = area.right().min(view.right());
+    if x1 <= x0 {
+        return;
+    }
+    let mid_y = area.center().y;
+    let half_h = (area.height() * 0.46).max(1.0);
+    let ink = if faded {
+        t::faint()
+    } else {
+        kit::mix(t::text(), code, 0.35)
+    };
+    p.line_segment(
+        [pos2(x0, mid_y), pos2(x1, mid_y)],
+        Stroke::new(1.0_f32, ink.gamma_multiply(0.22)),
+    );
+    let sps = keyframexl::sequence::seconds_per_step(song.tempo);
+    let ticks_per_sec = keyframexl::sequence::STEP as f64 / sps;
+    let frames_per_tick = (z.sample_rate as f64 / ticks_per_sec) * 2f64.powf(z.tune_cents / 1200.0);
+    let step_px = 2.0_f32;
+    let span_ticks = (step_px as f64 / bar_w as f64) * BAR as f64;
+    let span_frames = (span_ticks * frames_per_tick).max(1.0);
+    let plen = plen.max(1);
+    let mut x = x0;
+    while x < x1 {
+        let tick = offset + ((x - area.left()) as f64 / bar_w as f64 * BAR as f64) as Tick;
+        let pat_tick = tick.rem_euclid(plen);
+        let rel_frame = pat_tick as f64 * frames_per_tick;
+        let f_start = if z.params.reverse {
+            (zv.end as f64 - 1.0) - rel_frame - span_frames
+        } else {
+            zv.offset as f64 + rel_frame
+        };
+        let f_end = f_start + span_frames;
+        let lo = (f_start.floor() as isize).max(zv.offset as isize) as usize;
+        let hi = (f_end.ceil() as isize).min(zv.end as isize) as usize;
+        if lo < hi {
+            let count = hi - lo;
+            let stride = (count / 16).max(1);
+            let mut peak = 0.0_f32;
+            let mut idx = lo;
+            while idx < hi {
+                let [l, r] = zv.frames[idx];
+                let a = l.abs().max(r.abs());
+                if a > peak {
+                    peak = a;
+                }
+                idx += stride;
+            }
+            let h = (peak.min(1.0) * half_h).max(1.0);
+            p.line_segment(
+                [pos2(x + 0.5, mid_y - h), pos2(x + 0.5, mid_y + h)],
+                Stroke::new(1.5_f32, ink),
+            );
+        }
+        x += step_px;
+    }
+}
+
 fn tick_at(x: f32, grid_l: f32, bar_w: f32) -> Tick {
     (((x - grid_l) / bar_w * BAR as f32) as Tick).max(0)
 }
@@ -861,6 +945,7 @@ impl App {
         let full_clip = ui.clip_rect();
         ui.set_clip_rect(full_clip.intersect(rows_view));
         let grid_resp = ui.interact(grid_seen, ui.id().with("grid"), Sense::click_and_drag());
+        self.playlist_drop = Some((grid_seen, grid_l, grid.top(), bar_w, lane_h));
 
         for t in 0..rows {
             let y = grid.top() + t as f32 * lane_h;
@@ -1323,6 +1408,14 @@ impl App {
                 let p2 = painter.with_clip_rect(area.intersect(painter.clip_rect()));
                 let ink = if faded { t::faint() } else { t::enc_green() };
                 super::automation::paint_clip(&p2, area, env, &self.song, c.offset, len, plen, ink);
+            } else if area.height() >= 6.0
+                && let Some(inst_id) = pat.audio_clip
+            {
+                // Audio clip: its waveform across the clip (FL audio clip look).
+                let p2 = painter.with_clip_rect(area.intersect(painter.clip_rect()));
+                paint_audio_clip_wave(
+                    &p2, area, view, &self.song, inst_id, c.offset, plen, bar_w, code, faded,
+                );
             } else if area.height() >= 6.0 {
                 let pitches = pat.notes.iter().filter(|n| !n.muted).map(|n| n.pitch);
                 let low = pitches.clone().min().unwrap_or(0);
@@ -1385,11 +1478,16 @@ impl App {
             let pat_color = pat.color;
             let id_colour = t::pattern_color(pat.id, None);
             let tr = self.tr();
+            let pat_audio_clip = pat.audio_clip;
             kit::popup_menu(ui, popup_id, &marker_resp, 220.0, |ui| {
                 if ui.button(tr.pl_open_in_rack).clicked() {
                     menu_pick = Some("rack".to_string());
                 }
-                if ui.button(tr.pl_open_in_roll).clicked() {
+                if pat_audio_clip.is_some() {
+                    if ui.button(tr.pl_open_audio_channel).clicked() {
+                        menu_pick = Some("audio-channel".to_string());
+                    }
+                } else if ui.button(tr.pl_open_in_roll).clicked() {
                     menu_pick = Some("roll".to_string());
                 }
                 if ui.button(tr.pl_make_unique).clicked() {
@@ -2007,6 +2105,48 @@ impl App {
         }
         ui.data_mut(|d| d.insert_temp(paint_id, painting));
 
+        // Browser audio file dragged directly onto the playlist grid.
+        if let Some(drag) = grid_resp.dnd_hover_payload::<super::files::FileDrag>()
+            && super::files::is_audio(&drag.0)
+            && let Some(pos) = ui.ctx().pointer_hover_pos()
+            && grid_seen.contains(pos)
+        {
+            let alt = ui.input(|i| i.modifiers.alt);
+            let start = song_snap(
+                &meters,
+                tick_at(pos.x, grid_l, bar_w),
+                grid_ticks,
+                alt,
+                false,
+            )
+            .max(0);
+            let track = track_at(pos.y, grid.top(), lane_h).min(999);
+            let ghost = clip_rect(start, BAR * 4, track);
+            painter.rect_filled(ghost, 2.0, t::brand().gamma_multiply(0.18));
+            painter.rect_stroke(
+                ghost,
+                2.0,
+                Stroke::new(1.5_f32, t::brand()),
+                egui::StrokeKind::Inside,
+            );
+        }
+        if let Some(drag) = grid_resp.dnd_release_payload::<super::files::FileDrag>()
+            && super::files::is_audio(&drag.0)
+            && let Some(pos) = ui.ctx().pointer_hover_pos()
+        {
+            let alt = ui.input(|i| i.modifiers.alt);
+            let start = song_snap(
+                &meters,
+                tick_at(pos.x, grid_l, bar_w),
+                grid_ticks,
+                alt,
+                false,
+            )
+            .max(0);
+            let track = track_at(pos.y, grid.top(), lane_h).min(999);
+            self.load_audio_clip(drag.0.clone(), start, track);
+        }
+
         // Empty-cell placement: click where no clip covers.
         if tool == Tool::Draw
             && grid_resp.clicked()
@@ -2396,6 +2536,27 @@ impl App {
                     self.clip = Some(i);
                     self.auto_open = Some(clips[i].pattern);
                 }
+                Pending::Open(i)
+                    if i < clips.len()
+                        && self
+                            .song
+                            .patterns
+                            .iter()
+                            .any(|p| p.id == clips[i].pattern && p.audio_clip.is_some()) =>
+                {
+                    // An audio clip opens its sampler/audio channel window (FL).
+                    self.clip = Some(i);
+                    self.select_pattern(clips[i].pattern);
+                    if let Some(inst) = self
+                        .song
+                        .patterns
+                        .iter()
+                        .find(|p| p.id == clips[i].pattern)
+                        .and_then(|p| p.audio_clip)
+                    {
+                        self.win(Cmd::Show(Tab::Instrument { id: inst }));
+                    }
+                }
                 Pending::Open(i) => {
                     if i < clips.len() {
                         self.clip = Some(i);
@@ -2579,6 +2740,19 @@ impl App {
                             self.select_pattern(clips[i].pattern);
                             let inst = self.instrument;
                             self.open_roll(inst);
+                        }
+                        "audio-channel" => {
+                            self.clip = Some(i);
+                            self.select_pattern(clips[i].pattern);
+                            if let Some(inst) = self
+                                .song
+                                .patterns
+                                .iter()
+                                .find(|p| p.id == clips[i].pattern)
+                                .and_then(|p| p.audio_clip)
+                            {
+                                self.win(Cmd::Show(Tab::Instrument { id: inst }));
+                            }
                         }
                         "unique" => self.make_unique(i),
                         "mute" => self.toggle_clip_mute(i),

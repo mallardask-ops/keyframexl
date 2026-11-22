@@ -1799,6 +1799,7 @@ impl Engine {
         }
         self.render_voices(song, at + written, frames - written);
         self.render_phrases(song, at + written, frames - written);
+        self.render_audio_clips(song, pattern, song_mode, from, at, frames);
         self.clock += frames as u64;
     }
 
@@ -3334,6 +3335,156 @@ impl Engine {
             Some(slot) => slot.1 = key,
             None if room => self.last_key.push((inst, key)),
             None => {}
+        }
+    }
+
+    /// Mix active audio-clip patterns (`Pattern::audio_clip`) directly into their
+    /// channels' mixer buses for the timeline slice `from .. from + frames`.
+    /// Supports mid-clip seeking, slicing (`Clip::offset`), trimming, looping,
+    /// reverse, tune/stretch, fade-in/out, and live/automated channel volume & pan
+    /// with zero audio-thread allocation.
+    fn render_audio_clips(
+        &mut self,
+        song: &Song,
+        pattern: u64,
+        song_mode: bool,
+        from: u64,
+        at: usize,
+        frames: usize,
+    ) {
+        if frames == 0 || !song.patterns.iter().any(|p| p.audio_clip.is_some()) {
+            return;
+        }
+        let to = from + frames as u64;
+        if song_mode {
+            for c in song
+                .clips
+                .iter()
+                .filter(|c| !c.muted && !song.track_muted(c.track))
+            {
+                let Some(pat) = song
+                    .patterns
+                    .iter()
+                    .find(|p| p.id == c.pattern && p.audio_clip.is_some())
+                else {
+                    continue;
+                };
+                let Some(inst_id) = pat.audio_clip else {
+                    continue;
+                };
+                let clip_start = self.clip_frame(song, c.start);
+                let clip_end = self.clip_frame(song, c.start + song.clip_len(c));
+                if clip_start >= to || clip_end <= from {
+                    continue;
+                }
+                let offset_frames = self.clip_frame(song, c.offset);
+                let pat_frames = self.clip_frame(song, pat.length).max(1);
+                self.mix_audio_clip_span(
+                    song,
+                    inst_id,
+                    from,
+                    to,
+                    at,
+                    clip_start,
+                    clip_end,
+                    offset_frames,
+                    pat_frames,
+                );
+            }
+        } else if let Some(pat) = song
+            .patterns
+            .iter()
+            .find(|p| p.id == pattern && p.audio_clip.is_some())
+            && let Some(inst_id) = pat.audio_clip
+        {
+            let clip_end = self.clip_frame(song, pat.length);
+            if clip_end > from {
+                self.mix_audio_clip_span(
+                    song,
+                    inst_id,
+                    from,
+                    to,
+                    at,
+                    0,
+                    clip_end,
+                    0,
+                    clip_end.max(1),
+                );
+            }
+        }
+    }
+
+    fn mix_audio_clip_span(
+        &mut self,
+        song: &Song,
+        inst_id: u64,
+        from: u64,
+        to: u64,
+        at: usize,
+        clip_start: u64,
+        clip_end: u64,
+        offset_frames: u64,
+        pat_frames: u64,
+    ) {
+        let Some(inst) = song.instrument(inst_id) else {
+            return;
+        };
+        if inst.muted {
+            return;
+        }
+        let Some(preset) = inst.sampler_preset() else {
+            return;
+        };
+        let Some(z) = preset.zones.first() else {
+            return;
+        };
+        let zv = z.view();
+        if zv.end <= zv.offset || zv.frames.is_empty() {
+            return;
+        }
+        let seg_from = from.max(clip_start);
+        let seg_to = to.min(clip_end);
+        if seg_from >= seg_to {
+            return;
+        }
+        let bus = (inst.mixer as usize).min(self.buses.len().saturating_sub(1));
+        let gains =
+            channel_gains(&self.auto, &self.live_params, inst).unwrap_or_else(|| inst.gains());
+        let gl = (gains[0] * z.gain * (1.0 - z.pan.max(0.0))) as f32;
+        let gr = (gains[1] * z.gain * (1.0 + z.pan.min(0.0))) as f32;
+        let ratio = (z.sample_rate as f64 / self.rate) * 2f64.powf(z.tune_cents / 1200.0);
+        let out = &mut self.buses[bus];
+        const EDGE: u64 = 64;
+        for f in seg_from..seg_to {
+            let rel = ((f - clip_start) + offset_frames) % pat_frames;
+            let src = if z.params.reverse {
+                (zv.end as f64 - 1.0) - rel as f64 * ratio
+            } else {
+                zv.offset as f64 + rel as f64 * ratio
+            };
+            if src < zv.offset as f64 || src >= zv.end as f64 {
+                continue;
+            }
+            let i = src as usize;
+            let frac = (src - i as f64) as f32;
+            let a = zv.frames[i];
+            let b = zv.frames[(i + 1).min(zv.end - 1)];
+            let mut l = a[0] + (b[0] - a[0]) * frac;
+            let mut r = a[1] + (b[1] - a[1]) * frac;
+            let mut env = z.fade_gain(src) as f32;
+            let from_start = f - clip_start;
+            if from_start < EDGE {
+                env *= from_start as f32 / EDGE as f32;
+            }
+            let to_end = clip_end - f;
+            if to_end <= EDGE {
+                env *= to_end.saturating_sub(1) as f32 / EDGE as f32;
+            }
+            l *= env * gl;
+            r *= env * gr;
+            let idx = (at + (f - from) as usize) * 2;
+            out[idx] += l;
+            out[idx + 1] += r;
         }
     }
 
@@ -6417,5 +6568,60 @@ mod plugin_tests {
             (blend / dry - 0.75).abs() < 0.01,
             "slot mix blends dry and wet: {blend}"
         );
+    }
+
+    #[test]
+    fn audio_clip_plays_seeks_mid_clip_and_slices_cleanly() {
+        let rate = 48_000u32;
+        // 4 seconds (2 bars at 120 BPM): first half left=+0.5, second half right=-0.5.
+        let half = (rate * 2) as usize;
+        let mut frames = vec![[0.5f32, 0.0]; half];
+        frames.extend(vec![[0.0f32, -0.5]; half]);
+        let preset = SamplePreset::from_sample("Track", rate, frames);
+
+        let mut song = Song::default();
+        song.tempo = 120.0;
+        let (inst_id, pat_id, clip_idx) = song.add_audio_clip("Track", preset, 0, 0).unwrap();
+        song.validate().unwrap();
+        assert_eq!(song.pattern(pat_id).unwrap().audio_clip, Some(inst_id));
+
+        // 1. Song mode from bar 1 (frame 0): hears left=+0.5.
+        let mut e = Engine::new(rate);
+        let mut buf = vec![0.0f32; 512 * 2];
+        e.process(&song, pat_id, true, 0, &mut buf, true);
+        let l1 = buf[400 * 2];
+        let r1 = buf[400 * 2 + 1];
+        assert!(l1 > 0.4, "expected left signal at start, got {l1}");
+        assert!(r1.abs() < 0.01, "expected right silent at start, got {r1}");
+
+        // 2. Seeking directly into bar 2 (mid-clip, 2.0 s = 96_000 frames) hears right=-0.5!
+        let mut e_seek = Engine::new(rate);
+        e_seek.process(&song, pat_id, true, half as u64 + 256, &mut buf, true);
+        let l2 = buf[200 * 2];
+        let r2 = buf[200 * 2 + 1];
+        assert!(
+            l2.abs() < 0.01,
+            "expected left silent at mid-clip, got {l2}"
+        );
+        assert!(
+            r2 < -0.4,
+            "expected right signal at mid-clip seek, got {r2}"
+        );
+
+        // 3. Sliced clip (offset = 1 BAR = 2.0 s) starting at bar 1 plays second half!
+        song.clips[clip_idx].offset = BAR;
+        song.clips[clip_idx].length = Some(BAR);
+        let mut e_slice = Engine::new(rate);
+        e_slice.process(&song, pat_id, true, 0, &mut buf, true);
+        let l3 = buf[400 * 2];
+        let r3 = buf[400 * 2 + 1];
+        assert!(l3.abs() < 0.01, "sliced clip skips first half, got {l3}");
+        assert!(r3 < -0.4, "sliced clip plays second half, got {r3}");
+
+        // 4. Removing the channel cleanly removes its audio-clip pattern and clips.
+        song.remove_instrument(inst_id).unwrap();
+        song.validate().unwrap();
+        assert!(song.clips.is_empty());
+        assert!(!song.patterns.iter().any(|p| p.id == pat_id));
     }
 }

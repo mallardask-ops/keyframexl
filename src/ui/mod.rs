@@ -176,6 +176,9 @@ pub struct App {
     /// Where a dropped MIDI clip lands, as drawn last frame: channel rack
     /// rows and piano rolls (screen rect, channel).
     pub(crate) midi_zones: Vec<(egui::Rect, u64)>,
+    /// Playlist grid geometry from last frame for dropping audio clips:
+    /// (visible grid rect, grid_left, grid_top, bar_w, lane_h).
+    pub(crate) playlist_drop: Option<(egui::Rect, f32, f32, f32, f32)>,
     /// The pointer where files were just dropped (X11 asked directly: a drag
     /// from a plugin editor leaves egui's own pointer stale).
     pub(crate) drop_pointer: Option<egui::Pos2>,
@@ -320,6 +323,13 @@ pub struct App {
         u64,
         mpsc::Receiver<Result<keyframexl::sequence::SamplePreset, String>>,
         bool,
+    )>,
+    /// Audio files being decoded in the background to become playlist audio clips:
+    /// (start tick, track, receiver).
+    pub(crate) importing_clips: Vec<(
+        keyframexl::sequence::Tick,
+        u32,
+        mpsc::Receiver<Result<keyframexl::sequence::SamplePreset, String>>,
     )>,
     /// Options (F10): audio, MIDI, plugins, general; and its window.
     pub(crate) settings: crate::settings::Settings,
@@ -1225,6 +1235,7 @@ impl App {
             roll_sel: Vec::new(),
             riff: None,
             midi_zones: Vec::new(),
+            playlist_drop: None,
             drop_pointer: None,
             last_len: None,
             lane_target: roll::LaneTarget::Velocity,
@@ -1297,6 +1308,7 @@ impl App {
             lyric_edit: None,
             lyrics_dialog: None,
             importing: Vec::new(),
+            importing_clips: Vec::new(),
             load_queue: Default::default(),
             flp_slices: Default::default(),
             flp_freeze: None,
@@ -1465,7 +1477,12 @@ impl App {
             .patterns
             .iter()
             .skip(from + 1)
-            .find(|p| p.notes.is_empty() && p.slides.is_empty() && p.automation.is_none())
+            .find(|p| {
+                p.notes.is_empty()
+                    && p.slides.is_empty()
+                    && p.automation.is_none()
+                    && p.audio_clip.is_none()
+            })
             .map(|p| p.id);
         match empty {
             Some(id) => {
@@ -2729,6 +2746,48 @@ impl App {
         for (target, result, quiet) in done {
             self.land_preset(target, result, quiet);
         }
+        let mut done_clips = Vec::new();
+        self.importing_clips
+            .retain(|(start, track, rx)| match rx.try_recv() {
+                Ok(r) => {
+                    done_clips.push((*start, *track, r));
+                    false
+                }
+                Err(mpsc::TryRecvError::Empty) => true,
+                Err(mpsc::TryRecvError::Disconnected) => false,
+            });
+        for (start, track, result) in done_clips {
+            match result {
+                Ok(preset) => {
+                    self.checkpoint();
+                    let name = preset.name.clone();
+                    match self.song.add_audio_clip(&name, preset, start, track) {
+                        Ok((_inst, pat_id, clip_idx)) => {
+                            self.select_pattern(pat_id);
+                            self.clip = Some(clip_idx);
+                            self.set_song_mode(true);
+                            self.publish();
+                            let pos = playlist::song_bar_pos(&self.song.meters, start);
+                            let tr = self.tr();
+                            let msg = crate::i18n::fill(
+                                tr.status_audio_clip_added,
+                                &[
+                                    ("name", &self.pattern().name),
+                                    ("pos", &pos),
+                                    ("track", &(track + 1).to_string()),
+                                ],
+                            );
+                            self.say(Tone::Done, msg);
+                        }
+                        Err(e) => {
+                            self.history.pop();
+                            self.say(Tone::Bad, e);
+                        }
+                    }
+                }
+                Err(e) => self.say(Tone::Bad, e),
+            }
+        }
         while self.importing.len() < 3
             && let Some((id, path, quiet)) = self.load_queue.pop_front()
         {
@@ -3312,8 +3371,23 @@ impl App {
             Some("dwp") => {
                 crate::i18n::fill(tr.drop_dwp_into, &[("target", &self.drop_target_name())])
             }
-            Some("wav" | "flac" | "ogg") => {
-                crate::i18n::fill(tr.drop_sample_into, &[("target", &self.drop_target_name())])
+            Some("wav" | "flac" | "ogg" | "mp3" | "m4a" | "aac" | "aif" | "aiff") => {
+                let hover_pos = ctx.input(|i| i.pointer.latest_pos());
+                let on_playlist = hover_pos
+                    .and_then(|pos| self.playlist_drop.map(|(r, ..)| r.contains(pos)))
+                    .unwrap_or(false)
+                    || matches!(self.focus, Some(Tab::Playlist))
+                    || (self.playlist_drop.is_some()
+                        && !matches!(
+                            self.focus,
+                            Some(Tab::Instrument { id }) | Some(Tab::Roll { instrument: id })
+                                if self.is_sampler(id)
+                        ));
+                if on_playlist {
+                    tr.drop_audio_clip_playlist.to_string()
+                } else {
+                    crate::i18n::fill(tr.drop_sample_into, &[("target", &self.drop_target_name())])
+                }
             }
             Some("kfxl") => tr.drop_open_project.to_string(),
             Some("flp") => tr.drop_import_flp.to_string(),
@@ -3630,8 +3704,9 @@ impl eframe::App for App {
         self.poll_preview();
         self.poll_forge(ctx);
         self.dropped_files(ctx);
-        // Rebuilt as the rack and rolls draw below.
+        // Rebuilt as the rack, rolls and playlist draw below.
         self.midi_zones.clear();
+        self.playlist_drop = None;
         self.tap_keys(ctx);
         self.shortcuts(ctx);
         // The desktop's frame follows the setting, also when it changes.
@@ -3766,6 +3841,7 @@ impl eframe::App for App {
             || plugins_busy
             || self.is_playing()
             || !self.importing.is_empty()
+            || !self.importing_clips.is_empty()
             || self.vocal_job.is_some()
             || self.audio.as_ref().is_some_and(|a| a.vocal.status.busy())
             || !self.load_queue.is_empty()

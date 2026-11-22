@@ -2201,3 +2201,23 @@ fn midi_keys_highlight_on_piano_roll_keyboard_and_clear_on_release() {
     });
     assert_eq!(count_brand_rects(&out_off, g), 0);
 }
+
+#[test]
+fn audio_clip_adds_to_playlist_and_renders_waveform_cleanly() {
+    let mut app = app();
+    let preset =
+        keyframexl::sequence::SamplePreset::from_sample("Song", 48_000, vec![[0.6, -0.4]; 48_000]);
+    let (inst_id, pat_id, clip_idx) = app.song.add_audio_clip("Song", preset, 0, 1).unwrap();
+    app.select_pattern(pat_id);
+    app.clip = Some(clip_idx);
+    app.song.validate().unwrap();
+    assert_eq!(app.song.pattern(pat_id).unwrap().audio_clip, Some(inst_id));
+
+    // Playlist renders the audio clip waveform without panicking and records its drop zone.
+    let ctx = egui::Context::default();
+    crate::theme::setup(&ctx);
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| app.playlist(ui));
+    });
+    assert!(app.playlist_drop.is_some());
+}

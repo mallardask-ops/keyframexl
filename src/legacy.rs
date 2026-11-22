@@ -201,6 +201,7 @@ impl V1Song {
                     notes,
                     slides,
                     automation: None,
+                    audio_clip: None,
                     color: None,
                     loop_range: None,
                     lyrics: Default::default(),

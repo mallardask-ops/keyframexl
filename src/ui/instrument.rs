@@ -8,8 +8,12 @@ use crate::theme as t;
 use eframe::egui::{self, Align2, Rect, Sense, Ui, vec2};
 use keyframexl::sequence::{DRUM_VOICES, InstrumentKind};
 
+/// Audio formats the sampler and playlist audio clips load.
+pub const AUDIO_EXTS: [&str; 8] = ["wav", "flac", "ogg", "mp3", "m4a", "aac", "aif", "aiff"];
 /// Files the sampler loads today: DirectWave presets and audio. Extend here, not with new menu items.
-pub const PRESET_EXTS: [&str; 4] = ["dwp", "wav", "flac", "ogg"];
+pub const PRESET_EXTS: [&str; 9] = [
+    "dwp", "wav", "flac", "ogg", "mp3", "m4a", "aac", "aif", "aiff",
+];
 
 impl App {
     pub(crate) fn add_sampler(&mut self) -> u64 {
@@ -44,6 +48,14 @@ impl App {
             .clicked()
         {
             self.add_sampler();
+            ui.close_menu();
+        }
+        if ui
+            .button(tr.inst_menu_audio_clip)
+            .on_hover_text(tr.inst_menu_audio_clip_tip)
+            .clicked()
+        {
+            self.add_audio_clip_dialog();
             ui.close_menu();
         }
         if ui.button(tr.inst_menu_tide).clicked() {
@@ -215,8 +227,89 @@ impl App {
         }
     }
 
-    /// Files dropped on the window: presets go to the focused sampler (or a new
-    /// one), a project file opens.
+    /// Pick an audio/music file and place it as an audio clip on the playlist.
+    pub(crate) fn add_audio_clip_dialog(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter(self.tr().imp_filter_audio, &AUDIO_EXTS)
+            .pick_file()
+        {
+            let track = self.next_free_audio_track();
+            self.load_audio_clip(path, 0, track);
+        }
+    }
+
+    /// First empty playlist track (or next track after the last occupied one)
+    /// so imported/dropped music tracks stack neatly without overlapping.
+    pub(crate) fn next_free_audio_track(&self) -> u32 {
+        let mut t = 0u32;
+        while t < 999 && self.song.clips.iter().any(|c| c.track == t) {
+            t += 1;
+        }
+        t
+    }
+
+    /// Decode an audio file in the background and place it as an FL-style
+    /// audio clip pattern on the playlist at `(start, track)`.
+    pub(crate) fn load_audio_clip(
+        &mut self,
+        path: std::path::PathBuf,
+        start: keyframexl::sequence::Tick,
+        track: u32,
+    ) {
+        let file = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(crate::import::sample_preset(&path));
+        });
+        self.importing_clips.push((start, track, rx));
+        let msg = fill(self.tr().inst_loading_audio_clip, &[("file", &file)]);
+        self.say(Tone::Wait, msg);
+    }
+
+    /// If an audio file dropped from the OS should become a playlist audio clip,
+    /// return its `(start, track)` on the playlist.
+    fn audio_clip_drop_pos(&self) -> Option<(keyframexl::sequence::Tick, u32)> {
+        if let Some((grid_seen, grid_l, grid_top, bar_w, lane_h)) = self.playlist_drop {
+            if let Some(pos) = self.drop_pointer
+                && grid_seen.contains(pos)
+            {
+                let raw_tick = ((pos.x - grid_l) / bar_w * keyframexl::sequence::BAR as f32).floor()
+                    as keyframexl::sequence::Tick;
+                let start = super::playlist::song_snap(
+                    &self.song.meters,
+                    raw_tick,
+                    self.snap.grid(),
+                    false,
+                    false,
+                )
+                .max(0);
+                let track = ((pos.y - grid_top) / lane_h).floor().clamp(0.0, 999.0) as u32;
+                return Some((start, track));
+            }
+            let pointer_on_channel = self
+                .drop_pointer
+                .is_some_and(|p| self.midi_zones.iter().any(|(r, _)| r.contains(p)));
+            let sampler_focused = matches!(
+                self.focus,
+                Some(Tab::Instrument { id }) | Some(Tab::Roll { instrument: id })
+                    if self.is_sampler(id)
+            );
+            if matches!(self.focus, Some(Tab::Playlist))
+                || (!pointer_on_channel && !sampler_focused)
+            {
+                return Some((0, self.next_free_audio_track()));
+            }
+        }
+        None
+    }
+
+    /// Files dropped on the window: audio files dropped onto the playlist (or
+    /// generically when the playlist is open) become audio clips; presets go to
+    /// the focused sampler (or a new one); a project file opens.
     pub(crate) fn dropped_files(&mut self, ctx: &egui::Context) {
         let files: Vec<std::path::PathBuf> = ctx.input(|i| {
             i.raw
@@ -235,13 +328,19 @@ impl App {
             .and_then(crate::plugins::pointer_in)
             .map(|(x, y)| egui::pos2(x as f32 / ppp, y as f32 / ppp))
             .or_else(|| ctx.input(|i| i.pointer.latest_pos()));
+        let mut clip_drop = self.audio_clip_drop_pos();
         for path in files {
             let ext = path
                 .extension()
                 .and_then(|e| e.to_str())
                 .unwrap_or_default()
                 .to_ascii_lowercase();
-            if PRESET_EXTS.contains(&ext.as_str()) {
+            if AUDIO_EXTS.contains(&ext.as_str())
+                && let Some((start, track)) = clip_drop
+            {
+                self.load_audio_clip(path, start, track);
+                clip_drop = Some((start, (track + 1).min(999)));
+            } else if PRESET_EXTS.contains(&ext.as_str()) {
                 let target = match &self.focus {
                     Some(Tab::Instrument { id }) | Some(Tab::Roll { instrument: id })
                         if self.is_sampler(*id) =>

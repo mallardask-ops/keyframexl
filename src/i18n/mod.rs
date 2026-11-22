@@ -214,7 +214,7 @@ define_strings! {
         hint_riff, hint_settings, hint_empty,
         win_header_menu_tip, win_dock, win_detach_float,
         empty_all_closed, empty_keys_hint, empty_restore_layout,
-        drop_dwp_into, drop_sample_into, drop_open_project, drop_import_flp,
+        drop_dwp_into, drop_sample_into, drop_audio_clip_playlist, drop_open_project, drop_import_flp,
         drop_midi_notes, drop_any_file,
         // Settings
         settings_title, setting_language,
@@ -406,7 +406,8 @@ define_strings! {
         inst_menu_forge, inst_menu_forge_tip, inst_menu_drum_kit, inst_menu_drum_kit_tip,
         inst_kit_core, inst_kit_chip, inst_menu_vocal, inst_menu_vocal_tip,
         inst_menu_more_plugins, inst_menu_drum_voice, inst_no_plugins, inst_deleted,
-        inst_dlg_sampler_filter, inst_loading_into, inst_drop_unsupported, inst_drop_new_sampler,
+        inst_dlg_sampler_filter, inst_loading_into, inst_loading_audio_clip, inst_drop_unsupported, inst_drop_new_sampler,
+        inst_menu_audio_clip, inst_menu_audio_clip_tip, status_audio_clip_added, fb_add_audio_clip, pl_open_audio_channel,
         inst_gone, inst_sub_ch, inst_load_sound_menu, inst_save_ch_preset, inst_load_ch_preset,
         inst_delete_channel, inst_loading_btn, inst_replace_sound, inst_replace_sound_tip,
         inst_roll_btn_tip, inst_ch_name_hint, inst_click_rename, inst_drum_desc,
@@ -633,7 +634,7 @@ define_strings! {
         browser_dismiss_warning, fb_drag_reorder,
         // Unified import dialog (RC2)
         imp_title, imp_choose_file, imp_change_file, imp_browse, imp_destination,
-        imp_dest_flp, imp_dest_bundle, imp_dest_midi, imp_dest_new_sampler,
+        imp_dest_flp, imp_dest_bundle, imp_dest_midi, imp_dest_audio_clip, imp_dest_new_sampler,
         imp_dest_selected_sampler, imp_file_unavailable, imp_supported_hint,
         imp_action, imp_filter_all, imp_filter_audio, imp_filter_project, imp_unsupported_err,
         // Tap tempo window

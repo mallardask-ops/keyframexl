@@ -1449,6 +1449,7 @@ pub fn import_smf(
             notes: vec![],
             slides: vec![],
             automation: None,
+            audio_clip: None,
             color: None,
             loop_range: None,
             lyrics: Default::default(),

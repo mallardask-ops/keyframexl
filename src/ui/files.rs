@@ -14,7 +14,9 @@ use std::sync::{Arc, mpsc};
 
 const ROW_H: f32 = 24.0;
 /// File types the browser shows.
-pub const SHOWN: [&str; 8] = ["wav", "flac", "ogg", "dwp", "kfxl", "flp", "mid", "midi"];
+pub const SHOWN: [&str; 13] = [
+    "wav", "flac", "ogg", "mp3", "m4a", "aac", "aif", "aiff", "dwp", "kfxl", "flp", "mid", "midi",
+];
 
 /// A file dragged out of the browser.
 #[derive(Clone, Debug)]
@@ -159,7 +161,10 @@ pub fn ext(p: &Path) -> String {
 }
 
 pub fn is_audio(p: &Path) -> bool {
-    matches!(ext(p).as_str(), "wav" | "flac" | "ogg")
+    matches!(
+        ext(p).as_str(),
+        "wav" | "flac" | "ogg" | "mp3" | "m4a" | "aac" | "aif" | "aiff"
+    )
 }
 
 /// One folder: subfolders and the files we can use, in `sort` order.
@@ -647,6 +652,10 @@ impl App {
                     ui.close_menu();
                 }
                 super::browser::tag_menu(ui, &key);
+                if !e.dir && is_audio(&e.path) && ui.button(tr.fb_add_audio_clip).clicked() {
+                    action = Some((e.path.clone(), "clip"));
+                    ui.close_menu();
+                }
                 if !e.dir && ui.button(tr.fb_load_selected).clicked() {
                     action = Some((e.path.clone(), "load"));
                     ui.close_menu();
@@ -674,6 +683,10 @@ impl App {
         if let Some((path, what)) = action {
             match what {
                 "preview" => self.toggle_preview(path),
+                "clip" => {
+                    let track = self.next_free_audio_track();
+                    self.load_audio_clip(path, 0, track);
+                }
                 "load" => self.load_file(path, false),
                 "new" => self.load_file(path, true),
                 "remove" => {
