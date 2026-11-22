@@ -36,6 +36,8 @@ rsworld-sys = "0.1.0"
 encoding_rs = "0.8"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 ureq = "2"
+libloading = "0.8"
+vst3-host = { version = "0.11.1", path = "vendor/vst3-host", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -48,7 +50,6 @@ eframe = { version = "0.31", default-features = false, features = ["wayland", "x
 # plugin-host / yabridge / Wine children inherit and get killed by SIGXCPU
 # during plugin initialization.
 cpal = { version = "0.18.2", features = ["pipewire"] }
-vst3-host = { version = "0.11.1", path = "vendor/vst3-host", default-features = false }
 xcb = { version = "1", features = ["shape", "xtest"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -56,9 +57,13 @@ cpal = { version = "0.18.2", features = ["asio"] }
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Globalization",
+    "Win32_Graphics_Gdi",
     "Win32_System_Console",
+    "Win32_System_LibraryLoader",
     "Win32_System_Registry",
     "Win32_System_Threading",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }

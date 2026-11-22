@@ -2051,6 +2051,7 @@ dependencies = [
  "image",
  "lewton",
  "libc",
+ "libloading 0.8.9",
  "midir",
  "midly",
  "mp3lame-sys",

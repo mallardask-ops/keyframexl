@@ -85,8 +85,8 @@ pub struct PluginState {
     pub list: Vec<Scanned>,
     pub scan_rx: Option<mpsc::Receiver<ScanMsg>>,
     pub scan_note: Option<String>,
-    /// Our main window on X11: plugin editors go inside it. None on Wayland.
-    pub parent: Option<u32>,
+    /// Our main native window (X11 on Linux, Win32 HWND on Windows): plugin editors go inside it.
+    pub parent: Option<crate::plugins::NativeWindow>,
     /// Editor size in pixels as the plugin reports it.
     pub editor_size: HashMap<u64, (i32, i32)>,
     placed: HashMap<u64, EditorPlacement>,
