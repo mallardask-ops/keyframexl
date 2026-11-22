@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod audio;
 #[cfg(target_os = "linux")]
 mod bridge;
@@ -34,49 +36,22 @@ use std::{
     process::{Command, Stdio},
 };
 
-/// Started from the desktop (no terminal): what the program and its plugin
-/// processes print (errors, yabridge and Wine messages) goes to
-/// ~/.local/state/keyframexl/keyframexl.log, the previous run's to .log.1.
-#[cfg(unix)]
-fn log_to_file() {
-    use std::os::fd::AsRawFd;
-    // SAFETY: isatty only reads the descriptor's state.
-    if unsafe { libc::isatty(2) } == 1 {
-        return;
-    }
-    let Some(dir) = dirs::state_dir()
-        .or_else(|| dirs::home_dir().map(|h| h.join(".local/state")))
-        .map(|d| d.join("keyframexl"))
-    else {
-        return;
-    };
-    if std::fs::create_dir_all(&dir).is_err() {
-        return;
-    }
-    let path = dir.join("keyframexl.log");
-    let _ = std::fs::rename(&path, dir.join("keyframexl.log.1"));
-    let Ok(file) = std::fs::File::create(&path) else {
-        return;
-    };
-    // SAFETY: fd 2 is replaced by a file we keep open for the program's life;
-    // children (plugin processes) inherit it.
-    unsafe { libc::dup2(file.as_raw_fd(), 2) };
-    std::mem::forget(file);
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    eprintln!(
-        "KeyFrameXL {} started (unix time {stamp})",
-        keyframexl::version::display()
-    );
-}
-
-#[cfg(not(unix))]
-fn log_to_file() {}
-
 fn main() -> Result<(), Box<dyn Error>> {
+    platform::prepare_process();
     let args: Vec<String> = env::args().collect();
+    let is_gui_launch = args.len() <= 3
+        && args.get(1).is_none_or(|a| {
+            a == "--demo" || a == "--show" || a.starts_with("--capture-") || is_project_arg(a)
+        })
+        && args.get(2).is_none_or(|a| {
+            a == "--show"
+                || args
+                    .get(1)
+                    .is_some_and(|first| first.starts_with("--capture-"))
+        });
+    if !is_gui_launch {
+        platform::attach_parent_console();
+    }
     match args.get(1).map(String::as_str) {
         // A bridged plugin's own process (started by the program, never by hand).
         Some("plugin-host") => {
@@ -291,19 +266,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 return Err("pw-cat failed".into());
             }
         }
-        _ if args.len() <= 3
-            && args.get(1).is_none_or(|a| {
-                a == "--demo" || a == "--show" || a.starts_with("--capture-") || is_project_arg(a)
-            })
-            && args.get(2).is_none_or(|a| {
-                a == "--show"
-                    || args
-                        .get(1)
-                        .is_some_and(|first| first.starts_with("--capture-"))
-            }) =>
-        {
+        _ if is_gui_launch => {
             if !args.iter().any(|a| a.starts_with("--capture-")) {
-                log_to_file();
+                platform::setup_log_file();
             }
             // Plugin editors (X11, also through yabridge) can only be placed inside
             // an X11 window: unless turned off, run on X11 (XWayland under Wayland).
@@ -357,13 +322,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             use std::io::Write;
             let _ = std::io::stdout().flush();
             let _ = std::io::stderr().flush();
-            #[cfg(unix)]
-            // SAFETY: nothing is left to run; `_exit` only skips atexit handlers.
-            unsafe {
-                libc::_exit(0)
-            };
-            #[cfg(not(unix))]
-            std::process::exit(0);
+            platform::exit_immediately(0);
         }
         _ => eprintln!(
             "Usage: keyframexl [project.kfxl | --demo | render-demo <file.wav> | play-demo]"

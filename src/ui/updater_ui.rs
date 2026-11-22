@@ -448,11 +448,8 @@ impl App {
             self.check_for_updates(ctx);
         }
         if let Some(url) = action_open_url {
-            if let Err(e) = std::process::Command::new("xdg-open").arg(&url).spawn() {
-                self.say(
-                    Tone::Bad,
-                    fill(tr.upd_browser_err, &[("err", &e.to_string())]),
-                );
+            if let Err(e) = crate::platform::open_url(&url) {
+                self.say(Tone::Bad, fill(tr.upd_browser_err, &[("err", &e)]));
             } else {
                 self.say(Tone::Done, tr.upd_opened_page);
             }

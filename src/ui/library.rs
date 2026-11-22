@@ -48,26 +48,19 @@ fn children(dir: &Path) -> Vec<PathBuf> {
     v
 }
 
-/// Look in the usual places: Wine prefixes in home, mounted disks, the music folder.
+/// Look in the usual places: Image-Line install roots (Wine on Linux, Program
+/// Files on Windows), mounted disks, and the music folder.
 pub fn find(home: &Path, mounts: &[PathBuf]) -> Libraries {
+    find_in_roots(&crate::platform::fl_image_line_roots(home), mounts)
+}
+
+/// Scan explicit Image-Line install roots and library mount folders (pure,
+/// platform-independent so unit tests do not depend on host OS folders).
+fn find_in_roots(il_roots: &[PathBuf], mounts: &[PathBuf]) -> Libraries {
     let mut libs = Libraries::default();
     let mut packs: Vec<PathBuf> = Vec::new();
-    // Wine prefixes are hidden folders (.wine, .wine-fl …), so read home directly.
-    let prefixes: Vec<PathBuf> = std::fs::read_dir(home)
-        .map(|rd| {
-            rd.flatten()
-                .map(|e| e.path())
-                .filter(|p| {
-                    p.is_dir()
-                        && p.file_name()
-                            .is_some_and(|n| n.to_string_lossy().starts_with(".wine"))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    for prefix in prefixes {
-        let il = prefix.join("drive_c/Program Files/Image-Line");
-        for fl in children(&il).into_iter().filter(|p| {
+    for il in il_roots {
+        for fl in children(il).into_iter().filter(|p| {
             p.file_name()
                 .is_some_and(|n| n.to_string_lossy().starts_with("FL Studio"))
         }) {
@@ -100,16 +93,9 @@ pub fn find(home: &Path, mounts: &[PathBuf]) -> Libraries {
     libs
 }
 
-/// Mount points worth a look: /mnt/*, /media/$USER/*, /run/media/$USER/*, the music folder.
+/// Mount points / library folders worth a look on this OS.
 pub fn default_mounts(home: &Path) -> Vec<PathBuf> {
-    let user = std::env::var("USER").unwrap_or_default();
-    let mut v = children(Path::new("/mnt"));
-    v.extend(children(&Path::new("/media").join(&user)));
-    v.extend(children(&Path::new("/run/media").join(&user)));
-    v.extend(dirs::audio_dir());
-    v.push(home.join("Music"));
-    v.dedup();
-    v
+    crate::platform::default_mounts(home)
 }
 
 /// What a new project loads from the user's libraries: (channel name,
@@ -229,7 +215,8 @@ mod tests {
         std::fs::create_dir_all(sgm.join("Bass")).unwrap();
         std::fs::write(sgm.join("Bass/Fingered Bass.dwp"), b"x").unwrap();
         std::fs::create_dir_all(disk.path().join("Photos")).unwrap();
-        let libs = find(home.path(), &[disk.path().to_path_buf()]);
+        let il_root = home.path().join(".wine/drive_c/Program Files/Image-Line");
+        let libs = find_in_roots(&[il_root], &[disk.path().to_path_buf()]);
         assert!(
             libs.fl_packs
                 .as_ref()
@@ -250,7 +237,7 @@ mod tests {
             "drums are built in; FL's packs are not borrowed"
         );
         assert_eq!(
-            find(disk.path(), &[]),
+            find_in_roots(&[], &[]),
             Libraries::default(),
             "nothing found, nothing changes"
         );

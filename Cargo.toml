@@ -6,8 +6,7 @@ description = "Native Linux pattern sequencer prototype"
 license = "MIT"
 
 [features]
-# Optional Steinberg ASIO backend on Windows (requires LLVM/Clang; asio-sys fetches
-# the ASIO SDK automatically or reads CPAL_ASIO_DIR).
+# Optional Steinberg ASIO backend (enabled by default on Windows).
 asio = ["cpal/asio"]
 
 [dependencies]
@@ -29,6 +28,7 @@ rtrb = "0.3"
 midly = "0.5"
 flacenc = "0.5"
 vorbis_rs = "0.5"
+mp3lame-sys = "0.2"
 midir = "0.11"
 base64 = "0.22"
 raw-window-handle = "0.6"
@@ -51,8 +51,23 @@ cpal = { version = "0.18.2", features = ["pipewire"] }
 vst3-host = { version = "0.11.1", path = "vendor/vst3-host", default-features = false }
 xcb = { version = "1", features = ["shape", "xtest"] }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+cpal = { version = "0.18.2", features = ["asio"] }
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_System_Console",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
 [build-dependencies]
 cc = "1.2"
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winresource = "0.1"
 
 [dev-dependencies]
 syn = { version = "2", features = ["full", "visit"] }

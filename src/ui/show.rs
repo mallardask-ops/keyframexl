@@ -2608,7 +2608,9 @@ fn encode_stream(
 ) -> Result<String, String> {
     let size_arg = format!("{width}x{height}");
     let fps_arg = fps.to_string();
-    let ffmpeg = Command::new("ffmpeg")
+    let mut cmd = Command::new("ffmpeg");
+    crate::platform::hide_console(&mut cmd);
+    let ffmpeg = cmd
         .args([
             "-y",
             "-loglevel",

@@ -9,6 +9,15 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 See [docs/v0.2.1.md](docs/v0.2.1.md) for the Windows port and 0.2.1 plan.
 
 ### Engine and internals
+- **Static MP3 export (LAME)**: `mp3lame-sys` is now statically compiled into
+  KeyFrameXL on Linux and Windows, so MP3 export works out of the box without
+  installing an external `lame` package or DLL.
+- **Windows desktop & audio layer (W1)**: `src/platform/{linux,windows}.rs`
+  (ShellExecuteW, Windows Registry dark/light theme, `GetUserDefaultLocaleName`,
+  Windows CJK fonts, `%LOCALAPPDATA%` log file, `ExitProcess`, hidden console
+  for `ffmpeg`, embedded `.ico` icon and `windows_subsystem = "windows"`), plus
+  WASAPI & ASIO driver selection with multi-channel / `I32` / `I16` output
+  support.
 - **MIDI export with mix, automation, slides and markers**: `File → Export → MIDI` now writes channel + mixer volume (CC 7) and pan (CC 10), song-mode volume/pan automation clips, piano-roll slides and fine pitch as `PitchBend` (with RPN 0,0 bend sensitivity when over ±2 semitones), per-note pan and Mod X / Mod Y (CC 74 / CC 71), and playlist section markers; melodic tracks skip GM drum channel 10, and MIDI import now also restores volume/pan on split drum channels and recognises RPN 0,0.
 - **Native PipeWire output**: the program is a PipeWire node of its own
   (cpal 0.18), with ALSA as the fallback; the buffer setting is the node's

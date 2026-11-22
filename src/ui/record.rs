@@ -56,11 +56,12 @@ impl Default for Recorder {
 
 /// Open the input device for recording: frames go into the returned ring.
 fn open_input(
+    driver: crate::settings::AudioDriver,
     name: Option<&str>,
     tr: &'static crate::i18n::Strings,
 ) -> Result<(cpal::Stream, rtrb::Consumer<[f32; 2]>, u32, String), String> {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-    let host = crate::audio::host();
+    let host = crate::audio::host_for(driver);
     let named = name.and_then(|want| {
         host.input_devices()
             .ok()?
@@ -242,7 +243,11 @@ impl App {
             }
             drop(taps);
             if self.rec.input {
-                match open_input(self.settings.audio.input.as_deref(), self.tr()) {
+                match open_input(
+                    self.settings.audio.driver,
+                    self.settings.audio.input.as_deref(),
+                    self.tr(),
+                ) {
                     Ok((stream, rx, rate, _)) => {
                         self.rec.input_stream = Some(stream);
                         self.rec.parts.push(TakePart {

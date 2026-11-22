@@ -200,44 +200,81 @@ pub enum TapCmd {
     StopAll,
 }
 
-/// The audio host: PipeWire's own (a node in its graph) when its daemon
-/// runs on Linux, else ALSA; on other platforms, the system default host.
-/// Made once: on PipeWire every query is a round trip.
-pub fn host() -> &'static cpal::Host {
-    static HOST: OnceLock<cpal::Host> = OnceLock::new();
-    HOST.get_or_init(|| {
-        #[cfg(target_os = "linux")]
-        {
+/// The audio host for `driver`: PipeWire (or ALSA fallback) on Linux; WASAPI or
+/// ASIO (falling back to WASAPI) on Windows; the default host elsewhere.
+/// Cached per host because querying PipeWire / ASIO drivers is non-trivial.
+pub fn host_for(driver: crate::settings::AudioDriver) -> &'static cpal::Host {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = driver;
+        static HOST: OnceLock<cpal::Host> = OnceLock::new();
+        HOST.get_or_init(|| {
             if pipewire_daemon_active()
                 && let Ok(h) = cpal::host_from_id(cpal::HostId::PipeWire)
             {
                 return h;
             }
             cpal::host_from_id(cpal::HostId::Alsa).unwrap_or_else(|_| cpal::default_host())
+        })
+    }
+    #[cfg(target_os = "windows")]
+    {
+        static WASAPI: OnceLock<cpal::Host> = OnceLock::new();
+        static ASIO: OnceLock<Option<cpal::Host>> = OnceLock::new();
+        match driver {
+            crate::settings::AudioDriver::Asio => {
+                if let Some(h) = ASIO
+                    .get_or_init(|| cpal::host_from_id(cpal::HostId::Asio).ok())
+                    .as_ref()
+                {
+                    return h;
+                }
+                WASAPI.get_or_init(|| {
+                    cpal::host_from_id(cpal::HostId::Wasapi)
+                        .unwrap_or_else(|_| cpal::default_host())
+                })
+            }
+            crate::settings::AudioDriver::Wasapi => WASAPI.get_or_init(|| {
+                cpal::host_from_id(cpal::HostId::Wasapi).unwrap_or_else(|_| cpal::default_host())
+            }),
         }
-        #[cfg(not(target_os = "linux"))]
-        {
-            cpal::default_host()
-        }
-    })
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        let _ = driver;
+        static HOST: OnceLock<cpal::Host> = OnceLock::new();
+        HOST.get_or_init(cpal::default_host)
+    }
 }
 
-/// The sound server the host reaches.
-pub fn host_backend() -> AudioBackend {
+/// Default audio host (PipeWire/ALSA on Linux, WASAPI on Windows).
+#[allow(dead_code)]
+pub fn host() -> &'static cpal::Host {
+    host_for(crate::settings::AudioDriver::default())
+}
+
+/// The sound server a host reaches.
+pub fn backend_of(host: &cpal::Host) -> AudioBackend {
     #[allow(unreachable_patterns)]
-    match host().id() {
+    match host.id() {
         #[cfg(target_os = "linux")]
         cpal::HostId::PipeWire => AudioBackend::PipeWire,
         #[cfg(target_os = "linux")]
         cpal::HostId::Alsa => AudioBackend::Alsa,
         #[cfg(target_os = "windows")]
         cpal::HostId::Wasapi => AudioBackend::Wasapi,
-        #[cfg(all(target_os = "windows", feature = "asio"))]
+        #[cfg(target_os = "windows")]
         cpal::HostId::Asio => AudioBackend::Asio,
         #[cfg(target_os = "macos")]
         cpal::HostId::CoreAudio => AudioBackend::CoreAudio,
         _ => AudioBackend::System,
     }
+}
+
+/// The sound server the default host reaches.
+#[allow(dead_code)]
+pub fn host_backend() -> AudioBackend {
+    backend_of(host())
 }
 
 /// A device's name as people know it (and as the settings store it).
@@ -309,20 +346,74 @@ fn names(devs: impl Iterator<Item = cpal::Device>) -> Vec<String> {
     v
 }
 
-/// Output devices the host offers (names as `AudioSettings::output` stores them).
-pub fn output_devices() -> Vec<String> {
-    host()
+/// Output devices the host offers for `driver` (names as `AudioSettings::output` stores them).
+pub fn output_devices_for(driver: crate::settings::AudioDriver) -> Vec<String> {
+    host_for(driver)
         .output_devices()
-        .map(|ds| names(ds))
+        .map(names)
         .unwrap_or_default()
 }
 
-/// Input devices (microphones, line in).
-pub fn input_devices() -> Vec<String> {
-    host()
+/// Input devices (microphones, line in) for `driver`.
+pub fn input_devices_for(driver: crate::settings::AudioDriver) -> Vec<String> {
+    host_for(driver)
         .input_devices()
-        .map(|ds| names(ds))
+        .map(names)
         .unwrap_or_default()
+}
+
+/// Output devices the default host offers.
+#[allow(dead_code)]
+pub fn output_devices() -> Vec<String> {
+    output_devices_for(crate::settings::AudioDriver::default())
+}
+
+/// Input devices (microphones, line in) on the default host.
+#[allow(dead_code)]
+pub fn input_devices() -> Vec<String> {
+    input_devices_for(crate::settings::AudioDriver::default())
+}
+
+/// Output stream wrapper for non-f32 sample formats (`I32`, `I16`) or multi-channel
+/// hardware outputs (`channels > 2`, common on ASIO interfaces): renders stereo
+/// `f32` into a preallocated scratch buffer (zero audio-thread allocation) and
+/// writes L/R to channels 0 and 1, silencing any extra outputs.
+fn build_converted_output_stream<T>(
+    device: &cpal::Device,
+    config: cpal::StreamConfig,
+    channels: usize,
+    mut render_stereo: impl FnMut(&mut [f32]) + Send + 'static,
+    on_err: impl FnMut(cpal::Error) + Send + 'static,
+) -> Result<cpal::Stream, String>
+where
+    T: cpal::SizedSample + cpal::FromSample<f32>,
+{
+    let mut stereo = vec![0.0f32; 8192 * 2];
+    device
+        .build_output_stream(
+            config,
+            move |data: &mut [T], _| {
+                let mut offset = 0;
+                while offset < data.len() {
+                    let rem_frames = (data.len() - offset) / channels;
+                    let frames = rem_frames.min(8192);
+                    let dst = &mut data[offset..offset + frames * channels];
+                    let buf = &mut stereo[..frames * 2];
+                    render_stereo(buf);
+                    for (frame_out, lr) in dst.chunks_exact_mut(channels).zip(buf.chunks_exact(2)) {
+                        frame_out[0] = T::from_sample(lr[0].clamp(-1.0, 1.0));
+                        frame_out[1] = T::from_sample(lr[1].clamp(-1.0, 1.0));
+                        for extra in &mut frame_out[2..] {
+                            *extra = T::EQUILIBRIUM;
+                        }
+                    }
+                    offset += frames * channels;
+                }
+            },
+            on_err,
+            None,
+        )
+        .map_err(|e| e.to_string())
 }
 
 /// Buffer frames to request: the user's pick when the device allows it, else
@@ -763,7 +854,8 @@ impl Audio {
     /// Open the output from `cfg`; an unknown device falls back to the default,
     /// an unsupported rate to 48 kHz.
     pub fn open(song: Song, cfg: &crate::settings::AudioSettings) -> Result<Self, String> {
-        let host = host();
+        let host = host_for(cfg.driver);
+        let backend = backend_of(host);
         let outputs: Vec<cpal::Device> = host
             .output_devices()
             .map(|d| d.collect())
@@ -773,13 +865,41 @@ impl Audio {
         let wanted = cfg
             .output
             .as_ref()
-            .filter(|n| !(host_backend() == AudioBackend::PipeWire && alsa_era_name(n)));
+            .filter(|n| !(backend == AudioBackend::PipeWire && alsa_era_name(n)));
         let named_at = wanted.and_then(|want| {
             outputs
                 .iter()
                 .position(|d| device_name(d).as_ref() == Some(want))
         });
-        // The first candidate that offers stereo f32 wins: the named one, then the default.
+        // Pick the best config at `rate`: prefer stereo (2 ch) over multi-channel
+        // (>= 2 ch, common on ASIO interfaces), and F32 > I32 > I16.
+        let pick_best = |configs: &[cpal::SupportedStreamConfigRange],
+                         rate: u32|
+         -> Option<cpal::SupportedStreamConfigRange> {
+            let fmt_rank = |f: cpal::SampleFormat| match f {
+                cpal::SampleFormat::F32 => Some(0u8),
+                cpal::SampleFormat::I32 => Some(1),
+                cpal::SampleFormat::I16 => Some(2),
+                _ => None,
+            };
+            configs
+                .iter()
+                .filter(|c| {
+                    fmt_rank(c.sample_format()).is_some()
+                        && c.channels() >= 2
+                        && c.min_sample_rate() <= rate
+                        && c.max_sample_rate() >= rate
+                })
+                .min_by_key(|c| {
+                    (
+                        u8::from(c.channels() != 2),
+                        fmt_rank(c.sample_format()).unwrap_or(9),
+                        c.channels(),
+                    )
+                })
+                .cloned()
+        };
+        // The first candidate that offers stereo-compatible output wins: named, then default.
         let mut chosen = None;
         let mut last_err = String::from("No default audio output");
         for pick_kind in pick_order(named_at.is_some()) {
@@ -792,20 +912,16 @@ impl Audio {
             match device.supported_output_configs() {
                 Ok(c) => {
                     let configs: Vec<_> = c.collect();
-                    let stereo = |rate: u32| {
-                        configs.iter().any(|c| {
-                            c.sample_format() == cpal::SampleFormat::F32
-                                && c.channels() == 2
-                                && c.min_sample_rate() <= rate
-                                && c.max_sample_rate() >= rate
-                        })
-                    };
-                    if stereo(cfg.rate) || stereo(48_000) {
+                    if pick_best(&configs, cfg.rate).is_some()
+                        || pick_best(&configs, 48_000).is_some()
+                    {
                         chosen = Some((device, name, configs, pick_kind != Pick::Named));
                         break;
                     }
-                    last_err =
-                        format!("{name} does not offer stereo f32 at {} or 48 kHz", cfg.rate);
+                    last_err = format!(
+                        "{name} does not offer stereo output at {} or 48 kHz",
+                        cfg.rate
+                    );
                 }
                 Err(e) => last_err = format!("{name}: {e}"),
             }
@@ -814,33 +930,26 @@ impl Audio {
             return Err(last_err);
         };
         let fallback = wanted.is_some() && substitute;
-        let pick = |rate: u32| {
-            configs.iter().find(|c| {
-                c.sample_format() == cpal::SampleFormat::F32
-                    && c.channels() == 2
-                    && c.min_sample_rate() <= rate
-                    && c.max_sample_rate() >= rate
-            })
-        };
-        let (range, rate) = match pick(cfg.rate) {
+        let (range, rate) = match pick_best(&configs, cfg.rate) {
             Some(c) => (c, cfg.rate),
             None => (
-                pick(48_000).ok_or_else(|| {
+                pick_best(&configs, 48_000).ok_or_else(|| {
                     format!(
-                        "{device_name} does not offer stereo f32 at {} or 48 kHz",
+                        "{device_name} does not offer stereo output at {} or 48 kHz",
                         cfg.rate
                     )
                 })?,
                 48_000,
             ),
         };
+        let sample_format = range.sample_format();
         let buffer = pick_buffer(cfg.buffer, range.buffer_size());
         let mut config = range.with_sample_rate(rate).config();
+        let channels = config.channels as usize;
         if let Some(b) = buffer {
             config.buffer_size = cpal::BufferSize::Fixed(b);
         }
         // On PipeWire a fixed buffer is the node's latency (its quantum).
-        let backend = host_backend();
         let running = Running {
             device: device_name,
             rate,
@@ -934,192 +1043,204 @@ impl Audio {
         let xruns = Arc::new(AtomicU32::new(0));
         let xrun_count = xruns.clone();
         let rt_told = AtomicBool::new(false);
-        let stream = device
-            .build_output_stream(
-                config,
-                move |data: &mut [f32], _| {
-                    tick.fetch_add(1, Ordering::Relaxed);
-                    keyframexl::denormal::flush_to_zero();
-                    // Newest song first, even while stopped, so Play starts current.
-                    fx_rx.drain(&mut engine);
-                    while let Ok(cmd) = tap_cmd_rx.pop() {
-                        match cmd {
-                            TapCmd::Add(tap) => {
-                                if let Err(tap) = engine.add_tap(tap) {
-                                    let _ = tap_back_tx.push(tap);
-                                }
-                            }
-                            TapCmd::StopAll => {
-                                while let Some(tap) = engine.take_tap() {
-                                    let _ = tap_back_tx.push(tap);
-                                }
-                            }
+        let mut render_stereo = move |data: &mut [f32]| {
+            tick.fetch_add(1, Ordering::Relaxed);
+            keyframexl::denormal::flush_to_zero();
+            // Newest song first, even while stopped, so Play starts current.
+            fx_rx.drain(&mut engine);
+            while let Ok(cmd) = tap_cmd_rx.pop() {
+                match cmd {
+                    TapCmd::Add(tap) => {
+                        if let Err(tap) = engine.add_tap(tap) {
+                            let _ = tap_back_tx.push(tap);
                         }
                     }
-                    while let Ok(cmd) = plug_rx.pop() {
-                        let back = match cmd {
-                            PluginCmd::Add(inst) => engine.adopt_plugin(inst),
-                            PluginCmd::Remove(id) => engine.take_plugin(id),
-                        };
-                        if let Some(old) = back {
-                            let _ = plug_back_tx.push(old);
+                    TapCmd::StopAll => {
+                        while let Some(tap) = engine.take_tap() {
+                            let _ = tap_back_tx.push(tap);
                         }
                     }
-                    if rx.update_with_changed().1 {
-                        engine.clear_live_params();
+                }
+            }
+            while let Ok(cmd) = plug_rx.pop() {
+                let back = match cmd {
+                    PluginCmd::Add(inst) => engine.adopt_plugin(inst),
+                    PluginCmd::Remove(id) => engine.take_plugin(id),
+                };
+                if let Some(old) = back {
+                    let _ = plug_back_tx.push(old);
+                }
+            }
+            if rx.update_with_changed().1 {
+                engine.clear_live_params();
+            }
+            param_rx.drain(rx.generation(), &mut engine);
+            let snap = rx.current();
+            while let Ok(cmd) = live_rx.pop() {
+                match cmd {
+                    LiveCmd::On {
+                        id,
+                        inst,
+                        pitch,
+                        velocity,
+                        ch,
+                        lyric,
+                    } => {
+                        // Same thread as the note: the syllable travels with its own key press.
+                        engine.live_lyric.store(lyric, Ordering::Relaxed);
+                        engine.live_on_ch(snap, id, inst, pitch, velocity, ch);
                     }
-                    param_rx.drain(rx.generation(), &mut engine);
-                    let snap = rx.current();
-                    while let Ok(cmd) = live_rx.pop() {
-                        match cmd {
-                            LiveCmd::On {
-                                id,
-                                inst,
-                                pitch,
-                                velocity,
-                                ch,
-                                lyric,
-                            } => {
-                                // Same thread as the note: the syllable travels with its own key press.
-                                engine.live_lyric.store(lyric, Ordering::Relaxed);
-                                engine.live_on_ch(snap, id, inst, pitch, velocity, ch);
-                            }
-                            LiveCmd::Off { id } => engine.live_off(id),
-                            LiveCmd::Midi { inst, bytes } => engine.live_midi(snap, inst, bytes),
-                        }
-                    }
-                    if hold.load(Ordering::Relaxed) {
-                        // An export is rendering with the plugin instances.
-                        data.fill(0.0);
-                        engine.push_silence_scopes(data.len() / 2);
-                        return;
-                    }
-                    if !p.load(Ordering::Relaxed) {
-                        if was_playing {
-                            // Transport stopped: the song's notes stop at once.
-                            engine.stop();
-                            was_playing = false;
-                        }
-                        if engine.busy() {
-                            engine.process_live(snap, data);
-                        } else {
-                            data.fill(0.0);
-                            engine.push_silence_scopes(data.len() / 2);
-                        }
-                        // Count-in: a bar of clicks, then Play by itself.
-                        let left = cin.load(Ordering::Relaxed);
-                        if left > 0 {
-                            let len = cin_len.load(Ordering::Relaxed).max(left);
-                            let frames = (data.len() / 2) as u64;
-                            let n = frames.min(left) as usize;
-                            count_metro.run(
-                                &mut data[..n * 2],
-                                len - left,
-                                None,
-                                snap.tempo,
-                                None,
-                                &[],
-                                rate,
-                            );
-                            let rest = left - n as u64;
-                            // A Stop or Play from the UI meanwhile wins.
-                            if cin
-                                .compare_exchange(left, rest, Ordering::Relaxed, Ordering::Relaxed)
-                                .is_ok()
-                                && rest == 0
-                            {
-                                p.store(true, Ordering::Relaxed);
-                            }
-                        }
-                        ld.store(0, Ordering::Relaxed);
-                        vc.store(engine.active_voices() as u32, Ordering::Relaxed);
-                        publish_activity(&engine, snap);
-                        player.run(&pv, &pd, data, rate);
-                        return;
-                    }
-                    was_playing = true;
-                    let started = std::time::Instant::now();
-                    let at = pos.load(Ordering::Relaxed);
-                    engine.process(
-                        snap,
-                        i.load(Ordering::Relaxed),
-                        m.load(Ordering::Relaxed),
-                        at,
-                        data,
-                        true,
+                    LiveCmd::Off { id } => engine.live_off(id),
+                    LiveCmd::Midi { inst, bytes } => engine.live_midi(snap, inst, bytes),
+                }
+            }
+            if hold.load(Ordering::Relaxed) {
+                // An export is rendering with the plugin instances.
+                data.fill(0.0);
+                engine.push_silence_scopes(data.len() / 2);
+                return;
+            }
+            if !p.load(Ordering::Relaxed) {
+                if was_playing {
+                    // Transport stopped: the song's notes stop at once.
+                    engine.stop();
+                    was_playing = false;
+                }
+                if engine.busy() {
+                    engine.process_live(snap, data);
+                } else {
+                    data.fill(0.0);
+                    engine.push_silence_scopes(data.len() / 2);
+                }
+                // Count-in: a bar of clicks, then Play by itself.
+                let left = cin.load(Ordering::Relaxed);
+                if left > 0 {
+                    let len = cin_len.load(Ordering::Relaxed).max(left);
+                    let frames = (data.len() / 2) as u64;
+                    let n = frames.min(left) as usize;
+                    count_metro.run(
+                        &mut data[..n * 2],
+                        len - left,
+                        None,
+                        snap.tempo,
+                        None,
+                        &[],
+                        rate,
                     );
-                    if metro_on.load(Ordering::Relaxed) {
-                        let (from, wrap) = engine.block_timeline();
-                        let table = engine.tempo_table();
-                        delayed(data, &mut clicks, &mut click_pdc, engine.latency(), |out| {
-                            metro.run(out, from, wrap, snap.tempo, table, &snap.meters, rate)
-                        });
+                    let rest = left - n as u64;
+                    // A Stop or Play from the UI meanwhile wins.
+                    if cin
+                        .compare_exchange(left, rest, Ordering::Relaxed, Ordering::Relaxed)
+                        .is_ok()
+                        && rest == 0
+                    {
+                        p.store(true, Ordering::Relaxed);
                     }
-                    // Monotonic transport clock for MIDI takes: the engine
-                    // wraps `next` every loop, but recording needs the absolute
-                    // position so the pattern grows past one loop instead of
-                    // wrapping every pass into bar 1. A UI seek (Stop rewinds
-                    // to 0) still wins if it happened meanwhile.
-                    let _ = pos.compare_exchange(
-                        at,
-                        at + (data.len() / 2) as u64,
-                        Ordering::Relaxed,
-                        Ordering::Relaxed,
-                    );
-                    player.run(&pv, &pd, data, rate);
-                    let budget = (data.len() / 2) as f64 / rate as f64;
-                    let used = started.elapsed().as_secs_f64() / budget;
-                    if used > 1.0 {
-                        callback_overruns.fetch_add(1, Ordering::Relaxed);
+                }
+                ld.store(0, Ordering::Relaxed);
+                vc.store(engine.active_voices() as u32, Ordering::Relaxed);
+                publish_activity(&engine, snap);
+                player.run(&pv, &pd, data, rate);
+                return;
+            }
+            was_playing = true;
+            let started = std::time::Instant::now();
+            let at = pos.load(Ordering::Relaxed);
+            engine.process(
+                snap,
+                i.load(Ordering::Relaxed),
+                m.load(Ordering::Relaxed),
+                at,
+                data,
+                true,
+            );
+            if metro_on.load(Ordering::Relaxed) {
+                let (from, wrap) = engine.block_timeline();
+                let table = engine.tempo_table();
+                delayed(data, &mut clicks, &mut click_pdc, engine.latency(), |out| {
+                    metro.run(out, from, wrap, snap.tempo, table, &snap.meters, rate)
+                });
+            }
+            // Monotonic transport clock for MIDI takes: the engine
+            // wraps `next` every loop, but recording needs the absolute
+            // position so the pattern grows past one loop instead of
+            // wrapping every pass into bar 1. A UI seek (Stop rewinds
+            // to 0) still wins if it happened meanwhile.
+            let _ = pos.compare_exchange(
+                at,
+                at + (data.len() / 2) as u64,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            );
+            player.run(&pv, &pd, data, rate);
+            let budget = (data.len() / 2) as f64 / rate as f64;
+            let used = started.elapsed().as_secs_f64() / budget;
+            if used > 1.0 {
+                callback_overruns.fetch_add(1, Ordering::Relaxed);
+            }
+            // Smooth so the number is readable.
+            let prev = ld.load(Ordering::Relaxed) as f64;
+            ld.store((prev * 0.9 + used * 1000.0 * 0.1) as u32, Ordering::Relaxed);
+            vc.store(engine.active_voices() as u32, Ordering::Relaxed);
+            publish_activity(&engine, snap);
+            for (slot, v) in pk.iter().zip(engine.peaks()) {
+                // Hold the loudest until the UI reads and clears it.
+                let old = f32::from_bits(slot.load(Ordering::Relaxed));
+                if *v > old {
+                    slot.store(v.to_bits(), Ordering::Relaxed);
+                }
+            }
+            for (slot, v) in gr.iter().zip(engine.reductions()) {
+                if *v > f32::from_bits(slot.load(Ordering::Relaxed)) {
+                    slot.store(v.to_bits(), Ordering::Relaxed);
+                }
+            }
+        };
+        let on_err = move |err: cpal::Error| {
+            use cpal::ErrorKind as K;
+            match err.kind() {
+                // The stream keeps running: a late block, the default
+                // output rerouted, no realtime priority.
+                K::Xrun => {
+                    xrun_count.fetch_add(1, Ordering::Relaxed);
+                }
+                K::DeviceChanged => {}
+                K::RealtimeDenied => {
+                    if !rt_told.swap(true, Ordering::Relaxed) {
+                        eprintln!("Audio: no realtime priority for the audio thread ({err})");
                     }
-                    // Smooth so the number is readable.
-                    let prev = ld.load(Ordering::Relaxed) as f64;
-                    ld.store((prev * 0.9 + used * 1000.0 * 0.1) as u32, Ordering::Relaxed);
-                    vc.store(engine.active_voices() as u32, Ordering::Relaxed);
-                    publish_activity(&engine, snap);
-                    for (slot, v) in pk.iter().zip(engine.peaks()) {
-                        // Hold the loudest until the UI reads and clears it.
-                        let old = f32::from_bits(slot.load(Ordering::Relaxed));
-                        if *v > old {
-                            slot.store(v.to_bits(), Ordering::Relaxed);
+                }
+                // Once: a broken stream may report on every poll.
+                _ => {
+                    if !fail.swap(true, Ordering::Relaxed) {
+                        eprintln!("Audio error: {err}");
+                        if let Ok(mut slot) = err_slot.lock() {
+                            *slot = Some(err.to_string());
                         }
                     }
-                    for (slot, v) in gr.iter().zip(engine.reductions()) {
-                        if *v > f32::from_bits(slot.load(Ordering::Relaxed)) {
-                            slot.store(v.to_bits(), Ordering::Relaxed);
-                        }
-                    }
-                },
-                move |err: cpal::Error| {
-                    use cpal::ErrorKind as K;
-                    match err.kind() {
-                        // The stream keeps running: a late block, the default
-                        // output rerouted, no realtime priority.
-                        K::Xrun => {
-                            xrun_count.fetch_add(1, Ordering::Relaxed);
-                        }
-                        K::DeviceChanged => {}
-                        K::RealtimeDenied => {
-                            if !rt_told.swap(true, Ordering::Relaxed) {
-                                eprintln!(
-                                    "Audio: no realtime priority for the audio thread ({err})"
-                                );
-                            }
-                        }
-                        // Once: a broken stream may report on every poll.
-                        _ => {
-                            if !fail.swap(true, Ordering::Relaxed) {
-                                eprintln!("Audio error: {err}");
-                                if let Ok(mut slot) = err_slot.lock() {
-                                    *slot = Some(err.to_string());
-                                }
-                            }
-                        }
-                    }
-                },
-                None,
-            )
-            .map_err(|e| e.to_string())?;
+                }
+            }
+        };
+        let stream = match (sample_format, channels) {
+            (cpal::SampleFormat::F32, 2) => device
+                .build_output_stream(
+                    config,
+                    move |data: &mut [f32], _| render_stereo(data),
+                    on_err,
+                    None,
+                )
+                .map_err(|e| e.to_string())?,
+            (cpal::SampleFormat::F32, ch) => {
+                build_converted_output_stream::<f32>(&device, config, ch, render_stereo, on_err)?
+            }
+            (cpal::SampleFormat::I32, ch) => {
+                build_converted_output_stream::<i32>(&device, config, ch, render_stereo, on_err)?
+            }
+            (cpal::SampleFormat::I16, ch) => {
+                build_converted_output_stream::<i16>(&device, config, ch, render_stereo, on_err)?
+            }
+            (fmt, _) => return Err(format!("Unsupported output sample format: {fmt:?}")),
+        };
         stream.play().map_err(|e| e.to_string())?;
         Ok(Self {
             running,

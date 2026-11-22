@@ -2352,6 +2352,8 @@ pub const UK: Strings = Strings {
     set_apply_note: "Зміни застосовуються й зберігаються одразу.",
     set_all_notes_off: "Усі ноти вимкнено.",
     set_card_output: "вихід",
+    set_driver: "Драйвер",
+    set_driver_hint: "WASAPI для звичайного відтворення; ASIO для аудіоінтерфейсів із низькою затримкою.",
     set_device: "Пристрій",
     set_system_default: "Системний типовий",
     set_sample_rate: "Частота дискретизації",

@@ -858,7 +858,7 @@ impl App {
                 tag_menu(ui, &fav_key);
                 if ui.button(tr.browser_open_folder).clicked() {
                     if let Some(parent) = path.parent() {
-                        let _ = std::process::Command::new("xdg-open").arg(parent).spawn();
+                        let _ = crate::platform::open_path(parent);
                     }
                     ui.close_menu();
                 }
@@ -899,7 +899,7 @@ impl App {
             tag_menu(ui, &fav_key);
             if ui.button(tr.browser_open_folder).clicked() {
                 if let Some(parent) = path.parent() {
-                    let _ = std::process::Command::new("xdg-open").arg(parent).spawn();
+                    let _ = crate::platform::open_path(parent);
                 }
                 ui.close_menu();
             }
