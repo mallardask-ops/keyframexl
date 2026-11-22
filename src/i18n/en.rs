@@ -126,7 +126,8 @@ pub const EN: Strings = Strings {
     about_audio_buf: "Audio: {rate} Hz · buffer {buf}",
     about_audio_default: "Audio: {rate} Hz · buffer default",
     about_version: "Version {ver}",
-    about_desc: "Pattern-based music sequencer for Linux.",
+    about_desc: "Pattern-based music sequencer for Linux and Windows.",
+    about_asio_notice: "ASIO is a trademark and software of Steinberg Media Technologies GmbH.",
     rename_pattern_title: "Rename pattern",
 
     // Manual chrome
@@ -182,7 +183,7 @@ pub const EN: Strings = Strings {
     deck_cpu_voices: "cpu {load}%   voices {voices}",
     deck_cpu_voices_hint: "Audio thread load and sounding voices",
     deck_no_audio: "no audio",
-    deck_no_audio_hint: "No audio output: check PipeWire, then restart",
+    deck_no_audio_hint: "No audio output: check audio settings (F10), then restart",
     deck_overloads_tip: "Audio overloads: {count} since start. Click to reset.",
     deck_scope_tip: "Master oscilloscope · click for spectrum, right-click for mode",
     deck_spectrum_tip: "Master spectrum · click for oscilloscope, right-click for mode",
@@ -250,7 +251,7 @@ pub const EN: Strings = Strings {
     theme_system: "System",
 
     // Shell status messages, hints, empty dock & drop overlay
-    status_no_audio_init: "No audio output: {err}. Check PipeWire, then restart.",
+    status_no_audio_init: "No audio output: {err}. Check Options → Audio settings (F10).",
     status_wine_conflict: "Another Wine ({name}) holds the Wine prefix, so Windows plugins cannot start. Settings → Plugins → Stop it.",
     status_undone: "Undone. Ctrl+Shift+Z redoes.",
     status_redone: "Redone",

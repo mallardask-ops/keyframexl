@@ -157,6 +157,31 @@ pub fn fl_image_line_roots(home: &Path) -> Vec<PathBuf> {
     }
 }
 
+/// Active FL Studio installation directory (e.g. `FL Studio 2025`), if installed.
+pub fn fl_install_dir() -> Option<PathBuf> {
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    {
+        imp::fl_install_dir()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        None
+    }
+}
+
+/// FL Studio user data folder (`Documents/Image-Line`), native on Windows or
+/// inside the Wine prefix on Linux.
+pub fn fl_user_data_dir() -> Option<PathBuf> {
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    {
+        imp::fl_user_data_dir()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        None
+    }
+}
+
 /// Default folders scanned for `.dwp` sound libraries on this OS.
 pub fn default_mounts(home: &Path) -> Vec<PathBuf> {
     #[cfg(any(target_os = "linux", target_os = "windows"))]

@@ -14,7 +14,7 @@
 
 Environment variables:
 
-- `KFXL_X11=0` runs on pure Wayland (plugin editors open in their own
+- `KFXL_X11=0` runs on pure Wayland on Linux (plugin editors open in their own
   windows).
 - `KFXL_NO_BRIDGE=1` loads every plugin inside the program.
 - `KFXL_LANG=en|uk` sets the interface language for this run.
@@ -23,12 +23,21 @@ Environment variables:
 
 ## Where files are
 
-- Log: `~/.local/state/keyframexl/keyframexl.log` (the previous run is
-  `keyframexl.log.1`). Attach it to a bug report.
-- Settings and recent projects: `~/.config/keyframexl/`.
-- Autosave and voicebanks: `~/.local/share/keyframexl/`.
-- Vocal analysis cache: `~/.cache/keyframexl/vocal`.
-- Your presets, Forge sounds and recordings: `~/Music/KeyFrameXL/`.
+- **Log** (attach to a bug report; previous run is `keyframexl.log.1`):
+  - Linux: `~/.local/state/keyframexl/keyframexl.log`
+  - Windows: `%LOCALAPPDATA%\keyframexl\keyframexl.log`
+- **Settings and recent projects:**
+  - Linux: `~/.config/keyframexl/`
+  - Windows: `%APPDATA%\keyframexl\`
+- **Autosave and voicebanks:**
+  - Linux: `~/.local/share/keyframexl/`
+  - Windows: `%LOCALAPPDATA%\keyframexl\`
+- **Plugin and vocal cache:**
+  - Linux: `~/.cache/keyframexl/`
+  - Windows: `%LOCALAPPDATA%\keyframexl\`
+- **Your presets, Forge sounds and recordings:**
+  - Linux: `~/Music/KeyFrameXL/`
+  - Windows: `%USERPROFILE%\Music\KeyFrameXL\`
 
 ## Problems
 

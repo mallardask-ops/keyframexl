@@ -141,6 +141,23 @@ pub fn fl_image_line_roots(home: &Path) -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
+pub fn fl_install_dir() -> Option<PathBuf> {
+    crate::fl_link::find_fl().and_then(|exe| exe.parent().map(Path::to_path_buf))
+}
+
+pub fn fl_user_data_dir() -> Option<PathBuf> {
+    let prefix = std::env::var_os("WINEPREFIX")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".wine"));
+    let user = std::env::var("USER").unwrap_or_default();
+    Some(
+        prefix
+            .join("drive_c/users")
+            .join(user)
+            .join("Documents/Image-Line"),
+    )
+}
+
 /// Mount points worth a look: `/mnt/*`, `/media/$USER/*`, `/run/media/$USER/*`, Music.
 pub fn default_mounts(home: &Path) -> Vec<PathBuf> {
     let user = std::env::var("USER").unwrap_or_default();

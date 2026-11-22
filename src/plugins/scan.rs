@@ -47,6 +47,176 @@ impl Scanned {
     }
 }
 
+/// Extract the cross-OS filename stem (handling both `/` and `\`) and optional
+/// CLAP `#<id>` suffix from a plugin path saved on Linux or Windows.
+fn plugin_path_key(raw: &str) -> (String, Option<String>) {
+    let (file_part, clap_id) = match raw.find(".clap#").or_else(|| {
+        let lower = raw.to_ascii_lowercase();
+        lower.find(".clap#")
+    }) {
+        Some(idx) => {
+            let split = idx + ".clap".len();
+            (&raw[..split], Some(raw[split + 1..].to_string()))
+        }
+        None => (raw, None),
+    };
+    let trimmed = file_part.trim_end_matches(['/', '\\']);
+    let base = trimmed.rsplit(['/', '\\']).next().unwrap_or(trimmed);
+    let stem = match base.rsplit_once('.') {
+        Some((s, ext))
+            if ext.eq_ignore_ascii_case("vst3")
+                || ext.eq_ignore_ascii_case("clap")
+                || ext.eq_ignore_ascii_case("so")
+                || ext.eq_ignore_ascii_case("dll") =>
+        {
+            s
+        }
+        _ => base,
+    };
+    (stem.to_ascii_lowercase(), clap_id)
+}
+
+fn format_of_raw_path(raw: &str) -> &'static str {
+    let lower = raw.to_ascii_lowercase();
+    if lower.contains(".clap#") || lower.ends_with(".clap") {
+        "clap"
+    } else if lower.ends_with(".so") || lower.ends_with(".dll") {
+        "vst2"
+    } else {
+        "vst3"
+    }
+}
+
+/// Resolve a saved `PluginRef` to a loadable path on this computer.
+///
+/// 1. If the stored path (or separator-normalized path) already exists on disk,
+///    or is a special FL link/native marker, use it as-is.
+/// 2. Otherwise match against usable `scanned` plugins of the same format:
+///    first by CLAP sub-plugin ID (`#<id>`), then by cross-OS bundle/library
+///    stem (`.dll` ↔ `.so`, `.vst3`, `.clap`), and finally by case-insensitive
+///    plugin name (preferring a matching vendor when multiple candidates exist).
+/// 3. If nothing matches, return the original path so the UI reports it missing.
+pub fn resolve_plugin_path(pref: &keyframexl::sequence::PluginRef, scanned: &[Scanned]) -> PathBuf {
+    let raw = pref.path.trim();
+    if raw.is_empty() {
+        return PathBuf::new();
+    }
+    let direct = PathBuf::from(raw);
+    if crate::fl_link::is_link(&direct) || crate::fl_native::slot(raw).is_some() {
+        return direct;
+    }
+    if crate::clap::split_path(&direct).0.exists() {
+        return direct;
+    }
+    // Try normalizing path separators for cross-OS relative paths.
+    let normalized = if cfg!(target_os = "windows") {
+        raw.replace('/', "\\")
+    } else {
+        raw.replace('\\', "/")
+    };
+    if normalized != raw {
+        let norm_path = PathBuf::from(&normalized);
+        if crate::clap::split_path(&norm_path).0.exists() {
+            return norm_path;
+        }
+    }
+
+    let want_fmt = if pref.format.is_empty() {
+        format_of_raw_path(raw)
+    } else {
+        pref.format.as_str()
+    };
+    let (want_stem, want_clap_id) = plugin_path_key(raw);
+
+    let candidates: Vec<&Scanned> = scanned
+        .iter()
+        .filter(|s| s.usable() && format_of(&s.path).eq_ignore_ascii_case(want_fmt))
+        .collect();
+
+    let pick_best = |matches: Vec<&Scanned>| -> Option<PathBuf> {
+        if matches.is_empty() {
+            return None;
+        }
+        if matches.len() == 1 {
+            return Some(matches[0].path.clone());
+        }
+        // Prefer exact vendor + name match, then vendor match, then name match.
+        let by_both = matches.iter().find(|s| {
+            !pref.vendor.is_empty()
+                && s.vendor.eq_ignore_ascii_case(&pref.vendor)
+                && !pref.name.is_empty()
+                && s.name.eq_ignore_ascii_case(&pref.name)
+        });
+        let by_vendor = matches
+            .iter()
+            .find(|s| !pref.vendor.is_empty() && s.vendor.eq_ignore_ascii_case(&pref.vendor));
+        let by_name = matches
+            .iter()
+            .find(|s| !pref.name.is_empty() && s.name.eq_ignore_ascii_case(&pref.name));
+        by_both
+            .or(by_vendor)
+            .or(by_name)
+            .or(matches.first())
+            .map(|s| s.path.clone())
+    };
+
+    // Tier 1: CLAP unique plugin ID (`...foo.clap#<id>`).
+    if let Some(want_id) = want_clap_id.as_deref() {
+        let exact_id: Vec<&Scanned> = candidates
+            .iter()
+            .copied()
+            .filter(|s| {
+                let (_, cid) = plugin_path_key(&s.path.to_string_lossy());
+                cid.as_deref() == Some(want_id)
+            })
+            .collect();
+        if let Some(found) = pick_best(exact_id) {
+            return found;
+        }
+        let ci_id: Vec<&Scanned> = candidates
+            .iter()
+            .copied()
+            .filter(|s| {
+                let (_, cid) = plugin_path_key(&s.path.to_string_lossy());
+                cid.as_deref()
+                    .is_some_and(|id| id.eq_ignore_ascii_case(want_id))
+            })
+            .collect();
+        if let Some(found) = pick_best(ci_id) {
+            return found;
+        }
+    }
+
+    // Tier 2: bundle / library stem + format (handles Linux .so <-> Windows .dll).
+    if !want_stem.is_empty() {
+        let stem_matches: Vec<&Scanned> = candidates
+            .iter()
+            .copied()
+            .filter(|s| {
+                let (stem, _) = plugin_path_key(&s.path.to_string_lossy());
+                stem == want_stem
+            })
+            .collect();
+        if let Some(found) = pick_best(stem_matches) {
+            return found;
+        }
+    }
+
+    // Tier 3: plugin display name + format (preferring vendor match).
+    if !pref.name.is_empty() {
+        let name_matches: Vec<&Scanned> = candidates
+            .iter()
+            .copied()
+            .filter(|s| s.name.eq_ignore_ascii_case(&pref.name))
+            .collect();
+        if let Some(found) = pick_best(name_matches) {
+            return found;
+        }
+    }
+
+    direct
+}
+
 /// Standard VST3 folders for the current OS plus `VST3_PATH` and the user's extra folders.
 pub fn search_dirs(extra: &[PathBuf]) -> Vec<PathBuf> {
     let mut v = Vec::new();
@@ -869,5 +1039,139 @@ mod tests {
                     .any(|p| p.to_string_lossy().to_ascii_lowercase().contains("vst"))
             );
         }
+    }
+
+    #[test]
+    fn resolve_plugin_path_matches_across_linux_and_windows() {
+        let dir = tempfile::tempdir().unwrap();
+        let existing = dir.path().join("Local.vst3");
+        std::fs::write(&existing, b"vst3").unwrap();
+
+        let scanned = vec![
+            Scanned {
+                path: PathBuf::from(r"C:\Program Files\Common Files\VST3\Vital.vst3"),
+                name: "Vital".into(),
+                vendor: "Vital Audio".into(),
+                category: "Instrument".into(),
+                instrument: true,
+                gui: true,
+                status: Status::Ok,
+                stamp: 1,
+                bridged: false,
+            },
+            Scanned {
+                path: PathBuf::from(
+                    r"C:\Program Files\Common Files\CLAP\Surge XT.clap#org.surge-synth-team.surge-xt",
+                ),
+                name: "Surge XT".into(),
+                vendor: "Surge Synth Team".into(),
+                category: "Instrument".into(),
+                instrument: true,
+                gui: true,
+                status: Status::Ok,
+                stamp: 1,
+                bridged: false,
+            },
+            Scanned {
+                path: PathBuf::from(r"C:\Program Files\Steinberg\VstPlugins\SSDSampler5.dll"),
+                name: "SSD5".into(),
+                vendor: "Steven Slate".into(),
+                category: "Instrument".into(),
+                instrument: true,
+                gui: true,
+                status: Status::Ok,
+                stamp: 1,
+                bridged: false,
+            },
+            Scanned {
+                path: PathBuf::from("/usr/lib/vst3/AcmeComp.vst3"),
+                name: "Compressor".into(),
+                vendor: "Acme".into(),
+                category: "Fx".into(),
+                instrument: false,
+                gui: true,
+                status: Status::Ok,
+                stamp: 1,
+                bridged: false,
+            },
+            Scanned {
+                path: PathBuf::from("/usr/lib/vst3/BetaComp.vst3"),
+                name: "Compressor".into(),
+                vendor: "Beta".into(),
+                category: "Fx".into(),
+                instrument: false,
+                gui: true,
+                status: Status::Ok,
+                stamp: 1,
+                bridged: false,
+            },
+        ];
+
+        let mk =
+            |format: &str, path: &str, name: &str, vendor: &str| keyframexl::sequence::PluginRef {
+                id: 1,
+                format: format.into(),
+                path: path.into(),
+                name: name.into(),
+                vendor: vendor.into(),
+                state: String::new(),
+                outs: vec![],
+            };
+
+        // 1. Existing path wins directly.
+        let p_local = mk("vst3", &existing.to_string_lossy(), "Local", "Acme");
+        assert_eq!(resolve_plugin_path(&p_local, &scanned), existing);
+
+        // 2. Linux VST3 path resolves to Windows VST3 by stem.
+        let p_vst3 = mk(
+            "vst3",
+            "/home/user/.vst3/Vital.vst3",
+            "Vital",
+            "Vital Audio",
+        );
+        assert_eq!(
+            resolve_plugin_path(&p_vst3, &scanned),
+            PathBuf::from(r"C:\Program Files\Common Files\VST3\Vital.vst3")
+        );
+
+        // 3. Linux CLAP sub-plugin path resolves to Windows CLAP by #id even if filename differs.
+        let p_clap = mk(
+            "clap",
+            "/home/user/.clap/SurgeXT-Linux.clap#org.surge-synth-team.surge-xt",
+            "Surge XT",
+            "Surge Synth Team",
+        );
+        assert_eq!(
+            resolve_plugin_path(&p_clap, &scanned),
+            PathBuf::from(
+                r"C:\Program Files\Common Files\CLAP\Surge XT.clap#org.surge-synth-team.surge-xt"
+            )
+        );
+
+        // 4. Linux VST2 .so resolves to Windows VST2 .dll by stem.
+        let p_vst2 = mk(
+            "vst2",
+            "/home/user/.vst/SSDSampler5.so",
+            "SSD5",
+            "Steven Slate",
+        );
+        assert_eq!(
+            resolve_plugin_path(&p_vst2, &scanned),
+            PathBuf::from(r"C:\Program Files\Steinberg\VstPlugins\SSDSampler5.dll")
+        );
+
+        // 5. Name fallback disambiguates by vendor when stems differ.
+        let p_vendor = mk("vst3", r"C:\VST3\DifferentFile.vst3", "Compressor", "Beta");
+        assert_eq!(
+            resolve_plugin_path(&p_vendor, &scanned),
+            PathBuf::from("/usr/lib/vst3/BetaComp.vst3")
+        );
+
+        // 6. Unknown plugin preserves its original path so the UI can report it missing.
+        let p_missing = mk("vst3", "/home/user/.vst3/Unknown.vst3", "Unknown", "None");
+        assert_eq!(
+            resolve_plugin_path(&p_missing, &scanned),
+            PathBuf::from("/home/user/.vst3/Unknown.vst3")
+        );
     }
 }

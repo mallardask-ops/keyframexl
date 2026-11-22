@@ -25,7 +25,8 @@ use std::path::Path;
 
 pub use host::{HostHandle, ParamRow, Reply, Req, start_host};
 pub use scan::{
-    Scanned, Status, clap_dirs, load_cache, probe_main, rescan_one, scan, search_dirs, vst2_dirs,
+    Scanned, Status, clap_dirs, load_cache, probe_main, rescan_one, resolve_plugin_path, scan,
+    search_dirs, vst2_dirs,
 };
 #[allow(unused_imports)]
 pub use wine::{

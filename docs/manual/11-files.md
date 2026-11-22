@@ -23,7 +23,7 @@ opens on another computer. *File → Import → Import bundle…* unpacks one.
 - **Source**: the song, the current pattern, or the playlist time
   selection.
 - **Formats**: WAV (16-bit, 24-bit, 32-bit float), FLAC (16 or 24-bit) and
-  MP3 (128, 192 or 320 kbps; needs the `lame` package). Several formats
+  MP3 (128, 192 or 320 kbps, built-in LAME encoder). Several formats
   can be written in one pass.
 - **Tail**: *Leave remainder* lets reverbs and releases ring out after the
   end (up to 30 s); *Cut remainder* ends at the last bar; *Wrap remainder*
@@ -42,14 +42,15 @@ reads one.
 **General**. General holds the theme (dark, light, or the desktop's
 choice; also in *View → Theme*), the language (English or Ukrainian), the
 Welcome screen, the interface size, autosave, *Ask on close*, the window
-system (system title bar, X11 window), what a new project loads
+system (system title bar, and X11 window on Linux), what a new project loads
 (*Starter sounds*), and updates.
 
 ## Updates
 
 *Help → Check for updates…* looks for a new version on GitHub. If there is
-one, it shows the release notes, downloads the archive, checks its
-SHA-256, installs it in place of the running program and restarts.
+one, it shows the release notes, downloads the archive (`.tar.gz` on Linux,
+`.zip` on Windows), checks its SHA-256, installs it in place of the running
+program and restarts.
 
 *Settings → General → Nightly builds* follows the nightly prerelease made
 for every change; switch it off to get only stable versions. *Check

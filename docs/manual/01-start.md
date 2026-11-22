@@ -1,7 +1,7 @@
 # Getting started
 
-KeyFrameXL is a pattern-based music sequencer for Linux. You build short
-**patterns** (a drum loop, a bass line), arrange them on the **playlist**
+KeyFrameXL is a pattern-based music sequencer for Linux and Windows. You build
+short **patterns** (a drum loop, a bass line), arrange them on the **playlist**
 into a song, and mix the channels on the **mixer**. Every editor is a
 window you can dock, stack or float.
 
@@ -10,17 +10,30 @@ offline. The same pages are in the repository under `docs/manual/`.
 
 ## Install
 
+### Linux
+
 1. Download `keyframexl-linux-x86_64.tar.gz` from the GitHub releases page.
 2. Unpack it and run `./install.sh`. The program goes to `~/.local/bin`,
    the launcher and icons to `~/.local/share`. Set `PREFIX` to install
    somewhere else.
 3. Start *KeyFrameXL* from the application menu, or run `keyframexl`.
 
-After that the program updates itself (see *Files, export and updates*).
-
 You need 64-bit Linux, OpenGL, and PipeWire or ALSA for sound. The program
 runs through X11 (XWayland on a Wayland desktop) so plugin windows can be
 embedded; `KFXL_X11=0` runs it on pure Wayland without plugin embedding.
+
+### Windows
+
+1. Download `keyframexl-windows-x86_64-setup.exe` from the GitHub releases
+   page and run it (installs to `%LOCALAPPDATA%\Programs\KeyFrameXL` without
+   administrator rights, adds a Start Menu shortcut and `.kfxl` association).
+   Or unpack the portable `keyframexl-windows-x86_64.zip` anywhere and run
+   `keyframexl.exe`.
+2. You need 64-bit Windows 10/11 and OpenGL drivers; sound works via WASAPI
+   out of the box or ASIO with an audio interface.
+
+On both platforms, the program updates itself after installation (see
+*Projects, export and updates*).
 
 ## The screen
 

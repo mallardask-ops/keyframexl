@@ -2498,14 +2498,14 @@ impl App {
     }
 
     /// Sampler channels of an imported FL project and the sample each had,
-    /// found on this computer (FL's paths point into the Wine prefix).
+    /// found on this computer (natively on Windows, or inside the Wine prefix on Linux).
     fn flp_samples(&self, report: &keyframexl::flp::FlpReport) -> Vec<(u64, std::path::PathBuf)> {
         let prefix = std::env::var_os("WINEPREFIX")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".wine"));
-        let install =
-            crate::fl_link::find_fl().and_then(|exe| exe.parent().map(|d| d.to_path_buf()));
-        let packs = install.as_ref().map(|d| d.join("Data/Patches"));
+        let install = crate::platform::fl_install_dir();
+        let user_docs = crate::platform::fl_user_data_dir();
+        let packs = install.as_ref().map(|d| d.join("Data").join("Patches"));
         report
             .channels
             .iter()
@@ -2516,20 +2516,18 @@ impl App {
                         id,
                         keyframexl::flp::resolve_path(s, &prefix, install.as_deref())?,
                     )),
-                    // DirectWave programs: FL's own packs, then the user's folder.
-                    (None, Some(d)) => {
-                        let docs = prefix
-                            .join("drive_c/users")
-                            .join(std::env::var("USER").unwrap_or_default())
-                            .join("Documents/Image-Line");
-                        Some((
-                            id,
-                            packs
-                                .as_deref()
-                                .and_then(|p| keyframexl::flp::find_file(p, d))
-                                .or_else(|| keyframexl::flp::find_file(&docs, d))?,
-                        ))
-                    }
+                    // DirectWave programs: FL's own packs, then the user's Image-Line folder.
+                    (None, Some(d)) => Some((
+                        id,
+                        packs
+                            .as_deref()
+                            .and_then(|p| keyframexl::flp::find_file(p, d))
+                            .or_else(|| {
+                                user_docs
+                                    .as_deref()
+                                    .and_then(|docs| keyframexl::flp::find_file(docs, d))
+                            })?,
+                    )),
                     _ => None,
                 }
             })

@@ -339,15 +339,15 @@ pub fn import_bundle(zip_path: &Path, extract_dir: &Path) -> Result<ImportedBund
     let mut song = project_io::parse(&bytes)?;
 
     // Point bundled references at the extracted files; missing ones keep
-    // their original path.
+    // their original path. Normalize cross-OS separators (`\` <-> `/`) so a
+    // bundle created on Windows or Linux unpacks cleanly on the other OS.
     let mut restored_irs = 0;
     for track in &mut song.mixer {
         for slot in &mut track.fx {
             let Some(ir) = &slot.ir else { continue };
-            if !ir.starts_with("ir") {
-                continue;
-            }
-            let joined = extract_dir.join(ir);
+            let rel = normalize_rel_bundle_path(&ir.to_string_lossy(), "ir");
+            let Some(rel) = rel else { continue };
+            let joined = extract_dir.join(rel);
             if joined.is_file() {
                 slot.ir = Some(joined);
                 restored_irs += 1;
@@ -356,9 +356,9 @@ pub fn import_bundle(zip_path: &Path, extract_dir: &Path) -> Result<ImportedBund
     }
     for inst in &mut song.instruments {
         if let InstrumentKind::Vocal { voice } = &mut inst.kind
-            && Path::new(&voice.bank).starts_with("voicebanks")
+            && let Some(rel) = normalize_rel_bundle_path(&voice.bank, "voicebanks")
         {
-            let joined = extract_dir.join(&voice.bank);
+            let joined = extract_dir.join(rel);
             if joined.is_dir() {
                 voice.bank = joined.to_string_lossy().into_owned();
             }
@@ -373,6 +373,23 @@ pub fn import_bundle(zip_path: &Path, extract_dir: &Path) -> Result<ImportedBund
         manifest,
         restored_irs,
     })
+}
+
+/// Normalize a relative bundle path (`ir/...` or `voicebanks/...`), accepting
+/// both `/` and `\` separators while rejecting `..` or absolute paths.
+fn normalize_rel_bundle_path(raw: &str, prefix: &str) -> Option<PathBuf> {
+    let parts: Vec<&str> = raw.split(['/', '\\']).filter(|s| !s.is_empty()).collect();
+    if parts.first().copied() != Some(prefix) || parts.len() < 2 {
+        return None;
+    }
+    let mut out = PathBuf::new();
+    for seg in parts {
+        if seg == "." || seg == ".." || seg.contains(':') {
+            return None;
+        }
+        out.push(seg);
+    }
+    Some(out)
 }
 
 /// A stem safe on any filesystem: ASCII letters, digits, `-` and `_`, with
@@ -855,5 +872,27 @@ mod tests {
             b"ir-bytes"
         );
         assert!(project_io::open(&imported.project_path).is_ok());
+    }
+
+    #[test]
+    fn imports_bundle_with_windows_backslash_ir_reference() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut song = Song::default();
+        song.mixer[1]
+            .fx
+            .push(conv_slot(PathBuf::from(r"ir\0_room.wav")));
+        let zip_path = dir.path().join("winref.zip");
+        let mut zip = ZipWriter::new(std::fs::File::create(&zip_path).unwrap());
+        write_entry(&mut zip, "song.kfxl", &project_io::to_bytes(&song).unwrap()).unwrap();
+        write_entry(&mut zip, "ir/0_room.wav", b"win-ir-bytes").unwrap();
+        zip.finish().unwrap();
+
+        let out = tempfile::tempdir().unwrap();
+        let imported = import_bundle(&zip_path, out.path()).unwrap();
+        assert_eq!(imported.restored_irs, 1);
+        assert_eq!(
+            std::fs::read(imported.song.mixer[1].fx[0].ir.as_ref().unwrap()).unwrap(),
+            b"win-ir-bytes"
+        );
     }
 }

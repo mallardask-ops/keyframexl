@@ -247,6 +247,25 @@ impl App {
                         ));
                         self.plugins.list = list;
                         self.plugins.scan_rx = None;
+                        // Retry any failed plugins that now resolve via the fresh scan
+                        // (e.g. a cross-OS .kfxl opened before the first plugin scan finished).
+                        let retry: Vec<u64> = self
+                            .song
+                            .plugin_refs()
+                            .into_iter()
+                            .filter(|r| {
+                                self.plugins
+                                    .live
+                                    .get(&r.id)
+                                    .is_some_and(|l| l.error.is_some())
+                                    && crate::plugins::resolve_plugin_path(r, &self.plugins.list)
+                                        != std::path::Path::new(&r.path)
+                            })
+                            .map(|r| r.id)
+                            .collect();
+                        for id in retry {
+                            self.unload_plugin(id);
+                        }
                     }
                 }
                 if self.plugins.scan_rx.is_none() {
@@ -308,10 +327,11 @@ impl App {
                 {
                     eprintln!("FL link: {e}");
                 }
+                let load_path = crate::plugins::resolve_plugin_path(r, &self.plugins.list);
                 if let Some(h) = &self.plugins.host {
                     h.send(Req::Load {
                         id: r.id,
-                        path: PathBuf::from(&r.path),
+                        path: load_path,
                         state: r.state_bytes(),
                         effect: effects.contains(&r.id),
                     });

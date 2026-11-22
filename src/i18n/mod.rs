@@ -151,7 +151,7 @@ define_strings! {
         // Help menu & dialogs
         help_welcome, help_demo_song, help_shortcuts, help_manual, help_check_updates, help_about,
         shortcuts_filter_hint, shortcuts_full_manual,
-        about_audio_buf, about_audio_default, about_version, about_desc,
+        about_audio_buf, about_audio_default, about_version, about_desc, about_asio_notice,
         rename_pattern_title,
         // Manual chrome
         manual_search_hint, manual_no_match, manual_open_online, manual_open_online_tip,
