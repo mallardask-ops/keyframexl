@@ -17,7 +17,7 @@ use std::sync::{OnceLock, mpsc};
 use windows_sys::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM},
     Graphics::Gdi::{
-        CombineRgn, CreateRectRgn, DeleteObject, RGN_OR, ScreenToClient, SetWindowRgn,
+        CombineRgn, CreateRectRgn, DeleteObject, HRGN, RGN_OR, ScreenToClient, SetWindowRgn,
     },
     System::LibraryLoader::GetModuleHandleW,
     UI::{
