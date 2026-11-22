@@ -405,7 +405,7 @@ pub const UK: Strings = Strings {
     update_ready_restart: "Оновлення встановлено! Перезапустіть KeyFrameXL для запуску нової версії.",
     update_restart_now: "Перезапустити зараз",
     update_restart_save_hint: "Є незбережені зміни — збережіть проєкт перед перезапуском.",
-    update_download_linux: "Завантажити вручну",
+    update_download_manual: "Завантажити вручну",
     update_open_release: "Відкрити сторінку релізу",
     update_skip_version: "Пропустити цю версію",
     update_check_again: "Перевірити ще раз",

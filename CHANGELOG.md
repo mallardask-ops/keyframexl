@@ -9,6 +9,13 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 See [docs/v0.2.1.md](docs/v0.2.1.md) for the Windows port and 0.2.1 plan.
 
 ### Engine and internals
+- **Windows self-updater & packaging (W2)**: `src/updater.rs` now picks the
+  target-OS archive (`keyframexl-windows-x86_64.zip` + `.sha256` on Windows,
+  ignoring `-setup.exe`), extracts `.zip` archives with the `zip` crate, checks
+  PE (`MZ`) magic, replaces the running executable via `keyframexl.old.exe`
+  (cleaned up on next launch), and ships portable `.zip` plus a user-scope Inno
+  Setup installer (`assets/keyframexl.iss`, `.kfxl` association, Start Menu
+  shortcut) in both nightly and stable releases.
 - **Static MP3 export (LAME)**: `mp3lame-sys` is now statically compiled into
   KeyFrameXL on Linux and Windows, so MP3 export works out of the box without
   installing an external `lame` package or DLL.

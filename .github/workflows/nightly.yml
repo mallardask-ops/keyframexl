@@ -26,15 +26,19 @@ env:
   KEEP_NIGHTLIES: "10"
 
 jobs:
-  nightly-linux:
-    name: nightly-linux-x86_64
+  version:
+    name: version
     runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.ver.outputs.skip }}
+      version: ${{ steps.ver.outputs.version }}
+      numeric_version: ${{ steps.ver.outputs.numeric_version }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Version
+      - name: Version & notes
         id: ver
         run: |
           set -euo pipefail
@@ -46,27 +50,56 @@ jobs:
           base=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
           if [[ "$base" == *-nightly* ]]; then
             version="${base}.$(date -u +%Y%m%d%H%M)"
+            core="${base%%-*}"
+            numeric_version="${core}.0"
           else
             IFS=. read -r major minor patch <<< "$base"
-            version="${major}.${minor}.$((patch + 1))-nightly.$(date -u +%Y%m%d%H%M)"
+            next_patch=$((patch + 1))
+            version="${major}.${minor}.${next_patch}-nightly.$(date -u +%Y%m%d%H%M)"
+            numeric_version="${major}.${minor}.${next_patch}.0"
           fi
           prev=$(git tag --sort=-creatordate --merged HEAD | grep -E '^v[0-9]' | head -n1 || true)
           {
             echo "skip=false"
             echo "version=${version}"
-            echo "prev=${prev}"
+            echo "numeric_version=${numeric_version}"
           } >> "$GITHUB_OUTPUT"
-          echo "Nightly ${version} (since ${prev:-start})"
+          echo "Nightly ${version} (numeric ${numeric_version}, since ${prev:-start})"
+
+          range="${prev:+${prev}..}HEAD"
+          {
+            echo "## Nightly ${version}"
+            echo
+            echo "> **Nightly build** from \`main\` at \`$(git rev-parse --short HEAD)\`. It may have rough edges; the in-app updater installs it when *Nightly builds* is on."
+            echo
+            echo "### Changes${prev:+ since \`${prev}\`}"
+            echo
+            git log --no-merges --pretty='- %s (`%h`)' "$range" | head -n 60
+          } > notes.md
+          cat notes.md
+
+      - name: Upload release notes
+        if: steps.ver.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-notes
+          path: notes.md
+
+  nightly-linux:
+    name: nightly-linux-x86_64
+    needs: version
+    if: needs.version.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Install native build packages
-        if: steps.ver.outputs.skip != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libasound2-dev \
             libpipewire-0.3-dev \
             libclang-dev \
-            libdbus-1-dev \
             libxcb1-dev \
             libxcb-xtest0-dev \
             libvorbis-dev \
@@ -76,25 +109,20 @@ jobs:
             libglib2.0-dev
 
       - uses: dtolnay/rust-toolchain@stable
-        if: steps.ver.outputs.skip != 'true'
 
       - uses: Swatinem/rust-cache@v2
-        if: steps.ver.outputs.skip != 'true'
 
       - name: Test
-        if: steps.ver.outputs.skip != 'true'
         run: cargo test --lib && cargo test --bin keyframexl
 
       - name: Build nightly binary
-        if: steps.ver.outputs.skip != 'true'
         env:
-          KFXL_BUILD_VERSION: ${{ steps.ver.outputs.version }}
-          KFXL_VERSION: ${{ steps.ver.outputs.version }}
+          KFXL_BUILD_VERSION: ${{ needs.version.outputs.version }}
+          KFXL_VERSION: ${{ needs.version.outputs.version }}
           KFXL_CHANNEL: nightly
         run: cargo build --release --locked
 
       - name: Package
-        if: steps.ver.outputs.skip != 'true'
         run: |
           set -euo pipefail
           name=keyframexl-linux-x86_64
@@ -102,6 +130,7 @@ jobs:
           mkdir -p "dist/${name}/docs"
           install -m 755 target/release/keyframexl "dist/${name}/keyframexl"
           cp README.md "dist/${name}/README.md"
+          cp LICENSE "dist/${name}/LICENSE"
           cp docs/roadmap.md "dist/${name}/docs/roadmap.md"
           install -m 755 assets/install.sh "dist/${name}/install.sh"
           install -Dm644 assets/keyframexl.desktop "dist/${name}/share/applications/keyframexl.desktop"
@@ -113,47 +142,125 @@ jobs:
           tar -C dist -czf "${name}.tar.gz" "${name}"
           sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256"
 
-      - name: Release notes
-        if: steps.ver.outputs.skip != 'true'
-        run: |
-          set -euo pipefail
-          prev="${{ steps.ver.outputs.prev }}"
-          range="${prev:+${prev}..}HEAD"
-          {
-            echo "## Nightly ${{ steps.ver.outputs.version }}"
-            echo
-            echo "> **Nightly build** from \`main\` at \`$(git rev-parse --short HEAD)\`. It may have rough edges; the in-app updater installs it when *Nightly builds* is on."
-            echo
-            echo "### Changes${prev:+ since \`${prev}\`}"
-            echo
-            git log --no-merges --pretty='- %s (`%h`)' "$range" | head -n 60
-          } > notes.md
-          cat notes.md
-
-      - name: Publish nightly prerelease
-        if: steps.ver.outputs.skip != 'true'
-        uses: softprops/action-gh-release@v2
+      - name: Upload Linux archive
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: v${{ steps.ver.outputs.version }}
-          target_commitish: ${{ github.sha }}
-          name: KeyFrameXL Nightly ${{ steps.ver.outputs.version }}
-          body_path: notes.md
-          prerelease: true
-          make_latest: false
-          files: |
+          name: keyframexl-linux-x86_64
+          path: |
             keyframexl-linux-x86_64.tar.gz
             keyframexl-linux-x86_64.tar.gz.sha256
 
+  nightly-windows:
+    name: nightly-windows-x86_64
+    needs: version
+    if: needs.version.outputs.skip != 'true'
+    runs-on: windows-latest
+    env:
+      LIBCLANG_PATH: C:\Program Files\LLVM\bin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Download Steinberg ASIO SDK
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "asio-sdk"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $zip = Join-Path $env:RUNNER_TEMP "asiosdk.zip"
+          curl.exe -fsSL -L "https://www.steinberg.net/asiosdk" -o $zip
+          tar.exe -xf $zip -C $dir
+          $hdr = Get-ChildItem -Path $dir -Recurse -Filter "asiodrivers.h" | Select-Object -First 1
+          if (-not $hdr) { throw "asiodrivers.h not found in ASIO SDK archive" }
+          $root = $hdr.Directory.Parent.FullName
+          "CPAL_ASIO_DIR=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Test
+        run: cargo test --lib && cargo test --bin keyframexl
+
+      - name: Build nightly binary
+        env:
+          KFXL_BUILD_VERSION: ${{ needs.version.outputs.version }}
+          KFXL_VERSION: ${{ needs.version.outputs.version }}
+          KFXL_CHANNEL: nightly
+        run: cargo build --release --locked
+
+      - name: Package portable zip & Inno Setup installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $name = "keyframexl-windows-x86_64"
+          if (Test-Path dist) { Remove-Item -Recurse -Force dist }
+          New-Item -ItemType Directory -Force -Path "dist\$name\docs" | Out-Null
+          Copy-Item "target\release\keyframexl.exe" "dist\$name\keyframexl.exe"
+          Copy-Item "README.md" "dist\$name\README.md"
+          Copy-Item "LICENSE" "dist\$name\LICENSE"
+          Copy-Item "docs\roadmap.md" "dist\$name\docs\roadmap.md"
+          Compress-Archive -Path "dist\$name" -DestinationPath "$name.zip" -Force
+
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
+          if (-not $iscc) { $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler (ISCC.exe) not found" }
+          & $iscc "/DMyAppVersion=${{ needs.version.outputs.version }}" "/DMyNumericVersion=${{ needs.version.outputs.numeric_version }}" "assets\keyframexl.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+          Move-Item -Force "dist\$name-setup.exe" "$name-setup.exe"
+
+          $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+          foreach ($f in @("$name.zip", "$name-setup.exe")) {
+            $hash = (Get-FileHash -Algorithm SHA256 $f).Hash.ToLowerInvariant()
+            [System.IO.File]::WriteAllText((Join-Path $PWD "$f.sha256"), "$hash  $f`n", $utf8NoBom)
+            Get-Content "$f.sha256"
+          }
+
+      - name: Upload Windows assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: keyframexl-windows-x86_64
+          path: |
+            keyframexl-windows-x86_64.zip
+            keyframexl-windows-x86_64.zip.sha256
+            keyframexl-windows-x86_64-setup.exe
+            keyframexl-windows-x86_64-setup.exe.sha256
+
+  publish:
+    name: publish-nightly
+    needs: [version, nightly-linux, nightly-windows]
+    if: needs.version.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish nightly prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: KeyFrameXL Nightly ${{ needs.version.outputs.version }}
+          body_path: release-assets/notes.md
+          prerelease: true
+          make_latest: false
+          files: |
+            release-assets/keyframexl-linux-x86_64.tar.gz
+            release-assets/keyframexl-linux-x86_64.tar.gz.sha256
+            release-assets/keyframexl-windows-x86_64.zip
+            release-assets/keyframexl-windows-x86_64.zip.sha256
+            release-assets/keyframexl-windows-x86_64-setup.exe
+            release-assets/keyframexl-windows-x86_64-setup.exe.sha256
+
       - name: Prune old nightlies
-        if: steps.ver.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release list --limit 100 --json tagName,createdAt \
+          gh release list --repo "${{ github.repository }}" --limit 100 --json tagName,createdAt \
             -q '[.[] | select(.tagName | test("-nightly\\."))] | sort_by(.createdAt) | reverse | .[].tagName' \
             | tail -n +$((KEEP_NIGHTLIES + 1)) \
             | while read -r tag; do
                 echo "Deleting old nightly ${tag}"
-                gh release delete "$tag" --yes --cleanup-tag
+                gh release delete "$tag" --repo "${{ github.repository }}" --yes --cleanup-tag
               done

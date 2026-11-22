@@ -320,7 +320,7 @@ impl App {
                                         );
                                     });
                                 }
-                                let can_install = target.is_ok() && info.linux_asset_url.is_some();
+                                let can_install = target.is_ok() && info.asset_url.is_some();
                                 ui.horizontal_wrapped(|ui| {
                                     if can_install
                                         && kit::button(
@@ -369,10 +369,10 @@ impl App {
                                     }
                                     if !can_install
                                         && !from_source
-                                        && let Some(asset) = &info.linux_asset_url
+                                        && let Some(asset) = &info.asset_url
                                         && kit::button(
                                             ui,
-                                            tr.update_download_linux,
+                                            tr.update_download_manual,
                                             kit::Kind::Ghost,
                                             true,
                                         )

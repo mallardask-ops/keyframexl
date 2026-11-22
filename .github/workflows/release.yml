@@ -28,7 +28,6 @@ jobs:
             libasound2-dev \
             libpipewire-0.3-dev \
             libclang-dev \
-            libdbus-1-dev \
             libxcb1-dev \
             libxcb-xtest0-dev \
             libvorbis-dev \
@@ -57,6 +56,7 @@ jobs:
           mkdir -p "dist/${name}/docs"
           install -m 755 target/release/keyframexl "dist/${name}/keyframexl"
           cp README.md "dist/${name}/README.md"
+          cp LICENSE "dist/${name}/LICENSE"
           cp docs/roadmap.md "dist/${name}/docs/roadmap.md"
           install -m 755 assets/install.sh "dist/${name}/install.sh"
           install -Dm644 assets/keyframexl.desktop "dist/${name}/share/applications/keyframexl.desktop"
@@ -69,7 +69,7 @@ jobs:
           sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256"
           cat "${name}.tar.gz.sha256"
 
-      - name: Upload workflow artifact
+      - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
           name: keyframexl-linux-x86_64
@@ -77,11 +77,98 @@ jobs:
             keyframexl-linux-x86_64.tar.gz
             keyframexl-linux-x86_64.tar.gz.sha256
 
+  release-windows:
+    name: release-windows-x86_64
+    runs-on: windows-latest
+    env:
+      LIBCLANG_PATH: C:\Program Files\LLVM\bin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Download Steinberg ASIO SDK
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "asio-sdk"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $zip = Join-Path $env:RUNNER_TEMP "asiosdk.zip"
+          curl.exe -fsSL -L "https://www.steinberg.net/asiosdk" -o $zip
+          tar.exe -xf $zip -C $dir
+          $hdr = Get-ChildItem -Path $dir -Recurse -Filter "asiodrivers.h" | Select-Object -First 1
+          if (-not $hdr) { throw "asiodrivers.h not found in ASIO SDK archive" }
+          $root = $hdr.Directory.Parent.FullName
+          "CPAL_ASIO_DIR=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Test
+        run: cargo test --lib && cargo test --bin keyframexl
+
+      - name: Build release binary
+        env:
+          KFXL_CHANNEL: stable
+        run: cargo build --release --locked
+
+      - name: Package portable zip & Inno Setup installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $name = "keyframexl-windows-x86_64"
+          $ver = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          $numVer = (($ver -split '-')[0]) + ".0"
+
+          if (Test-Path dist) { Remove-Item -Recurse -Force dist }
+          New-Item -ItemType Directory -Force -Path "dist\$name\docs" | Out-Null
+          Copy-Item "target\release\keyframexl.exe" "dist\$name\keyframexl.exe"
+          Copy-Item "README.md" "dist\$name\README.md"
+          Copy-Item "LICENSE" "dist\$name\LICENSE"
+          Copy-Item "docs\roadmap.md" "dist\$name\docs\roadmap.md"
+          Compress-Archive -Path "dist\$name" -DestinationPath "$name.zip" -Force
+
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
+          if (-not $iscc) { $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler (ISCC.exe) not found" }
+          & $iscc "/DMyAppVersion=$ver" "/DMyNumericVersion=$numVer" "assets\keyframexl.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+          Move-Item -Force "dist\$name-setup.exe" "$name-setup.exe"
+
+          $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+          foreach ($f in @("$name.zip", "$name-setup.exe")) {
+            $hash = (Get-FileHash -Algorithm SHA256 $f).Hash.ToLowerInvariant()
+            [System.IO.File]::WriteAllText((Join-Path $PWD "$f.sha256"), "$hash  $f`n", $utf8NoBom)
+            Get-Content "$f.sha256"
+          }
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: keyframexl-windows-x86_64
+          path: |
+            keyframexl-windows-x86_64.zip
+            keyframexl-windows-x86_64.zip.sha256
+            keyframexl-windows-x86_64-setup.exe
+            keyframexl-windows-x86_64-setup.exe.sha256
+
+  publish:
+    name: publish-release
+    needs: [release-linux, release-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            keyframexl-linux-x86_64.tar.gz
-            keyframexl-linux-x86_64.tar.gz.sha256
+            release-assets/keyframexl-linux-x86_64.tar.gz
+            release-assets/keyframexl-linux-x86_64.tar.gz.sha256
+            release-assets/keyframexl-windows-x86_64.zip
+            release-assets/keyframexl-windows-x86_64.zip.sha256
+            release-assets/keyframexl-windows-x86_64-setup.exe
+            release-assets/keyframexl-windows-x86_64-setup.exe.sha256
