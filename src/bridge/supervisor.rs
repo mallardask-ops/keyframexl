@@ -2,11 +2,11 @@
 //! block, and watches it. Never called from the audio callback; the proxy only
 //! reads the `crashed` flag this sets.
 
+use super::ipc::{ChildGuard, ControlListener, ControlStream, Endpoint};
 use super::protocol::{Message, VERSION, read_message, write_message};
 use super::shm::Shm;
 use std::{
     io,
-    os::unix::net::{UnixListener, UnixStream},
     process::{Child, Command, Stdio},
     sync::{
         Arc, Mutex,
@@ -16,7 +16,7 @@ use std::{
 };
 
 /// How long a published block may stay unanswered before the child counts as
-/// hung. Wine plugins under load (a sampler streaming a 2 GB library, several
+/// hung. Plugins under load (a sampler streaming a 2 GB library, several
 /// editors opening) can stall a few seconds and recover; silence is better
 /// than closing them.
 pub(crate) const HANG_AFTER: Duration = Duration::from_secs(5);
@@ -34,22 +34,10 @@ pub(crate) struct Supervisor {
     pub shm: Arc<Shm>,
     pub crashed: Arc<AtomicBool>,
     pub fault: Arc<Mutex<Option<Fault>>>,
-    socket: Mutex<UnixStream>,
+    socket: Mutex<ControlStream>,
     stop: Arc<AtomicBool>,
     monitor: Option<std::thread::JoinHandle<()>>,
-    _dir: tempfile::TempDir,
-}
-
-/// Where shared blocks live: /dev/shm (memory) when there is one.
-fn shm_dir() -> io::Result<tempfile::TempDir> {
-    let base = std::path::Path::new("/dev/shm");
-    if base.is_dir() {
-        tempfile::Builder::new()
-            .prefix("kfxl-bridge-")
-            .tempdir_in(base)
-    } else {
-        tempfile::tempdir()
-    }
+    _endpoint: Endpoint,
 }
 
 impl Supervisor {
@@ -63,37 +51,33 @@ impl Supervisor {
         max_events: u32,
         mode: &str,
     ) -> io::Result<Self> {
-        let dir = shm_dir()?;
-        let sock_path = dir.path().join("control.sock");
-        let shm_path = dir.path().join("audio.blk");
-        let shm = Arc::new(Shm::create(&shm_path, max_frames, max_events)?);
-        let listener = UnixListener::bind(&sock_path)?;
-        listener.set_nonblocking(true)?;
+        let endpoint = Endpoint::new(generation)?;
+        let control_addr = endpoint.control_addr();
+        let shm_name = endpoint.shm_name();
+        let shm = Arc::new(Shm::create(&shm_name, max_frames, max_events)?);
+        let mut listener = ControlListener::bind(&control_addr)?;
+        crate::platform::hide_console(&mut command);
         let mut child = command
-            .env("KFXL_BRIDGE_SOCKET", &sock_path)
+            .env("KFXL_BRIDGE_SOCKET", &control_addr)
             .stdin(Stdio::null())
             .spawn()?;
+        let guard = ChildGuard::attach(&child);
         let result = (|| {
             let deadline = Instant::now() + Duration::from_secs(5);
             let mut socket = loop {
-                match listener.accept() {
-                    Ok((socket, _)) => break socket,
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        if child.try_wait()?.is_some() {
-                            return Err(io::Error::other("plugin host exited during startup"));
-                        }
-                        if Instant::now() >= deadline {
-                            return Err(io::Error::new(
-                                io::ErrorKind::TimedOut,
-                                "plugin host did not start",
-                            ));
-                        }
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                    Err(e) => return Err(e),
+                if let Some(socket) = listener.accept_step(Duration::from_millis(5))? {
+                    break socket;
+                }
+                if child.try_wait()?.is_some() {
+                    return Err(io::Error::other("plugin host exited during startup"));
+                }
+                if Instant::now() >= deadline {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "plugin host did not start",
+                    ));
                 }
             };
-            socket.set_nonblocking(false)?;
             socket.set_read_timeout(Some(Duration::from_secs(30)))?;
             socket.set_write_timeout(Some(Duration::from_secs(5)))?;
             write_message(
@@ -118,7 +102,7 @@ impl Supervisor {
                 &mut socket,
                 &Message::Load {
                     mode: mode.into(),
-                    shm: shm_path.display().to_string(),
+                    shm: shm_name,
                 },
             )?;
             match read_message(&mut socket)? {
@@ -143,7 +127,7 @@ impl Supervisor {
                 (crashed.clone(), fault.clone(), stop.clone(), shm.clone());
             std::thread::Builder::new()
                 .name("plugin-bridge-watch".into())
-                .spawn(move || watch(child, shm, crashed, fault, stop))?
+                .spawn(move || watch(child, guard, shm, crashed, fault, stop))?
         };
         Ok(Self {
             shm,
@@ -152,7 +136,7 @@ impl Supervisor {
             socket: Mutex::new(socket),
             stop,
             monitor: Some(monitor),
-            _dir: dir,
+            _endpoint: endpoint,
         })
     }
 }
@@ -160,6 +144,7 @@ impl Supervisor {
 /// Reap the child when it exits; kill it when a block stays unanswered too long.
 fn watch(
     mut child: Child,
+    _guard: ChildGuard,
     shm: Arc<Shm>,
     crashed: Arc<AtomicBool>,
     fault: Arc<Mutex<Option<Fault>>>,
@@ -221,9 +206,9 @@ impl Supervisor {
         write_message(&mut *s, m)
     }
 
-    /// A second handle on the socket for a reader thread (blocking reads).
-    pub fn reader(&self) -> io::Result<UnixStream> {
-        let s = self
+    /// A second handle on the control channel for a reader thread (blocking reads).
+    pub fn reader(&self) -> io::Result<ControlStream> {
+        let mut s = self
             .socket
             .lock()
             .map_err(|_| io::Error::other("bridge socket poisoned"))?

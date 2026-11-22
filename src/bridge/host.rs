@@ -3,14 +3,14 @@
 //! socket; the parent's router looks to the UI exactly like that host thread
 //! (`HostHandle`), with one child per plugin instance.
 
+use super::ipc::ControlStream;
 use super::protocol::{Message, WireReply, read_message, write_message};
-use super::shm::{Shm, futex_wait};
+use super::shm::Shm;
 use super::{BridgeProc, Fault};
 use crate::plugins::{HostHandle, Reply, Req};
 use keyframexl::plugin::{MAX_EVENTS, PluginEvent, Shared, Transport, share};
 use std::{
     collections::HashMap,
-    os::unix::net::UnixStream,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -24,8 +24,8 @@ pub(crate) const MAX_FRAMES: u32 = 8192;
 
 // ------------------------------------------------------------------- child
 
-/// The child's life in `host` mode: plugin host thread + socket + audio loop.
-pub(crate) fn child_host(socket: UnixStream, shm: Shm, rate: u32) -> ! {
+/// The child's life in `host` mode: plugin host thread + control channel + audio loop.
+pub(crate) fn child_host(socket: ControlStream, shm: Shm, rate: u32) -> ! {
     let host = crate::plugins::start_host(rate, None);
     let proc: Arc<Mutex<Option<Shared>>> = Arc::new(Mutex::new(None));
     let done = Arc::new(AtomicBool::new(false));
@@ -80,9 +80,8 @@ pub(crate) fn child_host(socket: UnixStream, shm: Shm, rate: u32) -> ! {
                     Reply::Bye => {
                         let _ = write_message(&mut wr, &Message::Reply(WireReply::Bye));
                         // Plugins are unloaded: leave without the C library's exit
-                        // handlers (yabridge aborts when its statics are torn down).
-                        // SAFETY: nothing is left to run in this process.
-                        unsafe { libc::_exit(0) };
+                        // handlers (yabridge / plugin DLLs can abort during static teardown).
+                        crate::platform::exit_immediately(0);
                     }
                 };
                 if write_message(&mut wr, &Message::Reply(wire)).is_err() {
@@ -106,10 +105,9 @@ fn audio_loop(shm: &Shm, proc: &Mutex<Option<Shared>>, done: &AtomicBool, rate: 
             if done.load(Ordering::Acquire) {
                 // The host thread is unloading; it ends the process with Bye.
                 std::thread::sleep(Duration::from_secs(5));
-                // SAFETY: as above, a last resort if unloading hangs.
-                unsafe { libc::_exit(0) };
+                crate::platform::exit_immediately(0);
             }
-            futex_wait(&h.in_seq, seen, 100);
+            shm.wait_for_block(seen, 100);
             continue;
         }
         let frames = (h.frames.load(Ordering::Relaxed) as usize).min(shm.max_frames());

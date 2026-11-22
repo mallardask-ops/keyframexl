@@ -1,6 +1,6 @@
-//! Non-Linux stubs: permanent Wine-only `fl_link`, `fl_native`, and `flp_freeze`
-//! stubs (on Windows FL Studio VSTi loads natively as a regular plugin), plus
-//! the temporary `bridge` stub until W4 adds the Windows IPC bridge.
+//! Non-Linux stubs for the permanent Wine-only FL Studio helpers (`fl_link`,
+//! `fl_native`, and `flp_freeze`). On Windows FL Studio VSTi loads natively as
+//! a regular plugin.
 
 #![allow(dead_code, unused_variables)]
 
@@ -157,20 +157,5 @@ pub mod flp_freeze {
         _say: &dyn Fn(String),
     ) -> Result<Vec<(u32, PathBuf)>, String> {
         Err("FL freeze via Wine is only available on Linux".into())
-    }
-}
-
-pub mod bridge {
-    use crate::plugins::{self, HostHandle};
-    use std::io;
-
-    pub fn start_bridged_host(rate: u32, repaint: Option<eframe::egui::Context>) -> HostHandle {
-        plugins::start_host(rate, repaint)
-    }
-
-    pub fn child_main() -> io::Result<()> {
-        Err(io::Error::other(
-            "Out-of-process plugin bridge on Windows is scheduled for W4",
-        ))
     }
 }
