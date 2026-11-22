@@ -90,3 +90,20 @@ jobs:
 
       - name: cargo test (bin)
         run: cargo test --bin keyframexl
+
+      - name: Verify Inno Setup script
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
+          if (-not $iscc) { $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup compiler (ISCC.exe) not found" }
+          $dummy = Join-Path $env:RUNNER_TEMP "keyframexl-dummy.exe"
+          [System.IO.File]::WriteAllBytes($dummy, [byte[]](0x4D, 0x5A, 0x90, 0x00))
+          $out = Join-Path $env:RUNNER_TEMP "inno-out"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          & $iscc "/DMyExePath=$dummy" "/DMyOutputDir=$out" "/DMyAppVersion=0.2.1-ci" "/DMyNumericVersion=0.2.1.0" "assets\keyframexl.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+          if (-not (Test-Path (Join-Path $out "keyframexl-windows-x86_64-setup.exe"))) {
+            throw "Expected Inno Setup output exe was not created"
+          }

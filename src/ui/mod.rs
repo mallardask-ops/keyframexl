@@ -669,10 +669,8 @@ impl App {
                     title: "KeyFrameXL v9.9.9".into(),
                     notes: std::fs::read_to_string(file).unwrap_or_default(),
                     html_url: crate::updater::RELEASES_URL.into(),
-                    linux_asset_url: Some(
-                        "https://example.com/keyframexl-linux-x86_64.tar.gz".into(),
-                    ),
-                    linux_sha256_url: None,
+                    asset_url: Some("https://example.com/keyframexl-linux-x86_64.tar.gz".into()),
+                    sha256_url: None,
                     published_at: Some("2026-11-19".into()),
                 });
                 app.updater.install = match stage {

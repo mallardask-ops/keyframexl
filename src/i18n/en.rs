@@ -405,7 +405,7 @@ pub const EN: Strings = Strings {
     update_ready_restart: "Update installed! Restart KeyFrameXL to use the new version.",
     update_restart_now: "Restart now",
     update_restart_save_hint: "You have unsaved changes — save your project before restarting.",
-    update_download_linux: "Download manually",
+    update_download_manual: "Download manually",
     update_open_release: "Open release page",
     update_skip_version: "Skip this version",
     update_check_again: "Check again",

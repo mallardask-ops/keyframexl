@@ -242,7 +242,7 @@ define_strings! {
         // Update checker
         update_title, update_checking, update_up_to_date, update_available, update_install_now,
         update_downloading, update_verifying, update_installing, update_ready_restart,
-        update_restart_now, update_restart_save_hint, update_download_linux, update_open_release,
+        update_restart_now, update_restart_save_hint, update_download_manual, update_open_release,
         update_skip_version, update_check_again, update_later, update_source_build,
         update_copy_command, update_failed, update_nightly, update_nightly_hint,
         // Channel rack

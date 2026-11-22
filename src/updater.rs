@@ -114,8 +114,8 @@ pub struct ReleaseInfo {
     pub title: String,
     pub notes: String,
     pub html_url: String,
-    pub linux_asset_url: Option<String>,
-    pub linux_sha256_url: Option<String>,
+    pub asset_url: Option<String>,
+    pub sha256_url: Option<String>,
     pub published_at: Option<String>,
 }
 
@@ -207,8 +207,54 @@ pub fn is_skipped(skipped: Option<&str>, version: &str) -> bool {
     norm(sk) == norm(version)
 }
 
-/// Pick the most suitable Linux release asset `(name, url)`, ignoring checksums/signatures.
-fn pick_linux_asset(assets: &[serde_json::Value]) -> Option<(String, String)> {
+#[allow(dead_code)] // Each OS constructs only its own variant outside tests.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AssetTarget {
+    Linux,
+    Windows,
+}
+
+impl AssetTarget {
+    const fn current() -> Self {
+        #[cfg(target_os = "windows")]
+        {
+            Self::Windows
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            Self::Linux
+        }
+    }
+
+    const fn binary_name(self) -> &'static str {
+        match self {
+            Self::Linux => "keyframexl",
+            Self::Windows => "keyframexl.exe",
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Linux => "Linux",
+            Self::Windows => "Windows",
+        }
+    }
+}
+
+fn is_metadata_asset(lower: &str) -> bool {
+    lower.ends_with(".sha256")
+        || lower.ends_with(".sha512")
+        || lower.ends_with(".sig")
+        || lower.ends_with(".asc")
+        || lower.ends_with(".txt")
+}
+
+/// Pick the most suitable release asset `(name, url)` for `target`, ignoring checksums/signatures
+/// and (on Windows) standalone installers.
+fn pick_asset_for_target(
+    assets: &[serde_json::Value],
+    target: AssetTarget,
+) -> Option<(String, String)> {
     let mut fallback = None;
     for asset in assets {
         let Some(name) = asset.get("name").and_then(|v| v.as_str()) else {
@@ -218,31 +264,49 @@ fn pick_linux_asset(assets: &[serde_json::Value]) -> Option<(String, String)> {
             continue;
         };
         let lower = name.to_ascii_lowercase();
-        if lower.ends_with(".sha256")
-            || lower.ends_with(".sha512")
-            || lower.ends_with(".sig")
-            || lower.ends_with(".asc")
-            || lower.ends_with(".txt")
-        {
+        if is_metadata_asset(&lower) {
             continue;
         }
-        if lower.ends_with(".appimage") {
-            return Some((name.to_string(), url.to_string()));
-        }
-        if fallback.is_none()
-            && (lower.ends_with(".tar.gz")
-                || lower.ends_with(".tgz")
-                || lower.ends_with(".tar.xz")
-                || lower.contains("linux"))
-        {
-            fallback = Some((name.to_string(), url.to_string()));
+        match target {
+            AssetTarget::Linux => {
+                if lower.ends_with(".appimage") {
+                    return Some((name.to_string(), url.to_string()));
+                }
+                if fallback.is_none()
+                    && (lower.ends_with(".tar.gz")
+                        || lower.ends_with(".tgz")
+                        || lower.ends_with(".tar.xz")
+                        || (lower.contains("linux")
+                            && !lower.ends_with(".zip")
+                            && !lower.ends_with(".exe")
+                            && !lower.ends_with(".msi")))
+                {
+                    fallback = Some((name.to_string(), url.to_string()));
+                }
+            }
+            AssetTarget::Windows => {
+                // Self-updates always extract the portable zip archive, never an installer.
+                if !lower.ends_with(".zip") {
+                    continue;
+                }
+                if lower.contains("windows") || lower.contains("win64") || lower.contains("win32") {
+                    return Some((name.to_string(), url.to_string()));
+                }
+                if fallback.is_none()
+                    && !lower.contains("linux")
+                    && !lower.contains("macos")
+                    && !lower.contains("darwin")
+                {
+                    fallback = Some((name.to_string(), url.to_string()));
+                }
+            }
         }
     }
     fallback
 }
 
 /// Find the companion `.sha256` asset URL for `asset_name`, if published alongside it.
-fn pick_linux_sha256(assets: &[serde_json::Value], asset_name: &str) -> Option<String> {
+fn pick_sha256(assets: &[serde_json::Value], asset_name: &str) -> Option<String> {
     let want = format!("{}.sha256", asset_name.to_ascii_lowercase());
     for asset in assets {
         let Some(name) = asset.get("name").and_then(|v| v.as_str()) else {
@@ -299,6 +363,15 @@ fn evaluate_release(
     current: &Version,
     allow_pre: bool,
 ) -> Result<UpdateOutcome, String> {
+    evaluate_release_for(v, current, allow_pre, AssetTarget::current())
+}
+
+fn evaluate_release_for(
+    v: &serde_json::Value,
+    current: &Version,
+    allow_pre: bool,
+    target: AssetTarget,
+) -> Result<UpdateOutcome, String> {
     if v.get("draft").and_then(|b| b.as_bool()).unwrap_or(false) {
         return Ok(UpdateOutcome::UpToDate { latest: None });
     }
@@ -344,19 +417,19 @@ fn evaluate_release(
         .and_then(|s| s.as_str())
         .map(|s| s.split('T').next().unwrap_or(s).to_string());
     let assets = v.get("assets").and_then(|a| a.as_array());
-    let picked = assets.and_then(|arr| pick_linux_asset(arr));
-    let linux_sha256_url = picked
+    let picked = assets.and_then(|arr| pick_asset_for_target(arr, target));
+    let sha256_url = picked
         .as_ref()
-        .and_then(|(name, _)| assets.and_then(|arr| pick_linux_sha256(arr, name)));
-    let linux_asset_url = picked.map(|(_, url)| url);
+        .and_then(|(name, _)| assets.and_then(|arr| pick_sha256(arr, name)));
+    let asset_url = picked.map(|(_, url)| url);
     Ok(UpdateOutcome::Available(ReleaseInfo {
         version: remote.to_string(),
         tag: tag.to_string(),
         title,
         notes,
         html_url,
-        linux_asset_url,
-        linux_sha256_url,
+        asset_url,
+        sha256_url,
         published_at,
     }))
 }
@@ -390,8 +463,8 @@ pub fn parse_tags_json(body: &str, current: &Version) -> Result<UpdateOutcome, S
             title: format!("KeyFrameXL {ver}"),
             notes: String::new(),
             html_url: format!("https://github.com/{REPO}/releases/tag/{tag}"),
-            linux_asset_url: None,
-            linux_sha256_url: None,
+            asset_url: None,
+            sha256_url: None,
             published_at: None,
         })),
         Some((ver, _)) => Ok(UpdateOutcome::UpToDate {
@@ -511,15 +584,16 @@ impl UpdateChecker {
             .ok();
     }
 
-    /// Download, verify, and atomically install `info`'s Linux release over the running binary.
+    /// Download, verify, and install `info`'s release archive over the running binary.
     pub fn start_install(&mut self, info: &ReleaseInfo, ctx: Option<eframe::egui::Context>) {
         if self.is_installing() {
             return;
         }
-        let Some(asset_url) = info.linux_asset_url.clone() else {
-            self.install = InstallState::Failed(
-                "This release does not include a Linux binary archive.".into(),
-            );
+        let Some(asset_url) = info.asset_url.clone() else {
+            self.install = InstallState::Failed(format!(
+                "This release does not include a {} binary archive.",
+                AssetTarget::current().label()
+            ));
             return;
         };
         let target = match self_update_target() {
@@ -535,7 +609,7 @@ impl UpdateChecker {
                 return;
             }
         };
-        let sha_url = info.linux_sha256_url.clone();
+        let sha_url = info.sha256_url.clone();
         let version = info.version.clone();
         self.install = InstallState::Downloading {
             downloaded: 0,
@@ -671,11 +745,64 @@ pub fn self_update_target() -> Result<std::path::PathBuf, String> {
 }
 
 fn is_cargo_build_path(exe: &std::path::Path) -> bool {
-    let parts: Vec<_> = exe.components().map(|c| c.as_os_str().to_owned()).collect();
+    let parts: Vec<String> = exe
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase())
+        .collect();
     parts.windows(2).any(|w| {
         w[0] == "target"
-            && (w[1] == "debug" || w[1] == "release" || w[1] == "x86_64-unknown-linux-gnu")
+            && matches!(
+                w[1].as_str(),
+                "debug"
+                    | "release"
+                    | "x86_64-unknown-linux-gnu"
+                    | "aarch64-unknown-linux-gnu"
+                    | "x86_64-pc-windows-msvc"
+                    | "x86_64-pc-windows-gnu"
+                    | "aarch64-pc-windows-msvc"
+            )
     })
+}
+
+/// Companion backup path used on Windows when replacing a running executable
+/// (e.g. `keyframexl.exe` → `keyframexl.old.exe`).
+pub(crate) fn old_binary_path(exe: &std::path::Path) -> std::path::PathBuf {
+    let stem = exe
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("keyframexl");
+    let ext = exe.extension().and_then(|s| s.to_str());
+    let name = match ext {
+        Some(ext) if !ext.is_empty() => format!("{stem}.old.{ext}"),
+        _ => format!("{stem}.old"),
+    };
+    exe.with_file_name(name)
+}
+
+/// Remove any `.old.exe` left behind by a previous Windows self-update.
+/// Safe to call unconditionally on startup on every OS.
+pub fn cleanup_old_binary() {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let old = old_binary_path(&exe);
+    if !old.exists() {
+        return;
+    }
+    if std::fs::remove_file(&old).is_err() {
+        // The previous process may still be finishing teardown right after relaunch;
+        // retry briefly on a background thread so startup is never delayed.
+        let _ = std::thread::Builder::new()
+            .name("kfxl-old-cleanup".into())
+            .spawn(move || {
+                for _ in 0..8 {
+                    std::thread::sleep(Duration::from_millis(250));
+                    if !old.exists() || std::fs::remove_file(&old).is_ok() {
+                        break;
+                    }
+                }
+            });
+    }
 }
 
 /// Launch the freshly installed binary with the original arguments.
@@ -729,11 +856,15 @@ fn download_and_install(
     let tmp_dir = tempfile::tempdir_in(exe_dir)
         .or_else(|_| tempfile::tempdir())
         .map_err(|e| format!("Could not create temp directory: {e}"))?;
+    let default_archive = match AssetTarget::current() {
+        AssetTarget::Linux => "keyframexl-update.tar.gz",
+        AssetTarget::Windows => "keyframexl-update.zip",
+    };
     let archive_name = asset_url
         .rsplit('/')
         .next()
         .filter(|s| !s.is_empty())
-        .unwrap_or("keyframexl-update.tar.gz");
+        .unwrap_or(default_archive);
     let archive_path = tmp_dir.path().join(archive_name);
 
     {
@@ -785,11 +916,25 @@ fn download_and_install(
 }
 
 /// Extract (or accept direct ELF/AppImage) from `archive_path`, verify optional
-/// SHA-256 hex digest, and atomically replace `target_exe`.
+/// SHA-256 hex digest, and replace `target_exe` safely for the current OS.
 pub(crate) fn install_from_archive(
     archive_path: &std::path::Path,
     expected_sha256: Option<&str>,
     target_exe: &std::path::Path,
+) -> Result<(), String> {
+    install_from_archive_for(
+        archive_path,
+        expected_sha256,
+        target_exe,
+        AssetTarget::current(),
+    )
+}
+
+fn install_from_archive_for(
+    archive_path: &std::path::Path,
+    expected_sha256: Option<&str>,
+    target_exe: &std::path::Path,
+    target: AssetTarget,
 ) -> Result<(), String> {
     if let Some(expected) = expected_sha256 {
         let mut f = std::fs::File::open(archive_path)
@@ -813,11 +958,11 @@ pub(crate) fn install_from_archive(
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
+    let want_bin = target.binary_name();
 
-    let new_bin_src = if lower.ends_with(".tar.gz")
-        || lower.ends_with(".tgz")
-        || lower.ends_with(".tar.xz")
-    {
+    let new_bin_src = if lower.ends_with(".zip") {
+        extract_binary_from_zip(archive_path, extract_dir.path(), want_bin)?
+    } else if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") || lower.ends_with(".tar.xz") {
         let status = std::process::Command::new("tar")
             .arg("-xf")
             .arg(archive_path)
@@ -828,43 +973,140 @@ pub(crate) fn install_from_archive(
         if !status.success() {
             return Err("Extracting the release archive failed (`tar` returned an error).".into());
         }
-        find_extracted_binary(extract_dir.path())
-            .ok_or("Release archive did not contain a `keyframexl` binary.")?
+        find_extracted_binary(extract_dir.path(), want_bin)
+            .ok_or_else(|| format!("Release archive did not contain a `{want_bin}` binary."))?
     } else {
-        // Direct AppImage or raw Linux ELF binary.
+        // Direct AppImage or raw executable binary.
         archive_path.to_path_buf()
     };
 
-    // Sanity-check ELF magic before overwriting the running executable.
-    {
-        use std::io::Read;
-        let mut f = std::fs::File::open(&new_bin_src)
-            .map_err(|e| format!("Could not read extracted binary: {e}"))?;
-        let mut magic = [0u8; 4];
-        f.read_exact(&mut magic)
-            .map_err(|_| "Downloaded binary is empty or truncated.".to_string())?;
-        if &magic != b"\x7fELF" {
-            return Err("Downloaded file is not a valid Linux ELF executable.".into());
-        }
-    }
+    validate_binary_magic(&new_bin_src, target)?;
 
-    // Stage next to `target_exe` (same filesystem) so `rename` is strictly atomic.
-    let staged = exe_dir.join(format!(".keyframexl.update.{}", std::process::id()));
+    // Stage next to `target_exe` (same filesystem) so `rename` stays atomic/same-volume.
+    let staged = match target {
+        AssetTarget::Linux => exe_dir.join(format!(".keyframexl.update.{}", std::process::id())),
+        AssetTarget::Windows => {
+            exe_dir.join(format!("keyframexl.update.{}.exe", std::process::id()))
+        }
+    };
     std::fs::copy(&new_bin_src, &staged).map_err(|e| format!("Could not stage new binary: {e}"))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755))
-            .map_err(|e| format!("Could not mark updated binary executable: {e}"))?;
-    }
-    if let Err(e) = std::fs::rename(&staged, target_exe) {
-        let _ = std::fs::remove_file(&staged);
-        return Err(format!("Could not replace {}: {e}", target_exe.display()));
+
+    match target {
+        AssetTarget::Linux => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755))
+                    .map_err(|e| format!("Could not mark updated binary executable: {e}"))?;
+            }
+            if let Err(e) = std::fs::rename(&staged, target_exe) {
+                let _ = std::fs::remove_file(&staged);
+                return Err(format!("Could not replace {}: {e}", target_exe.display()));
+            }
+        }
+        AssetTarget::Windows => {
+            replace_binary_via_backup(&staged, target_exe)?;
+        }
     }
     Ok(())
 }
 
-fn find_extracted_binary(root: &std::path::Path) -> Option<std::path::PathBuf> {
+/// Extract `want_bin` from a `.zip` archive into `dest_dir`, rejecting traversal paths.
+fn extract_binary_from_zip(
+    archive_path: &std::path::Path,
+    dest_dir: &std::path::Path,
+    want_bin: &str,
+) -> Result<std::path::PathBuf, String> {
+    let file = std::fs::File::open(archive_path)
+        .map_err(|e| format!("Could not open zip archive: {e}"))?;
+    let mut zip =
+        zip::ZipArchive::new(file).map_err(|e| format!("Invalid zip release archive: {e}"))?;
+    for i in 0..zip.len() {
+        let mut entry = zip
+            .by_index(i)
+            .map_err(|e| format!("Could not read zip entry: {e}"))?;
+        if entry.is_dir() {
+            continue;
+        }
+        let Some(safe_rel) = entry.enclosed_name() else {
+            continue;
+        };
+        let matches = safe_rel
+            .file_name()
+            .and_then(|s| s.to_str())
+            .is_some_and(|n| n.eq_ignore_ascii_case(want_bin));
+        if matches {
+            let out_path = dest_dir.join(want_bin);
+            let mut out = std::fs::File::create(&out_path)
+                .map_err(|e| format!("Could not extract `{want_bin}`: {e}"))?;
+            std::io::copy(&mut entry, &mut out)
+                .map_err(|e| format!("Could not write extracted `{want_bin}`: {e}"))?;
+            return Ok(out_path);
+        }
+    }
+    Err(format!(
+        "Release archive did not contain a `{want_bin}` binary."
+    ))
+}
+
+fn validate_binary_magic(path: &std::path::Path, target: AssetTarget) -> Result<(), String> {
+    use std::io::Read;
+    let mut f =
+        std::fs::File::open(path).map_err(|e| format!("Could not read extracted binary: {e}"))?;
+    match target {
+        AssetTarget::Linux => {
+            let mut magic = [0u8; 4];
+            f.read_exact(&mut magic)
+                .map_err(|_| "Downloaded binary is empty or truncated.".to_string())?;
+            if &magic != b"\x7fELF" {
+                return Err("Downloaded file is not a valid Linux ELF executable.".into());
+            }
+        }
+        AssetTarget::Windows => {
+            let mut magic = [0u8; 2];
+            f.read_exact(&mut magic)
+                .map_err(|_| "Downloaded binary is empty or truncated.".to_string())?;
+            if &magic != b"MZ" {
+                return Err("Downloaded file is not a valid Windows PE executable.".into());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Replace `target_exe` on Windows where the running `.exe` cannot be overwritten
+/// in place, but can be renamed aside to `*.old.exe` and removed on next start.
+fn replace_binary_via_backup(
+    staged: &std::path::Path,
+    target_exe: &std::path::Path,
+) -> Result<(), String> {
+    let backup = old_binary_path(target_exe);
+    if backup.exists() {
+        let _ = std::fs::remove_file(&backup);
+    }
+    let moved_old = if target_exe.exists() {
+        if let Err(e) = std::fs::rename(target_exe, &backup) {
+            let _ = std::fs::remove_file(staged);
+            return Err(format!(
+                "Could not move running executable {} aside: {e}",
+                target_exe.display()
+            ));
+        }
+        true
+    } else {
+        false
+    };
+    if let Err(e) = std::fs::rename(staged, target_exe) {
+        if moved_old {
+            let _ = std::fs::rename(&backup, target_exe);
+        }
+        let _ = std::fs::remove_file(staged);
+        return Err(format!("Could not install {}: {e}", target_exe.display()));
+    }
+    Ok(())
+}
+
+fn find_extracted_binary(root: &std::path::Path, want_bin: &str) -> Option<std::path::PathBuf> {
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -874,7 +1116,11 @@ fn find_extracted_binary(root: &std::path::Path) -> Option<std::path::PathBuf> {
             let p = entry.path();
             if p.is_dir() {
                 stack.push(p);
-            } else if p.file_name().and_then(|s| s.to_str()) == Some("keyframexl") {
+            } else if p
+                .file_name()
+                .and_then(|s| s.to_str())
+                .is_some_and(|n| n.eq_ignore_ascii_case(want_bin))
+            {
                 return Some(p);
             }
         }
@@ -883,7 +1129,10 @@ fn find_extracted_binary(root: &std::path::Path) -> Option<std::path::PathBuf> {
 }
 
 fn parse_sha256_text(text: &str) -> Option<String> {
-    let tok = text.split_whitespace().next()?;
+    let tok = text
+        .trim_start_matches('\u{feff}')
+        .split_whitespace()
+        .next()?;
     if tok.len() == 64 && tok.bytes().all(|b| b.is_ascii_hexdigit()) {
         Some(tok.to_ascii_lowercase())
     } else {
@@ -1007,8 +1256,17 @@ mod tests {
         assert!(is_cargo_build_path(Path::new(
             "/home/u/kfxl/target/debug/keyframexl"
         )));
+        assert!(is_cargo_build_path(Path::new(
+            "/c/dev/kfxl/target/x86_64-pc-windows-msvc/release/keyframexl.exe"
+        )));
+        assert!(is_cargo_build_path(Path::new(
+            "/c/dev/kfxl/target/release/keyframexl.exe"
+        )));
         assert!(!is_cargo_build_path(Path::new(
             "/opt/keyframexl-linux-x86_64/keyframexl"
+        )));
+        assert!(!is_cargo_build_path(Path::new(
+            "/Users/u/AppData/Local/Programs/KeyFrameXL/keyframexl.exe"
         )));
         assert!(!is_cargo_build_path(Path::new("/home/u/target/keyframexl")));
     }
@@ -1031,7 +1289,7 @@ mod tests {
         );
         assert_eq!(
             parse_sha256_text(
-                "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD  x.tar.gz\n"
+                "\u{feff}BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD  x.zip\r\n"
             )
             .as_deref(),
             Some("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
@@ -1087,25 +1345,108 @@ mod tests {
     }
 
     #[test]
-    fn release_json_pairs_archive_with_its_checksum() {
+    fn install_from_zip_replaces_windows_exe_via_old_backup() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let archive = dir.path().join("keyframexl-windows-x86_64.zip");
+        let new_exe = b"MZ\x90\x00new-windows-build".to_vec();
+        {
+            let f = std::fs::File::create(&archive).unwrap();
+            let mut zw = zip::ZipWriter::new(f);
+            let opts = zip::write::SimpleFileOptions::default();
+            zw.start_file("keyframexl-windows-x86_64/README.md", opts)
+                .unwrap();
+            zw.write_all(b"readme").unwrap();
+            zw.start_file("keyframexl-windows-x86_64/keyframexl.exe", opts)
+                .unwrap();
+            zw.write_all(&new_exe).unwrap();
+            zw.finish().unwrap();
+        }
+
+        let target_dir = dir.path().join("install");
+        std::fs::create_dir(&target_dir).unwrap();
+        let target = target_dir.join("keyframexl.exe");
+        let old_exe = b"MZ\x90\x00old-windows-build".to_vec();
+        std::fs::write(&target, &old_exe).unwrap();
+
+        // Wrong checksum leaves the old binary intact.
+        let bad = "0".repeat(64);
+        assert!(
+            install_from_archive_for(&archive, Some(&bad), &target, AssetTarget::Windows).is_err()
+        );
+        assert_eq!(std::fs::read(&target).unwrap(), old_exe);
+
+        // Valid zip installs new binary and keeps the previous executable as `.old.exe`.
+        let sha = sha256_hex(&mut std::fs::File::open(&archive).unwrap()).unwrap();
+        install_from_archive_for(&archive, Some(&sha), &target, AssetTarget::Windows).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), new_exe);
+        let backup = old_binary_path(&target);
+        assert_eq!(backup.file_name().unwrap(), "keyframexl.old.exe");
+        assert_eq!(std::fs::read(&backup).unwrap(), old_exe);
+
+        // Rejects non-PE binary inside a zip.
+        let bad_zip = dir.path().join("bad-magic.zip");
+        {
+            let f = std::fs::File::create(&bad_zip).unwrap();
+            let mut zw = zip::ZipWriter::new(f);
+            let opts = zip::write::SimpleFileOptions::default();
+            zw.start_file("keyframexl.exe", opts).unwrap();
+            zw.write_all(b"\x7fELFnot-windows").unwrap();
+            zw.finish().unwrap();
+        }
+        assert!(
+            install_from_archive_for(&bad_zip, None, &target, AssetTarget::Windows)
+                .unwrap_err()
+                .contains("Windows PE")
+        );
+        assert_eq!(std::fs::read(&target).unwrap(), new_exe);
+    }
+
+    #[test]
+    fn release_json_pairs_archive_with_its_checksum_for_both_platforms() {
         let cur = Version::parse("0.1.0").unwrap();
-        let json = r#"{
-            "tag_name": "v0.1.1", "draft": false, "prerelease": false,
-            "assets": [
-                {"name": "keyframexl-linux-x86_64.tar.gz.sha256", "browser_download_url": "https://example.com/sha"},
-                {"name": "keyframexl-linux-x86_64.tar.gz", "browser_download_url": "https://example.com/tar"}
-            ]
-        }"#;
-        let UpdateOutcome::Available(info) = parse_release_json(json, &cur).unwrap() else {
-            panic!("expected Available");
+        let json: serde_json::Value = serde_json::from_str(
+            r#"{
+                "tag_name": "v0.2.1", "draft": false, "prerelease": false,
+                "assets": [
+                    {"name": "keyframexl-linux-x86_64.tar.gz.sha256", "browser_download_url": "https://example.com/linux.sha"},
+                    {"name": "keyframexl-linux-x86_64.tar.gz", "browser_download_url": "https://example.com/linux.tar.gz"},
+                    {"name": "keyframexl-windows-x86_64-setup.exe", "browser_download_url": "https://example.com/win-setup.exe"},
+                    {"name": "keyframexl-windows-x86_64-setup.exe.sha256", "browser_download_url": "https://example.com/win-setup.sha"},
+                    {"name": "keyframexl-windows-x86_64.zip.sha256", "browser_download_url": "https://example.com/win.sha"},
+                    {"name": "keyframexl-windows-x86_64.zip", "browser_download_url": "https://example.com/win.zip"}
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let UpdateOutcome::Available(linux) =
+            evaluate_release_for(&json, &cur, false, AssetTarget::Linux).unwrap()
+        else {
+            panic!("expected Available for Linux");
         };
         assert_eq!(
-            info.linux_asset_url.as_deref(),
-            Some("https://example.com/tar")
+            linux.asset_url.as_deref(),
+            Some("https://example.com/linux.tar.gz")
         );
         assert_eq!(
-            info.linux_sha256_url.as_deref(),
-            Some("https://example.com/sha")
+            linux.sha256_url.as_deref(),
+            Some("https://example.com/linux.sha")
+        );
+
+        let UpdateOutcome::Available(win) =
+            evaluate_release_for(&json, &cur, false, AssetTarget::Windows).unwrap()
+        else {
+            panic!("expected Available for Windows");
+        };
+        // Must pick the portable zip (never the installer exe) and its matching .sha256.
+        assert_eq!(
+            win.asset_url.as_deref(),
+            Some("https://example.com/win.zip")
+        );
+        assert_eq!(
+            win.sha256_url.as_deref(),
+            Some("https://example.com/win.sha")
         );
     }
 
@@ -1127,12 +1468,12 @@ mod tests {
             panic!("no release");
         };
         let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("keyframexl");
+        let target = dir.path().join(AssetTarget::current().binary_name());
         std::fs::write(&target, b"\x7fELFold").unwrap();
         let seen = std::cell::RefCell::new(Vec::new());
         download_and_install(
-            info.linux_asset_url.as_deref().expect("linux asset"),
-            Some(info.linux_sha256_url.as_deref().expect("sha256 asset")),
+            info.asset_url.as_deref().expect("release asset"),
+            Some(info.sha256_url.as_deref().expect("sha256 asset")),
             &target,
             &|s| seen.borrow_mut().push(s),
         )
@@ -1154,7 +1495,10 @@ mod tests {
         let list = r#"[
             {"tag_name": "v0.1.3-nightly.202611200900", "prerelease": true, "draft": false},
             {"tag_name": "v0.1.3-nightly.202611211200", "prerelease": true, "draft": false,
-             "assets": [{"name": "keyframexl-linux-x86_64.tar.gz", "browser_download_url": "https://example.com/n"}]},
+             "assets": [
+                {"name": "keyframexl-linux-x86_64.tar.gz", "browser_download_url": "https://example.com/n-linux"},
+                {"name": "keyframexl-windows-x86_64.zip", "browser_download_url": "https://example.com/n-win"}
+             ]},
             {"tag_name": "v0.1.4-nightly.1", "prerelease": true, "draft": true},
             {"tag_name": "v0.1.2", "prerelease": false, "draft": false}
         ]"#;
@@ -1163,10 +1507,11 @@ mod tests {
             panic!("nightly expected");
         };
         assert_eq!(info.version, "0.1.3-nightly.202611211200");
-        assert_eq!(
-            info.linux_asset_url.as_deref(),
-            Some("https://example.com/n")
-        );
+        let expected_url = match AssetTarget::current() {
+            AssetTarget::Linux => "https://example.com/n-linux",
+            AssetTarget::Windows => "https://example.com/n-win",
+        };
+        assert_eq!(info.asset_url.as_deref(), Some(expected_url));
         // Stable channel ignores nightlies.
         assert_eq!(
             parse_releases_list_json(list, &stable, false).unwrap(),
@@ -1212,26 +1557,29 @@ mod tests {
     #[test]
     fn parse_release_json_detects_newer_and_picks_linux_asset() {
         let cur = Version::parse("0.1.0").unwrap();
-        let json = r#"{
-            "tag_name": "v0.2.0",
-            "name": "KeyFrameXL 0.2.0",
-            "body": "Added project bundles and MIDI Clock.",
-            "html_url": "https://github.com/mallardask-ops/keyframexl/releases/tag/v0.2.0",
-            "published_at": "2026-06-01T12:00:00Z",
-            "draft": false,
-            "prerelease": false,
-            "assets": [
-                {"name": "keyframexl-0.2.0-linux-x86_64.tar.gz", "browser_download_url": "https://example.com/tar"},
-                {"name": "KeyFrameXL-0.2.0-x86_64.AppImage", "browser_download_url": "https://example.com/appimage"}
-            ]
-        }"#;
-        let out = parse_release_json(json, &cur).unwrap();
+        let json: serde_json::Value = serde_json::from_str(
+            r#"{
+                "tag_name": "v0.2.0",
+                "name": "KeyFrameXL 0.2.0",
+                "body": "Added project bundles and MIDI Clock.",
+                "html_url": "https://github.com/mallardask-ops/keyframexl/releases/tag/v0.2.0",
+                "published_at": "2026-06-01T12:00:00Z",
+                "draft": false,
+                "prerelease": false,
+                "assets": [
+                    {"name": "keyframexl-0.2.0-linux-x86_64.tar.gz", "browser_download_url": "https://example.com/tar"},
+                    {"name": "KeyFrameXL-0.2.0-x86_64.AppImage", "browser_download_url": "https://example.com/appimage"}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let out = evaluate_release_for(&json, &cur, false, AssetTarget::Linux).unwrap();
         match out {
             UpdateOutcome::Available(info) => {
                 assert_eq!(info.version, "0.2.0");
                 assert_eq!(info.tag, "v0.2.0");
                 assert_eq!(
-                    info.linux_asset_url.as_deref(),
+                    info.asset_url.as_deref(),
                     Some("https://example.com/appimage")
                 );
                 assert_eq!(info.published_at.as_deref(), Some("2026-06-01"));
@@ -1242,7 +1590,7 @@ mod tests {
         // Same version => UpToDate
         let cur2 = Version::parse("0.2.0").unwrap();
         assert_eq!(
-            parse_release_json(json, &cur2).unwrap(),
+            evaluate_release_for(&json, &cur2, false, AssetTarget::Linux).unwrap(),
             UpdateOutcome::UpToDate {
                 latest: Some("0.2.0".into())
             }
