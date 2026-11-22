@@ -11,7 +11,6 @@
 use super::NativeWindow;
 use super::host::{Handle, Loaded, Reply};
 use std::collections::HashMap;
-use std::ffi::c_void;
 use std::ptr;
 use std::sync::{OnceLock, mpsc};
 use windows_sys::Win32::{
@@ -314,7 +313,7 @@ fn embed_handle(
             let dpi = window_dpi(win);
             let _ = p.set_editor_scale_factor(dpi as f32 / 96.0);
             // SAFETY: `win` is a live child HWND destroyed only after `close_editor`.
-            let wh = unsafe { vst3_host::plugin::WindowHandle::from_hwnd(win as *mut c_void) };
+            let wh = unsafe { vst3_host::plugin::WindowHandle::from_hwnd(win) };
             if let Err(e) = p.open_editor(wh) {
                 unsafe {
                     DestroyWindow(frame);

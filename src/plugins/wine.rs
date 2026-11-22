@@ -681,6 +681,7 @@ mod imp {
 }
 
 #[cfg(not(target_os = "linux"))]
+#[allow(dead_code)]
 mod imp {
     use std::path::{Path, PathBuf};
 
