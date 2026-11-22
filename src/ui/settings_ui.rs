@@ -275,7 +275,7 @@ impl App {
 
     /// A note from a MIDI keyboard or the typing keyboard: light the key, record it.
     /// A controller either finishes a pending link or drives its bound control.
-    fn on_midi(&mut self, target: u64, event: Event, recording: bool) {
+    pub(super) fn on_midi(&mut self, target: u64, event: Event, recording: bool) {
         match event {
             Event::On {
                 pitch,
@@ -296,6 +296,9 @@ impl App {
                 }
             }
             Event::Control { channel, cc, value } => {
+                if cc == 120 || cc == 123 {
+                    self.midi_keys = [false; 128];
+                }
                 if cc > 127 {
                     return;
                 }

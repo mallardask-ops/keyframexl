@@ -2135,3 +2135,69 @@ fn a_closed_panel_opens_in_the_focused_window_or_its_own() {
     let (s, _, _) = app.ws.dock().find_tab(&Tab::Rack).expect("rack opened");
     assert!(!s.is_main(), "a floating window");
 }
+
+#[test]
+fn midi_keys_highlight_on_piano_roll_keyboard_and_clear_on_release() {
+    use crate::midi_in::Event as Midi;
+    let mut app = app();
+    let inst = app.midi_target();
+    app.roll_inst = inst;
+    app.focus = Some(Tab::Roll { instrument: inst });
+
+    let ctx = egui::Context::default();
+    let mut target = inst;
+    let count_brand_rects = |out: &egui::FullOutput, roll: roll::Geom| -> usize {
+        fn walk(shape: &egui::epaint::Shape, brand: egui::Color32, max_x: f32) -> usize {
+            match shape {
+                egui::epaint::Shape::Rect(r)
+                    if r.fill == brand && r.rect.right() <= max_x + 0.5 =>
+                {
+                    1
+                }
+                egui::epaint::Shape::Vec(v) => v.iter().map(|s| walk(s, brand, max_x)).sum(),
+                _ => 0,
+            }
+        }
+        let brand = crate::theme::brand();
+        out.shapes
+            .iter()
+            .map(|cs| walk(&cs.shape, brand, roll.grid.left()))
+            .sum()
+    };
+
+    // Baseline: no MIDI keys held -> no lit brand-colored key on the keyboard strip.
+    let out_idle = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| app.roll(ui, &mut target));
+    });
+    let g = app.probe.roll.expect("roll geometry");
+    assert_eq!(count_brand_rects(&out_idle, g), 0);
+
+    // Hold a white key (E5 = 76) and a black key (F#5 = 78) within view.
+    let white = (g.bottom..=g.top).find(|&p| p % 12 == 4).unwrap();
+    let black = (g.bottom..=g.top).find(|&p| p % 12 == 6).unwrap();
+    app.midi_keys[white as usize] = true;
+    app.midi_keys[black as usize] = true;
+    let out_lit = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| app.roll(ui, &mut target));
+    });
+    assert_eq!(count_brand_rects(&out_lit, g), 2);
+
+    // MIDI All Notes Off (CC 123) clears stuck keys.
+    app.midi_keys[white as usize] = true;
+    app.midi_keys[black as usize] = true;
+    app.on_midi(
+        inst,
+        Midi::Control {
+            channel: 1,
+            cc: 123,
+            value: 0,
+        },
+        false,
+    );
+    assert!(!app.midi_keys[white as usize]);
+    assert!(!app.midi_keys[black as usize]);
+    let out_off = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| app.roll(ui, &mut target));
+    });
+    assert_eq!(count_brand_rects(&out_off, g), 0);
+}

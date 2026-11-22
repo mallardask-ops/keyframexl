@@ -804,6 +804,7 @@ impl App {
         let held_pitch = self
             .held
             .and_then(|(_, ch, pitch)| (ch == id).then_some(pitch));
+        let midi_for_me = id == self.midi_target();
         let pointer = ui.ctx().pointer_hover_pos();
         let mut hovered_zone = None;
 
@@ -818,7 +819,8 @@ impl App {
             .shrink(1.0);
             zone_rects.push(r);
             let on = selected.is_none_or(|s| s == i);
-            let sounding = held_pitch.is_some_and(|hp| z.matches(hp, 100));
+            let sounding = held_pitch.is_some_and(|hp| z.matches(hp, 100))
+                || (midi_for_me && (z.low..=z.high).any(|p| self.midi_keys[p as usize]));
             let fill_a = if sounding {
                 0.38
             } else if on {
@@ -867,7 +869,7 @@ impl App {
                 vec2((key_w - 0.5).max(1.5), kb_rect.height()),
             );
             let black = is_black_key(k);
-            let active = held_pitch == Some(k);
+            let active = held_pitch == Some(k) || (midi_for_me && self.midi_keys[k as usize]);
             let col = if active {
                 t::SMP_GOLD
             } else if black {

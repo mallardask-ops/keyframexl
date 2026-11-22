@@ -584,8 +584,8 @@ impl App {
             self.probe.roll = Some(g);
         }
 
-        self.paint_keys_and_grid(&p, &g, inner);
         // Keys play while held; sliding across them plays each key (FL).
+        // Handle interaction before painting so mouse-held and MIDI-held keys render in one pass.
         let keys = Rect::from_min_max(
             pos2(inner.left(), grid.top()),
             pos2(grid.left(), grid.bottom()),
@@ -605,16 +605,7 @@ impl App {
         } else if self.key_down.take().is_some() {
             self.release_note();
         }
-        if let Some(k) = self.key_down {
-            let y = g.y(k);
-            if g.visible(k) {
-                p.rect_filled(
-                    Rect::from_min_max(pos2(keys.left(), y), pos2(keys.right(), y + g.row)),
-                    0.0,
-                    t::text().gamma_multiply(0.35),
-                );
-            }
-        }
+        self.paint_keys_and_grid(&p, &g, inner);
         // The ruler (pattern mode): click moves the playhead there; drag
         // selects a span the pattern then loops (FL); double-click clears it.
         let ruler = Rect::from_min_max(
@@ -1731,9 +1722,13 @@ impl App {
             }
         }
         // Rows: white-key rows lighter than black-key rows.
+        // Light keys currently held on a MIDI/typing keyboard (for this channel) or via mouse.
+        let midi_for_me = self.roll_inst == self.midi_target();
         for pitch in (g.bottom..=g.top).rev() {
             let y = g.y(pitch);
             let rr = Rect::from_min_max(pos2(g.grid.left(), y), pos2(g.grid.right(), y + g.row));
+            let lit =
+                (midi_for_me && self.midi_keys[pitch as usize]) || self.key_down == Some(pitch);
             let row_fill = match self.roll_scale {
                 // In the scale: the lighter row; outside: darker than a black-key row.
                 Some(sc) if sc.is_root(pitch) => t::row_root(),
@@ -1743,6 +1738,9 @@ impl App {
                 None => t::row_white(),
             };
             p.rect_filled(rr, 0.0, row_fill);
+            if lit {
+                p.rect_filled(rr, 0.0, t::brand().gamma_multiply(0.14));
+            }
             if pitch % 12 == 0 || pitch % 12 == 5 {
                 p.line_segment(
                     [
@@ -1760,10 +1758,27 @@ impl App {
                 );
             }
             let key = Rect::from_min_max(pos2(keys.left(), y), pos2(keys.right(), y + g.row));
-            p.rect_filled(key, 0.0, t::key_white());
-            if is_black(pitch) {
+            let black = is_black(pitch);
+            let black_r = key.left() + key.width() * 0.62;
+            p.rect_filled(
+                key,
+                0.0,
+                if lit && !black {
+                    t::brand()
+                } else {
+                    t::key_white()
+                },
+            );
+            if black {
+                if lit {
+                    // Subtle tint on the white margin beside a lit black key so the row connects.
+                    p.rect_filled(
+                        Rect::from_min_max(pos2(black_r, key.top()), key.right_bottom()),
+                        0.0,
+                        t::brand().gamma_multiply(0.22),
+                    );
+                }
                 // The seam between the two white keys shows only beside the black one.
-                let black_r = key.left() + key.width() * 0.62;
                 p.line_segment(
                     [
                         pos2(black_r, key.center().y),
@@ -1771,36 +1786,77 @@ impl App {
                     ],
                     Stroke::new(1.0_f32, t::key_white_edge()),
                 );
-                p.rect_filled(
-                    Rect::from_min_max(key.min, pos2(black_r, key.bottom())),
-                    1.0,
-                    t::key_black(),
-                );
+                let bk = Rect::from_min_max(key.min, pos2(black_r, key.bottom()));
+                p.rect_filled(bk, 1.0, if lit { t::brand() } else { t::key_black() });
+                if lit {
+                    p.rect_stroke(
+                        bk,
+                        1.0,
+                        Stroke::new(1.0_f32, t::brand_top().gamma_multiply(0.65)),
+                        egui::StrokeKind::Inside,
+                    );
+                }
             } else if matches!(pitch % 12, 0 | 5) {
                 p.line_segment(
                     [
                         pos2(key.left(), key.bottom() - 0.5),
                         pos2(key.right(), key.bottom() - 0.5),
                     ],
-                    Stroke::new(1.0_f32, t::key_white_edge()),
+                    Stroke::new(
+                        1.0_f32,
+                        if lit {
+                            t::brand_edge()
+                        } else {
+                            t::key_white_edge()
+                        },
+                    ),
                 );
             }
             let named = match self.roll_scale {
                 Some(sc) => sc.is_root(pitch),
                 None => pitch % 12 == 0,
             };
-            if named && g.row >= 10.0 {
-                let ink = if is_black(pitch) {
-                    t::key_white()
+            if (named || lit) && g.row >= 10.0 {
+                if lit && black {
+                    p.text(
+                        pos2(black_r - 3.0, key.center().y),
+                        Align2::RIGHT_CENTER,
+                        note_name(pitch),
+                        t::mono(10.5),
+                        t::on_brand(),
+                    );
                 } else {
-                    t::key_ink()
-                };
-                p.text(
-                    pos2(key.right() - 5.0, key.center().y),
-                    Align2::RIGHT_CENTER,
-                    note_name(pitch),
-                    t::mono(12.0),
-                    ink,
+                    let ink = if lit {
+                        t::on_brand()
+                    } else if black {
+                        t::key_white()
+                    } else {
+                        t::key_ink()
+                    };
+                    p.text(
+                        pos2(key.right() - 5.0, key.center().y),
+                        Align2::RIGHT_CENTER,
+                        note_name(pitch),
+                        t::mono(12.0),
+                        ink,
+                    );
+                }
+            }
+        }
+        // Edge cue when a held MIDI key lies above or below the visible pitch range.
+        if midi_for_me {
+            if ((g.top as usize + 1)..128).any(|k| self.midi_keys[k]) {
+                p.rect_filled(
+                    Rect::from_min_max(keys.left_top(), pos2(keys.right(), keys.top() + 3.0)),
+                    0.0,
+                    t::brand(),
+                );
+            }
+            if (0..g.bottom as usize).any(|k| self.midi_keys[k]) {
+                p.rect_filled(
+                    Rect::from_min_max(pos2(keys.left(), keys.bottom() - 3.0), keys.right_bottom()),
+                    0.0,
+                    t::brand(),
                 );
             }
         }
