@@ -1556,6 +1556,20 @@ mod tests {
     }
 
     #[test]
+    fn dev_nightly_rc_and_stable_order() {
+        let v = |s| Version::parse(s).unwrap();
+        // Cargo.toml X.Y.Z-dev (local builds) < nightly < rc < stable.
+        assert!(v("0.2.1-dev") < v("0.2.1-nightly.202611230300"));
+        assert!(v("0.2.1-nightly.202611230300") < v("0.2.1-nightly.202611240300"));
+        assert!(v("0.2.1-nightly.202611240300") < v("0.2.1-rc.1"));
+        assert!(v("0.2.1-rc.1") < v("0.2.1-rc.2"));
+        assert!(v("0.2.1-rc.2") < v("0.2.1"));
+        assert!(v("0.2.1") < v("0.2.2-dev"));
+        // Old 0.2.0 candidate nightlies still sort below their stable.
+        assert!(v("0.2.0-nightly.rc.4.202611211505") < v("0.2.0"));
+    }
+
+    #[test]
     fn nightly_channel_picks_highest_release() {
         let stable = Version::parse("0.1.2").unwrap();
         let list = r#"[
