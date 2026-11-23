@@ -8,6 +8,14 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 
 See [docs/v0.2.1.md](docs/v0.2.1.md) for the Windows port and 0.2.1 plan.
 
+### Added
+- **Universal automation & MIDI controller linking**: right-click almost any
+  knob or control — including Song BPM (tempo automation clips in the Playlist),
+  Channel Rack Swing, Mixer stereo separation / 3-band strip EQ / FX mix / sends,
+  all Sampler program & zone knobs, all Tide Synth & built-in FX knobs, Vocal
+  parameters, and Forge character knobs — to create an automation clip or link
+  it to a MIDI controller.
+
 ### Changed
 - **Keyframe Forge Studio UI & presets rework**: replaced the vertical form and fixed game-style buttons with a tabbed studio workspace (`Design`, `Presets & Blocks`, `Variations`, `Export`) featuring an interactive multi-layer timeline (drag to move/trim, drop audio files, lock layers), live playhead, `Loop` / `Round-Robin` / `Auto-Audition` / `A-B` controls, one-click curve shapes with `Pan` and `Morph` lines, searchable presets & Layer Building Blocks, WYSIWYG / Sound Pack export, and one-click `→ Playlist` rendering; rebuilt built-in UI, footsteps, weapons, doors, magic, and seamless-loop ambience presets on the new Modal, Granular, FM/Unison, and stereo noise engine.
 

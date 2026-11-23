@@ -514,9 +514,8 @@ impl App {
         // The time selection's length (and its bars, for the chip).
         let sel = self.song.loop_range.map(|(a, b)| {
             let rate = self.rate();
-            let table = (!self.song.tempo_map.is_empty()).then(|| {
-                keyframexl::tempo::TempoTable::build(&self.song.tempo_map, self.song.tempo, rate)
-            });
+            let table = keyframexl::tempo::effective_tempo_map(&self.song)
+                .map(|m| keyframexl::tempo::TempoTable::build(&m, self.song.tempo, rate));
             let f = |t| {
                 keyframexl::sequence::tick_frames(&self.song, table.as_ref(), t, rate) as f64
                     / rate as f64

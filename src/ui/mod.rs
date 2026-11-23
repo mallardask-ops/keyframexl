@@ -1609,9 +1609,11 @@ impl App {
 
     /// The song's tempo map as frames, when it plays in Song mode with one.
     pub(crate) fn tempo_table(&self) -> Option<keyframexl::tempo::TempoTable> {
-        (self.song_mode && !self.song.tempo_map.is_empty()).then(|| {
-            keyframexl::tempo::TempoTable::build(&self.song.tempo_map, self.song.tempo, self.rate())
-        })
+        if !self.song_mode {
+            return None;
+        }
+        keyframexl::tempo::effective_tempo_map(&self.song)
+            .map(|m| keyframexl::tempo::TempoTable::build(&m, self.song.tempo, self.rate()))
     }
 
     /// Frames since the start → tick, through the tempo map when there is one.

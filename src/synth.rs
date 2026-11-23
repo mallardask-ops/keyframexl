@@ -850,8 +850,8 @@ impl SynthPatch {
         self.apply_macros(&mut p);
         p
     }
-    pub(crate) fn modulated_for_render(&self) -> Self {
-        let mut p = Self {
+    pub(crate) fn copy_for_render(&self) -> Self {
+        Self {
             table: self.table,
             level: self.level,
             coarse: self.coarse,
@@ -880,7 +880,36 @@ impl SynthPatch {
             lfos: self.lfos,
             mods: Vec::new(),
             fx: Vec::new(),
-        };
+        }
+    }
+    pub(crate) fn apply_own_macros(&mut self) {
+        let macros = self.macros;
+        for m in macros {
+            if m.value == 0.0 {
+                continue;
+            }
+            for r in m.routes {
+                if r.depth == 0.0 {
+                    continue;
+                }
+                let d = m.value * r.depth;
+                match r.target {
+                    Param::Position => self.position = (self.position + d).clamp(0.0, 1.0),
+                    Param::Warp => self.warp_amount = (self.warp_amount + d).clamp(-1.0, 1.0),
+                    Param::Cutoff => {
+                        self.cutoff = (self.cutoff * 2.0_f64.powf(d * 8.0)).clamp(20.0, 20000.0);
+                    }
+                    Param::Resonance => self.resonance = (self.resonance + d).clamp(0.0, 1.0),
+                    Param::Sub => self.sub = (self.sub + d).clamp(0.0, 1.0),
+                    Param::Noise => self.noise = (self.noise + d).clamp(0.0, 1.0),
+                    Param::Detune => self.detune = (self.detune + d).clamp(0.0, 1.0),
+                    Param::Spread => self.spread = (self.spread + d).clamp(0.0, 1.0),
+                }
+            }
+        }
+    }
+    pub(crate) fn modulated_for_render(&self) -> Self {
+        let mut p = self.copy_for_render();
         self.apply_macros(&mut p);
         p
     }

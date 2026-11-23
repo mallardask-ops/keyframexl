@@ -100,6 +100,76 @@ impl App {
                     ],
                 )
             }
+            Target::MixerSep { track } => {
+                fill(tr.auto_l_sep, &[("name", &self.mixer_name(track as usize))])
+            }
+            Target::MixerEq { track, band } => {
+                let band_lbl = match band {
+                    0 => tr.mixer_eq_low,
+                    1 => tr.mixer_eq_mid,
+                    _ => tr.mixer_eq_high,
+                };
+                fill(
+                    tr.auto_l_eq,
+                    &[
+                        ("name", &self.mixer_name(track as usize)),
+                        ("band", band_lbl),
+                    ],
+                )
+            }
+            Target::Tempo => tr.auto_l_tempo.into(),
+            Target::Swing => tr.auto_l_swing.into(),
+            Target::SamplerParam { inst, zone, param } => {
+                let p_lbl = sampler_param_label(tr, param);
+                let name = self.instrument_name(inst);
+                match zone {
+                    Some(z) if !param.is_program() => fill(
+                        tr.auto_l_zone_param,
+                        &[
+                            ("name", &name),
+                            ("zone", &format!("{:02}", z as usize + 1)),
+                            ("param", &p_lbl),
+                        ],
+                    ),
+                    _ => fill(tr.auto_l_inst_param, &[("name", &name), ("param", &p_lbl)]),
+                }
+            }
+            Target::SynthParam { inst, param } => {
+                let p_lbl = synth_param_label(tr, param);
+                fill(
+                    tr.auto_l_inst_param,
+                    &[("name", &self.instrument_name(inst)), ("param", &p_lbl)],
+                )
+            }
+            Target::SynthFxParam { inst, fx, param } => {
+                let fx_kind = keyframexl::synth::FX_KINDS.get(fx as usize);
+                let fx_name = fx_kind.map_or(tr.auto_effect, |k| k.label());
+                let p_name = fx_kind
+                    .and_then(|k| k.params().get(param as usize))
+                    .map_or(tr.auto_parameter, |p| p.name);
+                fill(
+                    tr.auto_l_synth_fx,
+                    &[
+                        ("name", &self.instrument_name(inst)),
+                        ("fx", fx_name),
+                        ("param", p_name),
+                    ],
+                )
+            }
+            Target::VocalParam { inst, param } => {
+                let p_lbl = vocal_param_label(tr, param);
+                fill(
+                    tr.auto_l_inst_param,
+                    &[("name", &self.instrument_name(inst)), ("param", p_lbl)],
+                )
+            }
+            Target::ForgeParam { inst, param } => {
+                let p_lbl = forge_param_label(tr, param);
+                fill(
+                    tr.auto_l_inst_param,
+                    &[("name", &self.instrument_name(inst)), ("param", p_lbl)],
+                )
+            }
             Target::PluginParam { plugin, param } => {
                 let row = self
                     .plugins
@@ -170,7 +240,14 @@ impl App {
         }
         if target.set(&mut self.song, value) {
             let clamped = target.current(&self.song).unwrap_or(value);
-            self.publish_param(target, clamped);
+            if matches!(
+                target,
+                Target::Tempo | Target::VocalParam { .. } | Target::ForgeParam { .. }
+            ) {
+                self.publish();
+            } else {
+                self.publish_param(target, clamped);
+            }
             true
         } else {
             false
@@ -978,6 +1055,36 @@ impl App {
                     format!("R{:.0}", v * 100.0)
                 }
             }
+            Target::MixerSep { .. } => {
+                if v.abs() < 0.005 {
+                    "0".into()
+                } else if v < 0.0 {
+                    fill(
+                        tr.mixer_sep_narrower,
+                        &[("pct", &format!("{:.0}", -v * 100.0))],
+                    )
+                } else {
+                    fill(tr.mixer_sep_wider, &[("pct", &format!("{:.0}", v * 100.0))])
+                }
+            }
+            Target::MixerEq { .. } => {
+                if v.abs() < 0.05 {
+                    "0.0 dB".into()
+                } else {
+                    format!("{v:+.1} dB")
+                }
+            }
+            Target::Tempo => format!("{v:.1} BPM"),
+            Target::Swing => format!("{:.0}%", v * 100.0),
+            Target::SamplerParam { param, .. } => format_sampler_value(param, v),
+            Target::SynthParam { param, .. } => format_synth_value(param, v),
+            Target::SynthFxParam { fx, param, .. } => {
+                keyframexl::automation_params::synth_fx_spec(fx, param)
+                    .map(|spec| keyframexl::fx::format(spec, v))
+                    .unwrap_or_else(|| format!("{v:.2}"))
+            }
+            Target::VocalParam { param, .. } => format_vocal_value(param, v),
+            Target::ForgeParam { param, .. } => format_forge_value(param, v),
             Target::FxParam { track, slot, param } => self
                 .song
                 .mixer
@@ -991,6 +1098,264 @@ impl App {
                 format!("{:.0}%", v * 100.0)
             }
         }
+    }
+}
+
+fn sampler_param_label(
+    tr: &crate::i18n::Strings,
+    param: keyframexl::automation::SamplerParam,
+) -> String {
+    use keyframexl::automation::SamplerParam as P;
+    let env_n = |n: u8, k: &str| {
+        format!(
+            "{} {k}",
+            fill(tr.auto_p_env_n, &[("n", &(n as usize + 1).to_string())])
+        )
+    };
+    let lfo_n = |n: u8, k: &str| {
+        format!(
+            "{} {k}",
+            fill(tr.auto_p_lfo_n, &[("n", &(n as usize + 1).to_string())])
+        )
+    };
+    let flt_n = |n: u8, k: &str| {
+        format!(
+            "{} {k}",
+            fill(tr.auto_p_filter_n, &[("n", &(n as usize + 1).to_string())])
+        )
+    };
+    match param {
+        P::ProgVolume => format!("{} {}", tr.auto_p_prog, tr.smp_k_volume),
+        P::ProgPan => format!("{} {}", tr.auto_p_prog, tr.smp_k_pan),
+        P::ProgTranspose => format!("{} {}", tr.auto_p_prog, tr.smp_k_trans),
+        P::ProgBendRange => format!("{} {}", tr.auto_p_prog, tr.smp_k_pb_rng),
+        P::ProgPolyphony => format!("{} {}", tr.auto_p_prog, tr.smp_k_poly),
+        P::ProgGlide => format!("{} {}", tr.auto_p_prog, tr.smp_k_glide),
+        P::ZoneSemi => tr.smp_k_semi.into(),
+        P::ZoneFine => tr.smp_k_fine.into(),
+        P::ZoneKeyTrack => tr.smp_k_ktrk.into(),
+        P::ZoneGain => tr.smp_k_gain.into(),
+        P::ZonePan => tr.smp_k_pan.into(),
+        P::ZoneVelTrack => tr.smp_k_vel.into(),
+        P::ZoneMuteGroup => tr.smp_k_group.into(),
+        P::ZoneStretchAmount => tr.smp_k_length.into(),
+        P::ZoneStretchBeats => tr.smp_k_beats.into(),
+        P::ZoneAmpDelay => format!("{} {}", tr.auto_p_amp_env, tr.smp_k_delay),
+        P::ZoneAmpAttack => format!("{} {}", tr.auto_p_amp_env, tr.smp_k_attack),
+        P::ZoneAmpHold => format!("{} {}", tr.auto_p_amp_env, tr.smp_k_hold),
+        P::ZoneAmpDecay => format!("{} {}", tr.auto_p_amp_env, tr.smp_k_decay),
+        P::ZoneAmpSustain => format!("{} {}", tr.auto_p_amp_env, tr.smp_k_sustain),
+        P::ZoneAmpRelease => format!("{} {}", tr.auto_p_amp_env, tr.smp_k_release),
+        P::ZoneFilterCutoff(fi) => flt_n(fi, tr.smp_k_freq),
+        P::ZoneFilterEmph(fi) => flt_n(fi, tr.smp_k_emph),
+        P::ZoneEnvDelay(ei) => env_n(ei, tr.smp_k_delay),
+        P::ZoneEnvAttack(ei) => env_n(ei, tr.smp_k_attack),
+        P::ZoneEnvHold(ei) => env_n(ei, tr.smp_k_hold),
+        P::ZoneEnvDecay(ei) => env_n(ei, tr.smp_k_decay),
+        P::ZoneEnvSustain(ei) => env_n(ei, tr.smp_k_sustain),
+        P::ZoneEnvRelease(ei) => env_n(ei, tr.smp_k_release),
+        P::ZoneLfoRate(li) => lfo_n(li, tr.smp_k_rate),
+        P::ZoneLfoAttack(li) => lfo_n(li, tr.smp_k_attack),
+        P::ZoneLfoPhase(li) => lfo_n(li, tr.smp_k_phase),
+    }
+}
+
+fn synth_param_label(
+    tr: &crate::i18n::Strings,
+    param: keyframexl::automation::SynthParam,
+) -> String {
+    use keyframexl::automation::SynthParam as P;
+    match param {
+        P::Position => format!("{} {}", tr.auto_p_osc_a, tr.tide_k_pos),
+        P::Warp => format!("{} {}", tr.auto_p_osc_a, tr.tide_k_warp),
+        P::Level => format!("{} {}", tr.auto_p_osc_a, tr.tide_k_level),
+        P::Coarse => format!("{} {}", tr.auto_p_osc_a, tr.tide_k_coarse),
+        P::Fine => format!("{} {}", tr.auto_p_osc_a, tr.tide_k_fine),
+        P::Sub => tr.tide_k_sub.into(),
+        P::Noise => tr.tide_k_noise.into(),
+        P::PosB => format!("{} {}", tr.auto_p_osc_b, tr.tide_k_pos),
+        P::WarpB => format!("{} {}", tr.auto_p_osc_b, tr.tide_k_warp),
+        P::LevelB => format!("{} {}", tr.auto_p_osc_b, tr.tide_k_level),
+        P::CoarseB => format!("{} {}", tr.auto_p_osc_b, tr.tide_k_coarse),
+        P::FineB => format!("{} {}", tr.auto_p_osc_b, tr.tide_k_fine),
+        P::LevelC => format!("{} {}", tr.auto_p_osc_c, tr.tide_k_level),
+        P::CoarseC => format!("{} {}", tr.auto_p_osc_c, tr.tide_k_coarse),
+        P::PartialsC => format!("{} {}", tr.auto_p_osc_c, tr.tide_k_partials),
+        P::TiltC => format!("{} {}", tr.auto_p_osc_c, tr.tide_k_tilt),
+        P::OddC => format!("{} {}", tr.auto_p_osc_c, tr.tide_k_odd),
+        P::ShimmerC => format!("{} {}", tr.auto_p_osc_c, tr.tide_k_shimmer),
+        P::Cutoff => tr.tide_k_cutoff.into(),
+        P::Resonance => tr.tide_k_reso.into(),
+        P::Keytrack => tr.tide_k_key.into(),
+        P::EnvAmount => tr.tide_k_env.into(),
+        P::AmpAttack => format!("{} {}", tr.auto_p_amp_env, tr.tide_k_attack),
+        P::AmpDecay => format!("{} {}", tr.auto_p_amp_env, tr.tide_k_decay),
+        P::AmpSustain => format!("{} {}", tr.auto_p_amp_env, tr.tide_k_sustain),
+        P::AmpRelease => format!("{} {}", tr.auto_p_amp_env, tr.tide_k_release),
+        P::FilterAttack => format!("{} {}", tr.auto_p_flt_env, tr.tide_k_attack),
+        P::FilterDecay => format!("{} {}", tr.auto_p_flt_env, tr.tide_k_decay),
+        P::FilterSustain => format!("{} {}", tr.auto_p_flt_env, tr.tide_k_sustain),
+        P::FilterRelease => format!("{} {}", tr.auto_p_flt_env, tr.tide_k_release),
+        P::LfoRate(i) => format!(
+            "{} {}",
+            fill(tr.auto_p_lfo_n, &[("n", &(i as usize + 1).to_string())]),
+            tr.tide_k_rate
+        ),
+        P::Unison => tr.tide_k_voices.into(),
+        P::Detune => tr.tide_k_detune.into(),
+        P::Spread => tr.tide_k_spread.into(),
+        P::Glide => tr.tide_k_glide.into(),
+        P::BendRange => tr.tide_k_bend.into(),
+        P::Macro(i) => fill(tr.auto_p_macro_n, &[("n", &(i as usize + 1).to_string())]),
+    }
+}
+
+fn vocal_param_label(
+    tr: &crate::i18n::Strings,
+    param: keyframexl::automation::VocalParam,
+) -> &'static str {
+    use keyframexl::automation::VocalParam as P;
+    match param {
+        P::VibratoDepth => tr.vocal_k_vibrato,
+        P::VibratoRate => tr.vocal_k_rate,
+        P::VibratoDelay => tr.vocal_k_delay,
+        P::VibratoFade => tr.vocal_k_fade_in,
+        P::Transition => tr.vocal_k_glide,
+        P::Gender => tr.vocal_k_gender,
+        P::Breath => tr.vocal_k_breath,
+    }
+}
+
+fn forge_param_label(
+    tr: &crate::i18n::Strings,
+    param: keyframexl::automation::ForgeParam,
+) -> &'static str {
+    use keyframexl::automation::ForgeParam as P;
+    let m = tr.forge_macros();
+    match param {
+        P::Size => m[0].0,
+        P::Energy => m[1].0,
+        P::Dirt => m[2].0,
+        P::Space => m[3].0,
+        P::Transpose => tr.forge_k_pitch,
+        P::GainDb => tr.forge_k_output,
+    }
+}
+
+fn fmt_secs_f32(v: f32) -> String {
+    if v <= 0.0005 {
+        "0".into()
+    } else if v < 1.0 {
+        format!("{:.0} ms", v * 1000.0)
+    } else {
+        format!("{v:.2} s")
+    }
+}
+
+fn fmt_hz_f32(v: f32) -> String {
+    if v >= 1000.0 {
+        format!("{:.1} kHz", v / 1000.0)
+    } else {
+        format!("{v:.0} Hz")
+    }
+}
+
+fn fmt_pan_f32(v: f32) -> String {
+    if v.abs() < 0.005 {
+        "C".into()
+    } else if v < 0.0 {
+        format!("L{:.0}", -v * 100.0)
+    } else {
+        format!("R{:.0}", v * 100.0)
+    }
+}
+
+fn format_sampler_value(param: keyframexl::automation::SamplerParam, v: f32) -> String {
+    use keyframexl::automation::SamplerParam as P;
+    match param {
+        P::ProgVolume | P::ZoneGain => {
+            if v <= -59.9 {
+                "−∞ dB".into()
+            } else {
+                format!("{v:+.1} dB")
+            }
+        }
+        P::ProgPan | P::ZonePan => fmt_pan_f32(v),
+        P::ProgTranspose | P::ZoneSemi => format!("{:+.0} st", v.round()),
+        P::ProgBendRange => format!("{v:.0} ct"),
+        P::ZoneFine => format!("{v:+.0} ct"),
+        P::ProgPolyphony | P::ZoneMuteGroup => format!("{:.0}", v.round()),
+        P::ZoneKeyTrack => format!("{:+.0}%", v * 100.0),
+        P::ZoneVelTrack
+        | P::ZoneStretchAmount
+        | P::ZoneAmpSustain
+        | P::ZoneFilterEmph(_)
+        | P::ZoneEnvSustain(_) => format!("{:.0}%", v * 100.0),
+        P::ZoneStretchBeats => format!("{v:.2}"),
+        P::ProgGlide
+        | P::ZoneAmpDelay
+        | P::ZoneAmpAttack
+        | P::ZoneAmpHold
+        | P::ZoneAmpDecay
+        | P::ZoneAmpRelease
+        | P::ZoneEnvDelay(_)
+        | P::ZoneEnvAttack(_)
+        | P::ZoneEnvHold(_)
+        | P::ZoneEnvDecay(_)
+        | P::ZoneEnvRelease(_)
+        | P::ZoneLfoAttack(_) => fmt_secs_f32(v),
+        P::ZoneFilterCutoff(_) => fmt_hz_f32(v),
+        P::ZoneLfoRate(_) => format!("{v:.2} Hz"),
+        P::ZoneLfoPhase(_) => format!("{:.0}°", v * 360.0),
+    }
+}
+
+fn format_synth_value(param: keyframexl::automation::SynthParam, v: f32) -> String {
+    use keyframexl::automation::SynthParam as P;
+    match param {
+        P::Cutoff => fmt_hz_f32(v),
+        P::LfoRate(_) => {
+            if v < 1.0 {
+                format!("{v:.2} Hz")
+            } else {
+                format!("{v:.1} Hz")
+            }
+        }
+        P::Coarse | P::CoarseB | P::CoarseC => format!("{:+.0} st", v.round()),
+        P::Fine | P::FineB => format!("{:+.0} ct", v.round()),
+        P::BendRange => format!("±{:.0} st", v.round()),
+        P::Unison | P::PartialsC => format!("{:.0}", v.round()),
+        P::AmpAttack
+        | P::AmpDecay
+        | P::AmpRelease
+        | P::FilterAttack
+        | P::FilterDecay
+        | P::FilterRelease
+        | P::Glide => fmt_secs_f32(v),
+        P::Warp | P::WarpB | P::TiltC | P::OddC | P::Keytrack | P::EnvAmount => {
+            format!("{:+.0}%", v * 100.0)
+        }
+        _ => format!("{:.0}%", v * 100.0),
+    }
+}
+
+fn format_vocal_value(param: keyframexl::automation::VocalParam, v: f32) -> String {
+    use keyframexl::automation::VocalParam as P;
+    match param {
+        P::VibratoDepth => format!("{v:.0} ct"),
+        P::VibratoRate => format!("{v:.1} Hz"),
+        P::VibratoDelay | P::VibratoFade | P::Transition => fmt_secs_f32(v),
+        P::Gender => format!("{:+.0}%", v * 100.0),
+        P::Breath => format!("{:.0}%", v * 100.0),
+    }
+}
+
+fn format_forge_value(param: keyframexl::automation::ForgeParam, v: f32) -> String {
+    use keyframexl::automation::ForgeParam as P;
+    match param {
+        P::Transpose => format!("{v:+.1} st"),
+        P::GainDb => format!("{v:+.1} dB"),
+        _ => format!("{:.0}%", v * 100.0),
     }
 }
 

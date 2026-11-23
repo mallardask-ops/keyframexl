@@ -478,7 +478,7 @@ fn tempo_micros(bpm: f64) -> u32 {
 /// no ramp meta, so Linear ramps are approximated by tempo events every 1/16
 /// note (STEP ticks) interpolated along the ramp.
 fn push_conductor_tempo_meters<'a>(conductor: &mut Vec<(u64, TrackEventKind<'a>)>, song: &Song) {
-    if song.tempo_map.is_empty() {
+    let Some(effective) = crate::tempo::effective_tempo_map(song) else {
         conductor.push((
             0,
             TrackEventKind::Meta(MetaMessage::Tempo(u24::new(tempo_micros(song.tempo)))),
@@ -488,8 +488,8 @@ fn push_conductor_tempo_meters<'a>(conductor: &mut Vec<(u64, TrackEventKind<'a>)
             TrackEventKind::Meta(MetaMessage::TimeSignature(4, 2, 24, 8)),
         ));
         return;
-    }
-    let mut points = song.tempo_map.points.clone();
+    };
+    let mut points = effective.points;
     points.sort_by_key(|p| p.tick);
     if points.first().is_none_or(|p| p.tick != 0) {
         conductor.push((

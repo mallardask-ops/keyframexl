@@ -167,11 +167,20 @@ pub(super) fn master_strip(ui: &mut Ui, ed: &mut Edit, id: u64, p: &mut ForgePat
     let tr = crate::i18n::ctx_tr(ui.ctx());
     panel(ui, tr.forge_sec_character, t::enc_white(), |ui| {
         ui.horizontal_wrapped(|ui| {
+            use keyframexl::automation::{ForgeParam as FP, Target};
             let macro_colors = [t::enc_white(), t::enc_orange(), t::wait(), t::enc_blue()];
             let macros = tr.forge_macros();
+            let mparams = [FP::Size, FP::Energy, FP::Dirt, FP::Space];
             for i in 0..4 {
                 let mut v = p.macros.get(i);
                 let def = forge::Macros::default().get(i) as f64;
+                kit::automatable(
+                    ui,
+                    Target::ForgeParam {
+                        inst: id,
+                        param: mparams[i],
+                    },
+                );
                 knob(
                     ui,
                     ed,
@@ -185,6 +194,13 @@ pub(super) fn master_strip(ui: &mut Ui, ed: &mut Edit, id: u64, p: &mut ForgePat
                 );
                 p.macros.set(i, v);
             }
+            kit::automatable(
+                ui,
+                Target::ForgeParam {
+                    inst: id,
+                    param: FP::Transpose,
+                },
+            );
             knob(
                 ui,
                 ed,
@@ -195,6 +211,13 @@ pub(super) fn master_strip(ui: &mut Ui, ed: &mut Edit, id: u64, p: &mut ForgePat
                 false,
                 &|v| format!("{v:+.1} st"),
                 tr.forge_k_pitch_hint,
+            );
+            kit::automatable(
+                ui,
+                Target::ForgeParam {
+                    inst: id,
+                    param: FP::GainDb,
+                },
             );
             knob(
                 ui,

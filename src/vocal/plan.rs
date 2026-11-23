@@ -72,7 +72,7 @@ impl Place<'_> {
 
 pub fn plan(song: &Song, rate: u32) -> Vec<Spec> {
     let table =
-        (!song.tempo_map.is_empty()).then(|| TempoTable::build(&song.tempo_map, song.tempo, rate));
+        crate::tempo::effective_tempo_map(song).map(|m| TempoTable::build(&m, song.tempo, rate));
     let mut out = Vec::new();
     for inst in &song.instruments {
         let InstrumentKind::Vocal { voice } = &inst.kind else {

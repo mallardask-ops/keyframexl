@@ -521,9 +521,17 @@ impl App {
         });
     }
 
-    /// Knob bound to a value. A gesture start is one undo step.
-    fn pknob(&mut self, ui: &mut Ui, spec: &P, color: Color32, value: f64) -> Option<f64> {
+    /// Knob bound to an automatable Sampler parameter. A gesture start is one undo step.
+    fn pknob(
+        &mut self,
+        ui: &mut Ui,
+        spec: &P,
+        color: Color32,
+        value: f64,
+        target: keyframexl::automation::Target,
+    ) -> Option<f64> {
         let mut v = value;
+        kit::automatable(ui, target);
         let (_, started, changed) = kit::knob(
             ui,
             &kit::Knob {
@@ -542,6 +550,28 @@ impl App {
             self.checkpoint();
         }
         changed.then_some(v.clamp(spec.min, spec.max))
+    }
+
+    fn sampler_target(
+        &self,
+        id: u64,
+        param: keyframexl::automation::SamplerParam,
+    ) -> keyframexl::automation::Target {
+        let zone = if param.is_program() {
+            None
+        } else {
+            self.sampler_view
+                .get(&id)
+                .copied()
+                .unwrap_or_default()
+                .zone
+                .map(|z| z as u16)
+        };
+        keyframexl::automation::Target::SamplerParam {
+            inst: id,
+            zone,
+            param,
+        }
     }
 
     pub(super) fn sampler_editor(&mut self, ui: &mut Ui, id: u64, preset: &SamplePreset) {
@@ -1110,8 +1140,15 @@ impl App {
                             pr.bend_range,
                         ),
                     ];
+                    let prog_params = [
+                        keyframexl::automation::SamplerParam::ProgVolume,
+                        keyframexl::automation::SamplerParam::ProgPan,
+                        keyframexl::automation::SamplerParam::ProgTranspose,
+                        keyframexl::automation::SamplerParam::ProgBendRange,
+                    ];
                     for (k, (spec, v)) in specs.iter().enumerate() {
-                        if let Some(nv) = this.pknob(ui, spec, c, *v) {
+                        let tgt = this.sampler_target(id, prog_params[k]);
+                        if let Some(nv) = this.pknob(ui, spec, c, *v, tgt) {
                             this.edit_preset(id, false, |p| match k {
                                 0 => p.program.volume_db = nv,
                                 1 => p.program.pan = nv,
@@ -1150,6 +1187,8 @@ impl App {
                     }
                 });
                 ui.horizontal_wrapped(|ui| {
+                    let poly_tgt = this
+                        .sampler_target(id, keyframexl::automation::SamplerParam::ProgPolyphony);
                     if let Some(v) = this.pknob(
                         ui,
                         &P {
@@ -1163,6 +1202,7 @@ impl App {
                         },
                         t::SMP_GOLD,
                         pr.polyphony as f64,
+                        poly_tgt,
                     ) {
                         this.edit_preset(id, false, |p| p.program.polyphony = v.round() as u8);
                     }
@@ -1170,6 +1210,8 @@ impl App {
                     let fmt_glide = move |v: f64| {
                         if v <= 0.0 { off_str.into() } else { secs(v) }
                     };
+                    let glide_tgt =
+                        this.sampler_target(id, keyframexl::automation::SamplerParam::ProgGlide);
                     if let Some(v) = this.pknob(
                         ui,
                         &P {
@@ -1183,6 +1225,7 @@ impl App {
                         },
                         t::SMP_LOOP,
                         pr.glide,
+                        glide_tgt,
                     ) {
                         this.edit_preset(id, false, |p| {
                             p.program.glide = if v < 0.0011 { 0.0 } else { v }
@@ -1348,8 +1391,14 @@ impl App {
                             z.params.key_track,
                         ),
                     ];
+                    let pitch_params = [
+                        keyframexl::automation::SamplerParam::ZoneSemi,
+                        keyframexl::automation::SamplerParam::ZoneFine,
+                        keyframexl::automation::SamplerParam::ZoneKeyTrack,
+                    ];
                     for (k, (spec, v)) in rows.iter().enumerate() {
-                        if let Some(nv) = this.pknob(ui, spec, t::SMP_GOLD, *v) {
+                        let tgt = this.sampler_target(id, pitch_params[k]);
+                        if let Some(nv) = this.pknob(ui, spec, t::SMP_GOLD, *v, tgt) {
                             this.edit_zones(id, false, |z| {
                                 let semi = (z.tune_cents / 100.0).round();
                                 let fine = z.tune_cents - semi * 100.0;
@@ -1428,8 +1477,15 @@ impl App {
                             z.params.mute_group as f64,
                         ),
                     ];
+                    let amp_params = [
+                        keyframexl::automation::SamplerParam::ZoneGain,
+                        keyframexl::automation::SamplerParam::ZonePan,
+                        keyframexl::automation::SamplerParam::ZoneVelTrack,
+                        keyframexl::automation::SamplerParam::ZoneMuteGroup,
+                    ];
                     for (k, (spec, v)) in rows.iter().enumerate() {
-                        if let Some(nv) = this.pknob(ui, spec, t::SMP_START, *v) {
+                        let tgt = this.sampler_target(id, amp_params[k]);
+                        if let Some(nv) = this.pknob(ui, spec, t::SMP_START, *v, tgt) {
                             this.edit_zones(id, false, |z| match k {
                                 0 => z.gain = 10f64.powf(nv / 20.0).min(16.0),
                                 1 => z.pan = nv,
@@ -1497,7 +1553,13 @@ impl App {
                             hint: tr.smp_k_length_hint,
                             log: true,
                         };
-                        if let Some(nv) = self.pknob(ui, &spec, t::SMP_FILTER2, z.stretch.amount) {
+                        let tgt = self.sampler_target(
+                            id,
+                            keyframexl::automation::SamplerParam::ZoneStretchAmount,
+                        );
+                        if let Some(nv) =
+                            self.pknob(ui, &spec, t::SMP_FILTER2, z.stretch.amount, tgt)
+                        {
                             self.edit_zones(id, false, |z| z.stretch.amount = nv.clamp(0.25, 4.0));
                         }
                     }
@@ -1511,7 +1573,13 @@ impl App {
                             hint: tr.smp_k_beats_hint,
                             log: true,
                         };
-                        if let Some(nv) = self.pknob(ui, &spec, t::SMP_FILTER2, z.stretch.beats) {
+                        let tgt = self.sampler_target(
+                            id,
+                            keyframexl::automation::SamplerParam::ZoneStretchBeats,
+                        );
+                        if let Some(nv) =
+                            self.pknob(ui, &spec, t::SMP_FILTER2, z.stretch.beats, tgt)
+                        {
                             // Quarter-beat steps.
                             self.edit_zones(id, false, |z| {
                                 z.stretch.beats = ((nv * 4.0).round() / 4.0).clamp(0.25, 64.0)
@@ -1552,13 +1620,24 @@ impl App {
 
         // Interactive bendable DAHDSR Amp Envelope.
         smp_bay(ui, |ui| {
+            use keyframexl::automation::SamplerParam as SP;
             let env = z.adsr.clone();
+            let params = [
+                SP::ZoneAmpDelay,
+                SP::ZoneAmpAttack,
+                SP::ZoneAmpHold,
+                SP::ZoneAmpDecay,
+                SP::ZoneAmpSustain,
+                SP::ZoneAmpRelease,
+            ];
             if let Some(new_env) = self.envelope_bay(
                 ui,
+                id,
                 &format!("amp-{id}"),
                 tr.smp_sec_amp_env,
                 t::SMP_GOLD,
                 &env,
+                params,
             ) {
                 self.edit_zones(id, false, |z| z.adsr = new_env.clone());
             }
@@ -2013,6 +2092,10 @@ impl App {
                     }
                 });
                 ui.horizontal_wrapped(|ui| {
+                    let cut_tgt = this.sampler_target(
+                        id,
+                        keyframexl::automation::SamplerParam::ZoneFilterCutoff(fi as u8),
+                    );
                     if let Some(v) = this.pknob(
                         ui,
                         &P {
@@ -2026,9 +2109,14 @@ impl App {
                         },
                         col,
                         f.cutoff,
+                        cut_tgt,
                     ) {
                         this.edit_zones(id, false, |z| z.params.filters[fi].cutoff = v);
                     }
+                    let emph_tgt = this.sampler_target(
+                        id,
+                        keyframexl::automation::SamplerParam::ZoneFilterEmph(fi as u8),
+                    );
                     if let Some(v) = this.pknob(
                         ui,
                         &P {
@@ -2042,6 +2130,7 @@ impl App {
                         },
                         col,
                         f.emphasis,
+                        emph_tgt,
                     ) {
                         this.edit_zones(id, false, |z| z.params.filters[fi].emphasis = v);
                     }
@@ -2093,9 +2182,25 @@ impl App {
             };
             let env = z.params.env[ei].clone();
             smp_bay(ui, |ui| {
-                if let Some(new_env) =
-                    self.envelope_bay(ui, &format!("env{ei}-{id}"), &title, t::SMP_START, &env)
-                {
+                use keyframexl::automation::SamplerParam as SP;
+                let e = ei as u8;
+                let params = [
+                    SP::ZoneEnvDelay(e),
+                    SP::ZoneEnvAttack(e),
+                    SP::ZoneEnvHold(e),
+                    SP::ZoneEnvDecay(e),
+                    SP::ZoneEnvSustain(e),
+                    SP::ZoneEnvRelease(e),
+                ];
+                if let Some(new_env) = self.envelope_bay(
+                    ui,
+                    id,
+                    &format!("env{ei}-{id}"),
+                    &title,
+                    t::SMP_START,
+                    &env,
+                    params,
+                ) {
                     self.edit_zones(id, false, |z| z.params.env[ei] = new_env.clone());
                 }
             });
@@ -2351,8 +2456,14 @@ impl App {
                             l.phase,
                         ),
                     ];
+                    let lfo_params = [
+                        keyframexl::automation::SamplerParam::ZoneLfoRate(li as u8),
+                        keyframexl::automation::SamplerParam::ZoneLfoAttack(li as u8),
+                        keyframexl::automation::SamplerParam::ZoneLfoPhase(li as u8),
+                    ];
                     for (k, (spec, v)) in rows.iter().enumerate() {
-                        if let Some(nv) = this.pknob(ui, spec, t::SMP_START, *v) {
+                        let tgt = this.sampler_target(id, lfo_params[k]);
+                        if let Some(nv) = this.pknob(ui, spec, t::SMP_START, *v, tgt) {
                             this.edit_zones(id, false, |z| match k {
                                 0 => z.params.lfo[li].rate = nv,
                                 1 => z.params.lfo[li].attack = nv,
@@ -2700,13 +2811,16 @@ impl App {
 
     // ---------------------------------------------------------------- Interactive Bendable DAHDSR
 
+    #[allow(clippy::too_many_arguments)]
     fn envelope_bay(
         &mut self,
         ui: &mut Ui,
+        id: u64,
         key: &str,
         title: &str,
         color: Color32,
         env: &Adsr,
+        params: [keyframexl::automation::SamplerParam; 6],
     ) -> Option<Adsr> {
         smp_section_head(ui, title, color);
         let mut out: Option<Adsr> = None;
@@ -2889,7 +3003,8 @@ impl App {
                 ),
             ];
             for (k, (spec, v)) in rows.iter().enumerate() {
-                if let Some(nv) = self.pknob(ui, spec, color, *v) {
+                let tgt = self.sampler_target(id, params[k]);
+                if let Some(nv) = self.pknob(ui, spec, color, *v, tgt) {
                     let mut e = out.clone().unwrap_or_else(|| env.clone());
                     let nv = if spec.log && nv < 0.0011 { 0.0 } else { nv };
                     match k {

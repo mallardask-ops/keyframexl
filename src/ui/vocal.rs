@@ -236,8 +236,16 @@ impl App {
                 });
                 panel(ui, tr.vocal_sec_voice, t::enc_green(), |ui| {
                     ui.horizontal_wrapped(|ui| {
+                        use keyframexl::automation::{Target, VocalParam};
                         let c = t::enc_green();
                         let p = &mut v.params;
+                        kit::automatable(
+                            ui,
+                            Target::VocalParam {
+                                inst: id,
+                                param: VocalParam::VibratoDepth,
+                            },
+                        );
                         ed.knob(
                             ui,
                             tr.vocal_k_vibrato,
@@ -247,6 +255,13 @@ impl App {
                             false,
                             &|x| format!("{x:.0} ct"),
                             tr.vocal_k_vibrato_hint,
+                        );
+                        kit::automatable(
+                            ui,
+                            Target::VocalParam {
+                                inst: id,
+                                param: VocalParam::VibratoRate,
+                            },
                         );
                         ed.knob(
                             ui,
@@ -258,6 +273,13 @@ impl App {
                             &|x| format!("{x:.1} Hz"),
                             tr.vocal_k_rate_hint,
                         );
+                        kit::automatable(
+                            ui,
+                            Target::VocalParam {
+                                inst: id,
+                                param: VocalParam::VibratoDelay,
+                            },
+                        );
                         ed.knob(
                             ui,
                             tr.vocal_k_delay,
@@ -267,6 +289,13 @@ impl App {
                             false,
                             &secs,
                             tr.vocal_k_delay_hint,
+                        );
+                        kit::automatable(
+                            ui,
+                            Target::VocalParam {
+                                inst: id,
+                                param: VocalParam::VibratoFade,
+                            },
                         );
                         ed.knob(
                             ui,
@@ -278,6 +307,13 @@ impl App {
                             &secs,
                             tr.vocal_k_fade_in_hint,
                         );
+                        kit::automatable(
+                            ui,
+                            Target::VocalParam {
+                                inst: id,
+                                param: VocalParam::Transition,
+                            },
+                        );
                         ed.knob(
                             ui,
                             tr.vocal_k_glide,
@@ -288,6 +324,13 @@ impl App {
                             &secs,
                             tr.vocal_k_glide_hint,
                         );
+                        kit::automatable(
+                            ui,
+                            Target::VocalParam {
+                                inst: id,
+                                param: VocalParam::Gender,
+                            },
+                        );
                         ed.knob(
                             ui,
                             tr.vocal_k_gender,
@@ -297,6 +340,13 @@ impl App {
                             false,
                             &signed,
                             tr.vocal_k_gender_hint,
+                        );
+                        kit::automatable(
+                            ui,
+                            Target::VocalParam {
+                                inst: id,
+                                param: VocalParam::Breath,
+                            },
                         );
                         ed.knob(
                             ui,

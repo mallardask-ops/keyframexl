@@ -195,6 +195,7 @@ mod project_tests {
 }
 
 pub mod automation;
+pub mod automation_params;
 pub mod bundle;
 pub mod demo;
 pub mod denormal;

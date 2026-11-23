@@ -542,9 +542,34 @@ impl Voice {
     }
 
     fn render_zone(&mut self, z: &Zone, program: &Program, rate: f64) -> [f64; 2] {
-        let p = &z.params;
+        self.render_zone_with(
+            z,
+            &z.params,
+            &z.adsr,
+            z.gain,
+            z.pan,
+            z.tune_cents,
+            z.velocity_tracking,
+            program,
+            rate,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_zone_with(
+        &mut self,
+        z: &Zone,
+        p: &crate::sampler::ZoneParams,
+        adsr: &crate::sampler::Adsr,
+        zone_gain: f64,
+        zone_pan: f64,
+        tune_cents: f64,
+        velocity_tracking: f64,
+        program: &Program,
+        rate: f64,
+    ) -> [f64; 2] {
         let gate = self.gate;
-        if self.t >= gate + z.adsr.release {
+        if self.t >= gate + adsr.release {
             self.done = true;
             return [0.0; 2];
         }
@@ -586,7 +611,7 @@ impl Voice {
 
         // Pitch.
         let semis = (self.key as f64 - z.root as f64) * p.key_track
-            + z.tune_cents / 100.0
+            + tune_cents / 100.0
             + program.transpose as f64
             + self.bend()
             + m[target(ModTarget::Pitch)];
@@ -666,14 +691,15 @@ impl Voice {
                 if !on[fi] {
                     return (0.0, 0.0);
                 }
-                if cache.0 == cut && cache.1 == emph {
-                    return cache.2;
-                }
                 let f = &p.filters[fi];
                 let fc = (f.cutoff * 2f64.powf(cut)).clamp(20.0, rate * 0.45);
+                let em = (f.emphasis + emph).clamp(0.0, 1.0);
+                if cache.0 == fc && cache.1 == em {
+                    return cache.2;
+                }
                 let g = (std::f64::consts::PI * fc / rate).tan();
-                let k = 2.0 - 1.96 * (f.emphasis + emph).clamp(0.0, 1.0);
-                *cache = (cut, emph, (g, k));
+                let k = 2.0 - 1.96 * em;
+                *cache = (fc, em, (g, k));
                 (g, k)
             };
             let c = [
@@ -720,11 +746,10 @@ impl Voice {
         }
 
         // Amplitude and pan.
-        let vel_gain =
-            (1.0 - z.velocity_tracking) + z.velocity_tracking * (self.vel as f64 / 127.0);
-        let mut amp = z.adsr.value(self.t, gate) * z.gain * vel_gain * program.gain();
+        let vel_gain = (1.0 - velocity_tracking) + velocity_tracking * (self.vel as f64 / 127.0);
+        let mut amp = adsr.value(self.t, gate) * zone_gain * vel_gain * program.gain();
         amp *= (1.0 + m[target(ModTarget::Gain)]).clamp(0.0, 2.0);
-        let pan = z.pan + program.pan + m[target(ModTarget::Pan)];
+        let pan = zone_pan + program.pan + m[target(ModTarget::Pan)];
         let pan = if self.pan != 0.0 { pan + self.pan } else { pan }.clamp(-1.0, 1.0);
         amp *= self.kill_gain();
         self.t += 1.0 / rate;
@@ -1195,7 +1220,7 @@ pub struct Engine {
     tempo: Option<crate::tempo::TempoTable>,
     block_at: u64,
     block_wrap: Option<(usize, u64)>,
-    tempo_key: (Vec<crate::tempo::TempoPoint>, u64),
+    tempo_key: u64,
     /// Seconds per step at the playhead this block (map tempo).
     sps_block: f64,
     tables: &'static crate::synth::TableBank,
@@ -1366,9 +1391,9 @@ impl Engine {
             tempo: None,
             block_at: 0,
             block_wrap: None,
-            tempo_key: (Vec::new(), 0),
+            tempo_key: 0,
             sps_block: seconds_per_step(120.0),
-            auto: Vec::with_capacity(64),
+            auto: Vec::with_capacity(128),
             auto_params: Vec::with_capacity(64),
             live_params: Vec::new(),
             vocal: std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
@@ -1466,6 +1491,9 @@ impl Engine {
     pub fn reserve(&mut self, tracks: usize, frames: usize) {
         self.grow_buses(tracks, frames);
         self.live_params.reserve(MAX_LIVE_PARAMS);
+        // Warm arc_swap's thread-local debt slot so the first audio block
+        // does not allocate it lazily inside `collect_hits`.
+        let _ = self.vocal.load();
         for c in &mut self.synth_fx {
             if c.buf.len() < frames * 2 {
                 c.buf.resize(frames * 2, 0.0);
@@ -1724,13 +1752,25 @@ impl Engine {
         self.block_at = pos;
         self.block_wrap = None;
         // Automation clips play in Song mode (FL), read once per block.
-        let mut bpm = song.tempo;
+        let mut bpm = override_of(
+            &self.auto,
+            &self.live_params,
+            crate::automation::Target::Tempo,
+        )
+        .map(|v| v as f64)
+        .unwrap_or(song.tempo);
         if song_mode {
             let at = self.song_tick(song, pos);
             crate::automation::values_at(song, at, &mut self.auto);
             if let Some(t) = &self.tempo {
                 bpm = t.bpm_at(at);
                 self.sps_block = seconds_per_step(bpm);
+            } else if let Some(v) = override_of(
+                &self.auto,
+                &self.live_params,
+                crate::automation::Target::Tempo,
+            ) {
+                bpm = v as f64;
             }
         } else {
             self.auto.clear();
@@ -1899,12 +1939,62 @@ impl Engine {
                     c.states[k] = Some(crate::fx::FxState::new(slot.kind, rate));
                 }
                 let st = c.states[k].as_mut().expect("built");
+                let fx_idx = crate::synth::FX_KINDS
+                    .iter()
+                    .position(|fk| *fk == slot.kind)
+                    .map(|i| i as u8);
+                let has_ov = fx_idx.is_some_and(|fi| {
+                    let is_fx = |t: crate::automation::Target| {
+                        matches!(
+                            t,
+                            crate::automation::Target::SynthFxParam { inst: ci, fx, .. }
+                                if ci == id && fx == fi
+                        )
+                    };
+                    self.auto.iter().any(|a| is_fx(a.target))
+                        || self.live_params.iter().any(|l| is_fx(l.target))
+                });
+                let params: &[f32] = if has_ov && let Some(fi) = fx_idx {
+                    self.auto_params.clear();
+                    for &p in slot.params.iter().take(self.auto_params.capacity()) {
+                        self.auto_params.push(p);
+                    }
+                    for l in &self.live_params {
+                        if let crate::automation::Target::SynthFxParam {
+                            inst: ci,
+                            fx,
+                            param,
+                        } = l.target
+                            && ci == id
+                            && fx == fi
+                            && let Some(p) = self.auto_params.get_mut(param as usize)
+                        {
+                            *p = l.value;
+                        }
+                    }
+                    for a in &self.auto {
+                        if let crate::automation::Target::SynthFxParam {
+                            inst: ci,
+                            fx,
+                            param,
+                        } = a.target
+                            && ci == id
+                            && fx == fi
+                            && let Some(p) = self.auto_params.get_mut(param as usize)
+                        {
+                            *p = a.value;
+                        }
+                    }
+                    &self.auto_params
+                } else {
+                    &slot.params
+                };
                 if slot.mix >= 1.0 {
-                    st.process(&slot.params, buf, rate, tempo);
+                    st.process(params, buf, rate, tempo);
                 } else {
                     let dry = &mut self.scratch[..n];
                     dry.copy_from_slice(buf);
-                    st.process(&slot.params, buf, rate, tempo);
+                    st.process(params, buf, rate, tempo);
                     for (w, d) in buf.iter_mut().zip(dry.iter()) {
                         *w = *d + (*w - *d) * slot.mix;
                     }
@@ -2521,14 +2611,40 @@ impl Engine {
                 self.track_pdc[t].run(bus, d);
             }
             // Built-in EQ, skipped while flat.
-            if track.eq != [0.0; 3] {
+            let eq_gains = [0u8, 1, 2].map(|band| {
+                override_of(
+                    &self.auto,
+                    &self.live_params,
+                    crate::automation::Target::MixerEq {
+                        track: t as u16,
+                        band,
+                    },
+                )
+                .unwrap_or(track.eq[band as usize])
+            });
+            if eq_gains != [0.0; 3] {
                 let st = self.eq[t]
                     .get_or_insert_with(|| crate::fx::FxState::new(crate::fx::FxKind::Eq, rate));
-                st.process(&track.eq_params(), bus, rate, tempo);
+                let eq_params = [
+                    crate::sequence::EQ_FREQS[0],
+                    eq_gains[0],
+                    crate::sequence::EQ_FREQS[1],
+                    eq_gains[1],
+                    0.8,
+                    crate::sequence::EQ_FREQS[2],
+                    eq_gains[2],
+                ];
+                st.process(&eq_params, bus, rate, tempo);
             }
             // Stereo separation (FL: the SEP knob), skipped at 0.
-            if track.sep != 0.0 {
-                let width = 1.0 + track.sep;
+            let sep = override_of(
+                &self.auto,
+                &self.live_params,
+                crate::automation::Target::MixerSep { track: t as u16 },
+            )
+            .unwrap_or(track.sep);
+            if sep != 0.0 {
+                let width = 1.0 + sep;
                 for f in bus.as_chunks_mut::<2>().0 {
                     let (m, s) = ((f[0] + f[1]) * 0.5, (f[0] - f[1]) * 0.5 * width);
                     f[0] = m + s;
@@ -2651,31 +2767,35 @@ impl Engine {
         }
     }
 
-    /// Keep the tempo table in step with the song's map (song mode only).
+    /// Keep the tempo table in step with the song's map + Tempo automation clips (song mode only).
     fn sync_tempo(&mut self, song: &Song, song_mode: bool) {
-        if !song_mode || song.tempo_map.is_empty() {
+        if !song_mode || !crate::tempo::has_tempo_automation(song) {
             self.tempo = None;
             return;
         }
-        let bits = song.tempo.to_bits();
-        if self.tempo.is_none()
-            || self.tempo_key.1 != bits
-            || self.tempo_key.0 != song.tempo_map.points
-        {
-            self.tempo_key = (song.tempo_map.points.clone(), bits);
-            self.tempo = Some(crate::tempo::TempoTable::build(
-                &song.tempo_map,
-                song.tempo,
-                self.rate as u32,
-            ));
+        let sig = crate::tempo::tempo_signature(song);
+        if self.tempo.is_none() || self.tempo_key != sig {
+            self.tempo_key = sig;
+            self.tempo = crate::tempo::effective_tempo_map(song)
+                .map(|m| crate::tempo::TempoTable::build(&m, song.tempo, self.rate as u32));
         }
+    }
+
+    fn swing_now(&self, song: &Song) -> f64 {
+        override_of(
+            &self.auto,
+            &self.live_params,
+            crate::automation::Target::Swing,
+        )
+        .map(|v| v as f64)
+        .unwrap_or(song.swing)
+        .clamp(0.0, 0.6)
     }
 
     /// Frames from the start of a pattern to tick `t`, swing included.
     fn note_frame(&self, song: &Song, t: Tick) -> u64 {
         let sps = Self::sps(song);
-        ((steps(t) * sps + swing_offset(t, sps, song.swing.clamp(0.0, 0.6))) * self.rate).ceil()
-            as u64
+        ((steps(t) * sps + swing_offset(t, sps, self.swing_now(song))) * self.rate).ceil() as u64
     }
 
     /// Frames from the song start to playlist tick `t`. Whole bars count in
@@ -2753,7 +2873,7 @@ impl Engine {
                         Some(table) => {
                             let sps = seconds_per_step(table.bpm_at(start + local));
                             (table.frames_at(start + local)
-                                + swing_offset(local, sps, song.swing.clamp(0.0, 0.6)) * e.rate)
+                                + swing_offset(local, sps, e.swing_now(song)) * e.rate)
                                 .ceil() as u64
                         }
                         None => offset + e.note_frame(song, local),
@@ -3600,13 +3720,36 @@ impl Engine {
                 let (b, pr, sl) = c.for_note(v.ch, p);
                 (v.bend_to, v.pressure, v.cc74, v.wheel) = (b, pr, sl, c.wheel);
             }
-            let mut synth = orig.map(|p| p.modulated_for_render());
+            let mut synth = orig.map(|p| {
+                if crate::automation_params::has_synth_overrides(v.inst, auto, live) {
+                    let mut s = p.copy_for_render();
+                    crate::automation_params::apply_synth_overrides(v.inst, &mut s, auto, live);
+                    s.apply_own_macros();
+                    s
+                } else {
+                    p.modulated_for_render()
+                }
+            });
             // The modulation matrix re-applies every 32 frames on top of the
             // patch after macros (no allocation: `mods` stays empty in copies).
             let unmodulated = synth
                 .as_ref()
                 .filter(|_| orig.is_some_and(|o| !o.mods.is_empty()))
                 .cloned();
+            let sampler_override = match v.source {
+                Source::Zone { zone }
+                    if crate::automation_params::has_sampler_overrides(v.inst, auto, live) =>
+                {
+                    preset.and_then(|p| {
+                        p.zones.get(zone).map(|z| {
+                            crate::automation_params::resolve_sampler_runtime(
+                                v.inst, zone, z, &p.program, auto, live,
+                            )
+                        })
+                    })
+                }
+                _ => None,
+            };
             let mut until_mod = 0usize;
             // Channel volume and pan, smoothed ~5 ms toward the block's target;
             // skipped at unity so old renders stay bit-exact.
@@ -3630,7 +3773,7 @@ impl Engine {
                             if let (Some(base), Some(o)) = (&unmodulated, orig) {
                                 if until_mod == 0 {
                                     *p = base.clone();
-                                    let src = v.mod_sources(o, song.tempo);
+                                    let src = v.mod_sources(base, song.tempo);
                                     o.apply_mods(p, &src);
                                     until_mod = 32;
                                 }
@@ -3654,7 +3797,20 @@ impl Engine {
                     },
                     Source::Zone { zone } => {
                         match preset.and_then(|p| p.zones.get(zone).map(|z| (z, &p.program))) {
-                            Some((z, program)) => v.render_zone(z, program, rate),
+                            Some((z, program)) => match &sampler_override {
+                                Some((rt, prog)) => v.render_zone_with(
+                                    z,
+                                    &rt.params,
+                                    &rt.adsr,
+                                    rt.gain,
+                                    rt.pan,
+                                    rt.tune_cents,
+                                    rt.velocity_tracking,
+                                    prog,
+                                    rate,
+                                ),
+                                None => v.render_zone(z, program, rate),
+                            },
                             // The preset changed under the voice: drop it.
                             None => {
                                 v.done = true;

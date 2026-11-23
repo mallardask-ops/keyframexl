@@ -2,7 +2,8 @@
 //! the song plays. An automation clip is a pattern with an envelope instead of
 //! notes, placed in the playlist like any clip.
 
-use crate::sequence::{Song, Tick};
+pub use crate::automation_params::{ForgeParam, SamplerParam, SynthParam, VocalParam};
+use crate::sequence::{EQ_RANGE, InstrumentKind, Song, Tick};
 use serde::{Deserialize, Serialize};
 
 /// The control an envelope drives.
@@ -45,6 +46,46 @@ pub enum Target {
         plugin: u64,
         param: u32,
     },
+    /// Song tempo in BPM (40..=300).
+    Tempo,
+    /// Global Channel Rack swing (0..=0.6).
+    Swing,
+    /// Mixer track stereo separation (−1..=1).
+    MixerSep {
+        track: u16,
+    },
+    /// Mixer track 3-band strip EQ gain in dB (band: 0=Low, 1=Mid, 2=High).
+    MixerEq {
+        track: u16,
+        band: u8,
+    },
+    /// Sampler program or zone parameter (`zone: None` = program param or all zones).
+    SamplerParam {
+        inst: u64,
+        zone: Option<u16>,
+        param: SamplerParam,
+    },
+    /// Tide Synth parameter.
+    SynthParam {
+        inst: u64,
+        param: SynthParam,
+    },
+    /// Tide Synth built-in FX parameter (`fx`: index in `synth::FX_KINDS`, 0..4).
+    SynthFxParam {
+        inst: u64,
+        fx: u8,
+        param: u16,
+    },
+    /// Vocal channel parameter.
+    VocalParam {
+        inst: u64,
+        param: VocalParam,
+    },
+    /// Forge character / pitch / output parameter.
+    ForgeParam {
+        inst: u64,
+        param: ForgeParam,
+    },
 }
 
 /// The highest mixer fader gain.
@@ -62,10 +103,26 @@ impl Target {
         )
     }
 
+    /// Whether this target moves on a logarithmic curve (strictly positive `lo > 0`).
+    pub fn log_scale(&self) -> bool {
+        match *self {
+            Target::SamplerParam { param, .. } => param.is_log(),
+            Target::SynthParam { param, .. } => param.is_log(),
+            Target::VocalParam { param, .. } => param.is_log(),
+            Target::SynthFxParam { fx, param, .. } => {
+                crate::automation_params::synth_fx_spec(fx, param)
+                    .is_some_and(|s| s.log && s.min > 0.0)
+            }
+            _ => false,
+        }
+    }
+
     /// `v` as a fraction 0..1 of the control's travel, given its `range`.
     pub fn to_unit(&self, v: f32, lo: f32, hi: f32) -> f32 {
         if self.tapered() {
             crate::sequence::volume_pos(v)
+        } else if self.log_scale() && lo > 0.0 && hi > lo {
+            ((v.clamp(lo, hi) / lo).ln() / (hi / lo).ln()).clamp(0.0, 1.0)
         } else {
             ((v - lo) / (hi - lo).max(1e-6)).clamp(0.0, 1.0)
         }
@@ -76,6 +133,8 @@ impl Target {
         let u = u.clamp(0.0, 1.0);
         if self.tapered() {
             crate::sequence::volume_gain(u).min(hi)
+        } else if self.log_scale() && lo > 0.0 && hi > lo {
+            lo * (hi / lo).powf(u)
         } else {
             lo + (hi - lo) * u
         }
@@ -86,7 +145,15 @@ impl Target {
         match *self {
             Target::MixerVolume { .. } => (0.0, VOLUME_MAX),
             Target::ChannelVolume { .. } => (0.0, CHANNEL_MAX),
-            Target::MixerPan { .. } | Target::ChannelPan { .. } => (-1.0, 1.0),
+            Target::MixerPan { .. } | Target::ChannelPan { .. } | Target::MixerSep { .. } => {
+                (-1.0, 1.0)
+            }
+            Target::MixerEq { .. } => (-EQ_RANGE, EQ_RANGE),
+            Target::Tempo => (
+                crate::tempo::TEMPO_MIN as f32,
+                crate::tempo::TEMPO_MAX as f32,
+            ),
+            Target::Swing => (0.0, 0.6),
             Target::FxParam { track, slot, param } => song
                 .mixer
                 .get(track as usize)
@@ -98,6 +165,15 @@ impl Target {
             | Target::FxEnabled { .. }
             | Target::SendLevel { .. }
             | Target::PluginParam { .. } => (0.0, 1.0),
+            Target::SamplerParam { param, .. } => param.range(),
+            Target::SynthParam { param, .. } => param.range(),
+            Target::SynthFxParam { fx, param, .. } => {
+                crate::automation_params::synth_fx_spec(fx, param)
+                    .map(|p| (p.min, p.max))
+                    .unwrap_or((0.0, 1.0))
+            }
+            Target::VocalParam { param, .. } => param.range(),
+            Target::ForgeParam { param, .. } => param.range(),
         }
     }
 
@@ -107,6 +183,13 @@ impl Target {
         match *self {
             Target::MixerVolume { track } => song.mixer.get(track as usize).map(|m| m.volume),
             Target::MixerPan { track } => song.mixer.get(track as usize).map(|m| m.pan),
+            Target::MixerSep { track } => song.mixer.get(track as usize).map(|m| m.sep),
+            Target::MixerEq { track, band } => song
+                .mixer
+                .get(track as usize)
+                .and_then(|m| m.eq.get(band as usize).copied()),
+            Target::Tempo => Some(song.tempo as f32),
+            Target::Swing => Some(song.swing as f32),
             Target::ChannelVolume { inst } => song.instrument(inst).map(|i| i.volume),
             Target::ChannelPan { inst } => song.instrument(inst).map(|i| i.pan),
             Target::FxParam { track, slot, param } => song
@@ -131,6 +214,25 @@ impl Target {
                 .and_then(|m| m.sends.iter().find(|s| s.to == to))
                 .map(|s| s.level),
             Target::PluginParam { .. } => None,
+            Target::SamplerParam { inst, zone, param } => song
+                .instrument(inst)
+                .and_then(|i| i.sampler_preset())
+                .and_then(|p| param.get(p, zone)),
+            Target::SynthParam { inst, param } => match &song.instrument(inst)?.kind {
+                InstrumentKind::Synth { patch } => Some(param.get(patch)),
+                _ => None,
+            },
+            Target::SynthFxParam { inst, fx, param } => {
+                crate::automation_params::synth_fx_current(song, inst, fx, param)
+            }
+            Target::VocalParam { inst, param } => match &song.instrument(inst)?.kind {
+                InstrumentKind::Vocal { voice } => Some(param.get(voice)),
+                _ => None,
+            },
+            Target::ForgeParam { inst, param } => match &song.instrument(inst)?.kind {
+                InstrumentKind::Forge { sound } => Some(param.get(&sound.patch)),
+                _ => None,
+            },
         }
     }
 
@@ -157,7 +259,12 @@ impl Target {
     pub fn default_value(&self, song: &Song) -> f32 {
         match *self {
             Target::MixerVolume { .. } | Target::ChannelVolume { .. } => 1.0,
-            Target::MixerPan { .. } | Target::ChannelPan { .. } => 0.0,
+            Target::MixerPan { .. }
+            | Target::ChannelPan { .. }
+            | Target::MixerSep { .. }
+            | Target::MixerEq { .. }
+            | Target::Swing => 0.0,
+            Target::Tempo => 120.0,
             Target::FxMix { .. } | Target::FxEnabled { .. } | Target::SendLevel { .. } => 1.0,
             Target::FxParam { track, slot, param } => song
                 .mixer
@@ -167,6 +274,15 @@ impl Target {
                 .map(|p| p.default)
                 .unwrap_or(0.0),
             Target::PluginParam { .. } => 0.5,
+            Target::SamplerParam { param, .. } => param.default_value(),
+            Target::SynthParam { param, .. } => param.default_value(),
+            Target::SynthFxParam { fx, param, .. } => {
+                crate::automation_params::synth_fx_spec(fx, param)
+                    .map(|p| p.default)
+                    .unwrap_or(0.0)
+            }
+            Target::VocalParam { param, .. } => param.default_value(),
+            Target::ForgeParam { param, .. } => param.default_value(),
         }
     }
 
@@ -187,6 +303,30 @@ impl Target {
                     m.pan = v;
                     return true;
                 }
+            }
+            Target::MixerSep { track } => {
+                if let Some(m) = song.mixer.get_mut(track as usize) {
+                    m.sep = v;
+                    return true;
+                }
+            }
+            Target::MixerEq { track, band } => {
+                if let Some(b) = song
+                    .mixer
+                    .get_mut(track as usize)
+                    .and_then(|m| m.eq.get_mut(band as usize))
+                {
+                    *b = v;
+                    return true;
+                }
+            }
+            Target::Tempo => {
+                song.tempo = ((v as f64) * 10.0).round() / 10.0;
+                return true;
+            }
+            Target::Swing => {
+                song.swing = v as f64;
+                return true;
             }
             Target::ChannelVolume { inst } => {
                 if let Some(i) = song.instruments.iter_mut().find(|i| i.id == inst) {
@@ -242,6 +382,56 @@ impl Target {
                 }
             }
             Target::PluginParam { .. } => {}
+            Target::SamplerParam { inst, zone, param } => {
+                if let Some(InstrumentKind::Sampler {
+                    preset: Some(preset),
+                }) = song
+                    .instruments
+                    .iter_mut()
+                    .find(|i| i.id == inst)
+                    .map(|i| &mut i.kind)
+                {
+                    return param.set(std::sync::Arc::make_mut(preset), zone, v);
+                }
+            }
+            Target::SynthParam { inst, param } => {
+                if let Some(InstrumentKind::Synth { patch }) = song
+                    .instruments
+                    .iter_mut()
+                    .find(|i| i.id == inst)
+                    .map(|i| &mut i.kind)
+                {
+                    param.set(patch, v);
+                    return true;
+                }
+            }
+            Target::SynthFxParam { inst, fx, param } => {
+                return crate::automation_params::synth_fx_set(song, inst, fx, param, v);
+            }
+            Target::VocalParam { inst, param } => {
+                if let Some(InstrumentKind::Vocal { voice }) = song
+                    .instruments
+                    .iter_mut()
+                    .find(|i| i.id == inst)
+                    .map(|i| &mut i.kind)
+                {
+                    param.set(voice, v);
+                    return true;
+                }
+            }
+            Target::ForgeParam { inst, param } => {
+                if let Some(InstrumentKind::Forge { sound }) = song
+                    .instruments
+                    .iter_mut()
+                    .find(|i| i.id == inst)
+                    .map(|i| &mut i.kind)
+                {
+                    let mut p = sound.patch.clone();
+                    param.set(&mut p, v);
+                    sound.edit(p);
+                    return true;
+                }
+            }
         }
         false
     }
@@ -334,6 +524,9 @@ impl Envelope {
                 crate::sequence::volume_pos(b.value),
             );
             return Some(crate::sequence::volume_gain(pa + (pb - pa) * x));
+        }
+        if self.target.log_scale() && a.value > 0.0 && b.value > 0.0 {
+            return Some(a.value * (b.value / a.value).powf(x));
         }
         Some(a.value + (b.value - a.value) * x)
     }

@@ -698,7 +698,7 @@ pub fn bloom(
 }
 
 /// FL Gross Beat's time side: 16 steps of 1/16, each one a playback mode.
-pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
+pub fn time(ui: &mut Ui, track: usize, slot: usize, params: &mut [f32]) -> (bool, bool) {
     let tr = crate::i18n::ctx_tr(ui.ctx());
     use super::kit;
     use keyframexl::fx::{TIME_MODES, TIME_STEPS};
@@ -860,14 +860,16 @@ pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
     let mut smooth = params[1] as f64;
     let mut slice = params[2] as f64;
     ui.horizontal(|ui| {
-        for (v, spec, color, hint) in [
+        for (pi, v, spec, color, hint) in [
             (
+                1u16,
                 &mut smooth,
                 keyframexl::fx::FxKind::Time.params()[1],
                 t::enc_white(),
                 tr.fxv_smooth_hint,
             ),
             (
+                2u16,
                 &mut slice,
                 keyframexl::fx::FxKind::Time.params()[2],
                 Color32::from_rgb(211, 162, 242),
@@ -885,6 +887,14 @@ pub fn time(ui: &mut Ui, params: &mut [f32]) -> (bool, bool) {
                 fmt: &fmt,
                 hint,
             };
+            kit::automatable(
+                ui,
+                keyframexl::automation::Target::FxParam {
+                    track: track as u16,
+                    slot: slot as u8,
+                    param: pi,
+                },
+            );
             let (_, s, c) = kit::knob(ui, &knob, v);
             started |= s;
             changed |= c;

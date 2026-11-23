@@ -1088,9 +1088,23 @@ fn envelope_view(ui: &mut Ui, ed: &mut Edit, e: &mut Adsr, color: Color32) {
     kit::tip(resp, tr.tide_env_view_tip);
 }
 
-fn envelope_knobs(ui: &mut Ui, ed: &mut Edit, e: &mut Adsr, color: Color32) {
+fn envelope_knobs(
+    ui: &mut Ui,
+    ed: &mut Edit,
+    id: u64,
+    e: &mut Adsr,
+    color: Color32,
+    params: [keyframexl::automation::SynthParam; 4],
+) {
     let tr = crate::i18n::ctx_tr(ui.ctx());
     ui.horizontal_wrapped(|ui| {
+        kit::automatable(
+            ui,
+            keyframexl::automation::Target::SynthParam {
+                inst: id,
+                param: params[0],
+            },
+        );
         ed.knob(
             ui,
             tr.tide_k_attack,
@@ -1100,6 +1114,13 @@ fn envelope_knobs(ui: &mut Ui, ed: &mut Edit, e: &mut Adsr, color: Color32) {
             true,
             &secs,
             tr.tide_k_attack_hint,
+        );
+        kit::automatable(
+            ui,
+            keyframexl::automation::Target::SynthParam {
+                inst: id,
+                param: params[1],
+            },
         );
         ed.knob(
             ui,
@@ -1111,6 +1132,13 @@ fn envelope_knobs(ui: &mut Ui, ed: &mut Edit, e: &mut Adsr, color: Color32) {
             &secs,
             tr.tide_k_decay_hint,
         );
+        kit::automatable(
+            ui,
+            keyframexl::automation::Target::SynthParam {
+                inst: id,
+                param: params[2],
+            },
+        );
         ed.knob(
             ui,
             tr.tide_k_sustain,
@@ -1120,6 +1148,13 @@ fn envelope_knobs(ui: &mut Ui, ed: &mut Edit, e: &mut Adsr, color: Color32) {
             false,
             &pct,
             tr.tide_k_sustain_hint,
+        );
+        kit::automatable(
+            ui,
+            keyframexl::automation::Target::SynthParam {
+                inst: id,
+                param: params[3],
+            },
         );
         ed.knob(
             ui,
@@ -2197,7 +2232,12 @@ impl App {
                         }
                     });
                     ui.horizontal_wrapped(|ui| {
+                        use keyframexl::automation::{SynthParam as SP, Target};
                         let c = t::TIDE_CYAN;
+                        let auto = |ui: &Ui, param| {
+                            kit::automatable(ui, Target::SynthParam { inst: id, param });
+                        };
+                        auto(ui, SP::Position);
                         ed.knob(
                             ui,
                             tr.tide_k_pos,
@@ -2208,6 +2248,7 @@ impl App {
                             &pct,
                             tr.tide_k_pos_a_hint,
                         );
+                        auto(ui, SP::Warp);
                         ed.knob(
                             ui,
                             tr.tide_k_warp,
@@ -2218,6 +2259,7 @@ impl App {
                             &signed,
                             tr.tide_k_warp_a_hint,
                         );
+                        auto(ui, SP::Level);
                         ed.knob(
                             ui,
                             tr.tide_k_level,
@@ -2228,6 +2270,7 @@ impl App {
                             &pct,
                             tr.tide_k_level_a_hint,
                         );
+                        auto(ui, SP::Coarse);
                         ed.knob(
                             ui,
                             tr.tide_k_coarse,
@@ -2238,6 +2281,7 @@ impl App {
                             &|v| format!("{:+.0} st", v.round()),
                             tr.tide_k_coarse_hint,
                         );
+                        auto(ui, SP::Fine);
                         ed.knob(
                             ui,
                             tr.tide_k_fine,
@@ -2248,6 +2292,7 @@ impl App {
                             &|v| format!("{:+.0} ct", v.round()),
                             tr.tide_k_fine_hint,
                         );
+                        auto(ui, SP::Sub);
                         ed.knob(
                             ui,
                             tr.tide_k_sub,
@@ -2258,6 +2303,7 @@ impl App {
                             &pct,
                             tr.tide_k_sub_hint,
                         );
+                        auto(ui, SP::Noise);
                         ed.knob(
                             ui,
                             tr.tide_k_noise,
@@ -2311,7 +2357,12 @@ impl App {
                         }
                     });
                     ui.horizontal_wrapped(|ui| {
+                        use keyframexl::automation::{SynthParam as SP, Target};
                         let c = t::TIDE_CYAN;
+                        let auto = |ui: &Ui, param| {
+                            kit::automatable(ui, Target::SynthParam { inst: id, param });
+                        };
+                        auto(ui, SP::PosB);
                         ed.knob(
                             ui,
                             tr.tide_k_pos,
@@ -2322,6 +2373,7 @@ impl App {
                             &pct,
                             tr.tide_k_pos_b_hint,
                         );
+                        auto(ui, SP::WarpB);
                         ed.knob(
                             ui,
                             tr.tide_k_warp,
@@ -2332,6 +2384,7 @@ impl App {
                             &signed,
                             tr.tide_k_warp_b_hint,
                         );
+                        auto(ui, SP::LevelB);
                         ed.knob(
                             ui,
                             tr.tide_k_level,
@@ -2342,6 +2395,7 @@ impl App {
                             &pct,
                             tr.tide_k_level_b_hint,
                         );
+                        auto(ui, SP::CoarseB);
                         ed.knob(
                             ui,
                             tr.tide_k_coarse,
@@ -2352,6 +2406,7 @@ impl App {
                             &|v| format!("{:+.0} st", v.round()),
                             tr.tide_k_coarse_hint,
                         );
+                        auto(ui, SP::FineB);
                         ed.knob(
                             ui,
                             tr.tide_k_fine,
@@ -2368,7 +2423,12 @@ impl App {
                     let c = &mut p.spectral;
                     tide_spectral_scope(ui, ed, c);
                     ui.horizontal_wrapped(|ui| {
+                        use keyframexl::automation::{SynthParam as SP, Target};
                         let col = t::TIDE_CYAN;
+                        let auto = |ui: &Ui, param| {
+                            kit::automatable(ui, Target::SynthParam { inst: id, param });
+                        };
+                        auto(ui, SP::LevelC);
                         ed.knob(
                             ui,
                             tr.tide_k_level,
@@ -2379,6 +2439,7 @@ impl App {
                             &pct,
                             tr.tide_k_level_c_hint,
                         );
+                        auto(ui, SP::CoarseC);
                         ed.knob(
                             ui,
                             tr.tide_k_coarse,
@@ -2390,6 +2451,7 @@ impl App {
                             tr.tide_k_coarse_hint,
                         );
                         let mut partials = c.partials as f64;
+                        auto(ui, SP::PartialsC);
                         ed.knob(
                             ui,
                             tr.tide_k_partials,
@@ -2404,6 +2466,7 @@ impl App {
                             .round()
                             .clamp(1.0, keyframexl::synth::MAX_PARTIALS as f64)
                             as u8;
+                        auto(ui, SP::TiltC);
                         ed.knob(
                             ui,
                             tr.tide_k_tilt,
@@ -2414,6 +2477,7 @@ impl App {
                             &signed,
                             tr.tide_k_tilt_hint,
                         );
+                        auto(ui, SP::OddC);
                         ed.knob(
                             ui,
                             tr.tide_k_odd,
@@ -2424,6 +2488,7 @@ impl App {
                             &signed,
                             tr.tide_k_odd_hint,
                         );
+                        auto(ui, SP::ShimmerC);
                         ed.knob(
                             ui,
                             tr.tide_k_shimmer,
@@ -2478,7 +2543,12 @@ impl App {
             tide_filter_scope(ui, ed, p);
 
             ui.horizontal_wrapped(|ui| {
+                use keyframexl::automation::{SynthParam as SP, Target};
                 let c = t::TIDE_CORAL;
+                let auto = |ui: &Ui, param| {
+                    kit::automatable(ui, Target::SynthParam { inst: id, param });
+                };
+                auto(ui, SP::Cutoff);
                 ed.knob(
                     ui,
                     tr.tide_k_cutoff,
@@ -2489,6 +2559,7 @@ impl App {
                     &hz,
                     tr.tide_k_cutoff_hint,
                 );
+                auto(ui, SP::Resonance);
                 ed.knob(
                     ui,
                     tr.tide_k_reso,
@@ -2499,6 +2570,7 @@ impl App {
                     &pct,
                     tr.tide_k_reso_hint,
                 );
+                auto(ui, SP::Keytrack);
                 ed.knob(
                     ui,
                     tr.tide_k_key,
@@ -2509,6 +2581,7 @@ impl App {
                     &signed,
                     tr.tide_k_key_hint,
                 );
+                auto(ui, SP::EnvAmount);
                 ed.knob(
                     ui,
                     tr.tide_k_env,
@@ -2633,14 +2706,14 @@ impl App {
         });
 
         match view.deck_tab {
-            0 => self.tide_deck_envelopes(ui, p, ed),
+            0 => self.tide_deck_envelopes(ui, id, p, ed),
             1 => self.tide_deck_modulation(ui, id, p, view, ed, tempo),
             2 => self.tide_deck_effects(ui, id, p, ed),
             _ => self.tide_deck_voices_macros(ui, id, p, ed),
         }
     }
 
-    fn tide_deck_envelopes(&mut self, ui: &mut Ui, p: &mut SynthPatch, ed: &mut Edit) {
+    fn tide_deck_envelopes(&mut self, ui: &mut Ui, id: u64, p: &mut SynthPatch, ed: &mut Edit) {
         let tr = self.tr();
         pair(ui, |ui, col| {
             if col == 0 {
@@ -2655,7 +2728,19 @@ impl App {
                         );
                     });
                     envelope_view(ui, ed, &mut p.amp_env, t::TIDE_MINT);
-                    envelope_knobs(ui, ed, &mut p.amp_env, t::TIDE_MINT);
+                    envelope_knobs(
+                        ui,
+                        ed,
+                        id,
+                        &mut p.amp_env,
+                        t::TIDE_MINT,
+                        [
+                            keyframexl::automation::SynthParam::AmpAttack,
+                            keyframexl::automation::SynthParam::AmpDecay,
+                            keyframexl::automation::SynthParam::AmpSustain,
+                            keyframexl::automation::SynthParam::AmpRelease,
+                        ],
+                    );
                 });
             } else {
                 tide_bay(ui, |ui| {
@@ -2669,7 +2754,19 @@ impl App {
                         );
                     });
                     envelope_view(ui, ed, &mut p.filter_env, t::TIDE_CORAL);
-                    envelope_knobs(ui, ed, &mut p.filter_env, t::TIDE_CORAL);
+                    envelope_knobs(
+                        ui,
+                        ed,
+                        id,
+                        &mut p.filter_env,
+                        t::TIDE_CORAL,
+                        [
+                            keyframexl::automation::SynthParam::FilterAttack,
+                            keyframexl::automation::SynthParam::FilterDecay,
+                            keyframexl::automation::SynthParam::FilterSustain,
+                            keyframexl::automation::SynthParam::FilterRelease,
+                        ],
+                    );
                 });
             }
         });
@@ -2766,6 +2863,13 @@ impl App {
                         if lfo.rate <= 0.0 {
                             lfo.rate = 1.0;
                         }
+                        kit::automatable(
+                            ui,
+                            keyframexl::automation::Target::SynthParam {
+                                inst: id,
+                                param: keyframexl::automation::SynthParam::LfoRate(which as u8),
+                            },
+                        );
                         ed.knob(
                             ui,
                             tr.tide_k_rate,
@@ -3015,7 +3119,18 @@ impl App {
                                             .map(|i| p.fx[i].params[n] as f64)
                                             .unwrap_or(spec.default as f64);
                                         let fmt = |x: f64| keyframexl::fx::format(spec, x as f32);
+                                        let fx_idx =
+                                            FX_KINDS.iter().position(|fk| *fk == kind).unwrap_or(0)
+                                                as u8;
                                         ui.push_id((id, kind.builtin().name, n), |ui| {
+                                            kit::automatable(
+                                                ui,
+                                                keyframexl::automation::Target::SynthFxParam {
+                                                    inst: id,
+                                                    fx: fx_idx,
+                                                    param: n as u16,
+                                                },
+                                            );
                                             ed.knob(
                                                 ui,
                                                 label,
@@ -3069,8 +3184,13 @@ impl App {
                     });
                     unison_fan_scope(ui, p.unison, p.detune, p.spread);
                     ui.horizontal_wrapped(|ui| {
+                        use keyframexl::automation::{SynthParam as SP, Target};
                         let c = t::TIDE_CYAN;
+                        let auto = |ui: &Ui, param| {
+                            kit::automatable(ui, Target::SynthParam { inst: id, param });
+                        };
                         let mut voices = p.unison as f64;
+                        auto(ui, SP::Unison);
                         ed.knob(
                             ui,
                             tr.tide_k_voices,
@@ -3082,6 +3202,7 @@ impl App {
                             tr.tide_k_voices_hint,
                         );
                         p.unison = voices.round().clamp(1.0, 7.0) as u8;
+                        auto(ui, SP::Detune);
                         ed.knob(
                             ui,
                             tr.tide_k_detune,
@@ -3092,6 +3213,7 @@ impl App {
                             &pct,
                             tr.tide_k_detune_hint,
                         );
+                        auto(ui, SP::Spread);
                         ed.knob(
                             ui,
                             tr.tide_k_spread,
@@ -3102,6 +3224,7 @@ impl App {
                             &pct,
                             tr.tide_k_spread_hint,
                         );
+                        auto(ui, SP::Glide);
                         ed.knob(
                             ui,
                             tr.tide_k_glide,
@@ -3118,6 +3241,7 @@ impl App {
                             },
                             tr.tide_k_glide_hint,
                         );
+                        auto(ui, SP::BendRange);
                         ed.knob(
                             ui,
                             tr.tide_k_bend,
@@ -3265,6 +3389,13 @@ impl App {
                                 Some(tgt) => format!("M{} {tgt}", i + 1),
                                 None => fill(tr.tide_macro_knob_n, &[("n", &(i + 1).to_string())]),
                             };
+                            kit::automatable(
+                                ui,
+                                keyframexl::automation::Target::SynthParam {
+                                    inst: id,
+                                    param: keyframexl::automation::SynthParam::Macro(i as u8),
+                                },
+                            );
                             ed.knob(
                                 ui,
                                 &label,
