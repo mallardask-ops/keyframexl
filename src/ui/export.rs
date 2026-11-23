@@ -44,9 +44,9 @@ pub struct ExportDialog {
     /// Song mode, only the playlist's time selection.
     pub selection: bool,
     running: Option<(mpsc::Receiver<Progress>, Arc<AtomicBool>)>,
-    progress: f32,
-    stage: String,
-    error: Option<String>,
+    pub(crate) progress: f32,
+    pub(crate) stage: String,
+    pub(crate) error: Option<String>,
 }
 
 const WAV: [Option<Format>; 4] = [
