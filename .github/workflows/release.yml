@@ -15,8 +15,33 @@ env:
   KFXL_NO_UPDATE_CHECK: "1"
 
 jobs:
+  # A stable release needs a tag that is exactly v<Cargo.toml version>, and that
+  # version must be plain X.Y.Z. `v*.*.*` alone also matches v0.2.1-rc.1 or a
+  # tag that disagrees with the manifest. Manual runs only build (no publish).
+  verify-tag:
+    name: verify-tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag matches Cargo.toml version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
+          tag="${GITHUB_REF_NAME}"
+          echo "tag=${tag} Cargo.toml=${version}"
+          if ! [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Cargo.toml version ${version} is not a stable X.Y.Z"
+            exit 1
+          fi
+          if [ "${tag}" != "v${version}" ]; then
+            echo "::error::Tag ${tag} does not match Cargo.toml version v${version}"
+            exit 1
+          fi
+
   release-linux:
     name: release-linux-x86_64
+    needs: verify-tag
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,7 +66,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Test
-        run: cargo test --lib && cargo test --bin keyframexl
+        run: cargo test --locked
 
       - name: Build release binary
         env:
@@ -79,6 +104,7 @@ jobs:
 
   release-windows:
     name: release-windows-x86_64
+    needs: verify-tag
     runs-on: windows-latest
     env:
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
@@ -103,7 +129,7 @@ jobs:
           "CPAL_ASIO_DIR=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Test
-        run: cargo test --lib && cargo test --bin keyframexl
+        run: cargo test --locked
 
       - name: Build release binary
         env:
