@@ -436,12 +436,21 @@ fn export_dialog_renders_on_a_worker_and_closes_with_the_files() {
         modifiers: Default::default(),
     };
     frame(&mut app, vec![enter]);
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    // Generous: on a busy CI runner (Windows, tests in parallel) the render
+    // has taken over 30 s; a stuck export still fails, with its state.
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(180);
     while app.export.is_some() && std::time::Instant::now() < until {
         frame(&mut app, vec![]);
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    assert!(app.export.is_none(), "the dialog closes when done");
+    assert!(
+        app.export.is_none(),
+        "the dialog closes when done; still open at {:?} ({:?}, error {:?}), status: {}",
+        app.export.as_ref().map(|d| d.progress),
+        app.export.as_ref().map(|d| d.stage.clone()),
+        app.export.as_ref().and_then(|d| d.error.clone()),
+        app.status.1
+    );
     assert_eq!(app.status.0, Tone::Done, "{}", app.status.1);
     assert!(
         app.status.1.contains("loop.wav") && app.status.1.contains("loop.flac"),
