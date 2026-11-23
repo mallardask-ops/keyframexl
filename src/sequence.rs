@@ -814,6 +814,10 @@ pub struct Song {
     /// Song-mode loop (FL: the playlist time selection), start..end in ticks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loop_range: Option<(Tick, Tick)>,
+    /// Song-mode start marker (FL: the playback start position): Stop goes
+    /// back here and Play starts here, until it is moved or removed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub play_start: Option<Tick>,
     /// Named playlist positions (FL: markers), sorted by tick.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub markers: Vec<Marker>,
@@ -894,6 +898,7 @@ impl Default for Song {
             tempo_map: crate::tempo::TempoMap::default(),
             meters: vec![],
             loop_range: None,
+            play_start: None,
             markers: vec![],
             info: ProjectInfo::default(),
             game_style: None,

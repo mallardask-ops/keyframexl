@@ -130,6 +130,9 @@ still in review and not part of this release.
   (`scripts/ux/shots.sh`).
 
 ### Interface
+- Playlist time selection: drag either edge on the ruler to resize it.
+- Playlist start marker: a ruler click sets it; Stop returns there and Play
+  starts there until it is moved or removed (ruler right-click).
 - A new install of a stable release gets only stable updates; a nightly build
   keeps following nightlies. Existing settings keep their choice.
 - **Browser**: *All*, *Library* and *Files* sources with one search field,
@@ -168,6 +171,8 @@ still in review and not part of this release.
 - The dark theme's Play button text is a little more readable.
 
 ### Fixes
+- The playlist playhead no longer slides along while a time selection is
+  dragged during playback; the new loop takes effect on release.
 - MIDI import reads pitch bends back: a bend ramp becomes a piano-roll slide
   and a bend held from a note's start becomes its fine pitch, so slides survive
   a MIDI export and re-import (before, every bend was dropped).

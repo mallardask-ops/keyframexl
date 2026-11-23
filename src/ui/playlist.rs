@@ -8,6 +8,8 @@ use eframe::egui::{self, Align2, CursorIcon, Pos2, Rect, Sense, Stroke, Ui, pos2
 use keyframexl::sequence::{BAR, Clip, Tick};
 use keyframexl::tempo::{Meter, bar_at};
 
+/// How close to a time selection edge (px) a ruler drag resizes it.
+const LOOP_EDGE_PX: f32 = 6.0;
 const HEAD_W: f32 = 120.0;
 const RULER_H: f32 = 24.0;
 const LANE_H: f32 = 32.0;
@@ -2219,8 +2221,27 @@ impl App {
         )
         .intersect(view);
         let rr = ui.interact(ruler, ui.id().with("ruler"), Sense::click_and_drag());
+        // The time selection's edges on the ruler: drag one to resize it.
+        let x_of = |t: Tick| grid_l + t as f32 / BAR as f32 * bar_w;
+        let committed = self.song.loop_range;
+        let edge_at = |x: f32| -> Option<Tick> {
+            let (a, b) = committed?;
+            // The other edge stays put while this one moves.
+            if (x - x_of(b)).abs() <= LOOP_EDGE_PX {
+                Some(a)
+            } else if (x - x_of(a)).abs() <= LOOP_EDGE_PX {
+                Some(b)
+            } else {
+                None
+            }
+        };
         if rr.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            let near_edge = rr.hover_pos().is_some_and(|p| edge_at(p.x).is_some());
+            ui.ctx().set_cursor_icon(if near_edge {
+                egui::CursorIcon::ResizeHorizontal
+            } else {
+                egui::CursorIcon::PointingHand
+            });
         }
         // Right-click the ruler: time signature from the bar under the pointer.
         let sig_id = ui.id().with("ruler-sig-bar");
@@ -2318,6 +2339,11 @@ impl App {
                 self.publish();
                 ui.close_menu();
             }
+            if self.song.play_start.is_some() && ui.button(tr.pl_remove_start_marker).clicked() {
+                self.song.play_start = None;
+                self.say(Tone::Quiet, tr.pl_start_marker_removed);
+                ui.close_menu();
+            }
             ui.separator();
             let bar: u32 = ui.data(|d| d.get_temp(sig_id)).unwrap_or(0);
             let tick = self.song.bar_tick(bar);
@@ -2395,6 +2421,26 @@ impl App {
             };
             self.set_song_mode(true);
             self.seek_tick(at);
+            // The click also sets the start marker (FL): Stop comes back here.
+            self.song.play_start = Some(at);
+            let tr = self.tr();
+            self.say(
+                Tone::Quiet,
+                crate::i18n::fill(
+                    tr.pl_start_marker_set,
+                    &[("pos", &song_bar_pos(&meters, at))],
+                ),
+            );
+        }
+        // Drag: a new time selection, or one edge of the current one. The
+        // draft stays out of the song (and the playhead's loop) until release:
+        // the engine keeps playing the old loop meanwhile.
+        let draft_id = ui.id().with("loop-draft");
+        let anchor_id = ui.id().with("loop-anchor");
+        if rr.drag_started_by(egui::PointerButton::Primary) {
+            let origin = ui.input(|i| i.pointer.press_origin());
+            let anchor: Option<Tick> = origin.and_then(|p| edge_at(p.x));
+            ui.data_mut(|d| d.insert_temp(anchor_id, anchor));
         }
         if rr.dragged_by(egui::PointerButton::Primary)
             && let (Some(from), Some(to)) = (
@@ -2402,17 +2448,32 @@ impl App {
                 rr.interact_pointer_pos(),
             )
         {
-            let (a, b) = (ruler_tick(from.x), ruler_tick(to.x));
+            let anchor: Option<Tick> = ui.data(|d| d.get_temp(anchor_id)).flatten();
+            let (a, b) = (
+                anchor.unwrap_or_else(|| ruler_tick(from.x)),
+                ruler_tick(to.x),
+            );
             if a != b {
-                self.song.loop_range = Some((a.min(b), a.max(b)));
+                ui.data_mut(|d| d.insert_temp(draft_id, Some((a.min(b), a.max(b)))));
             }
         }
+        let draft: Option<(Tick, Tick)> = ui.data(|d| d.get_temp(draft_id)).flatten();
         if rr.drag_stopped_by(egui::PointerButton::Primary)
-            && let Some((a, b)) = self.song.loop_range
+            && let Some((a, b)) = draft
         {
+            let resized: Option<Tick> = ui.data(|d| d.get_temp(anchor_id)).flatten();
+            ui.data_mut(|d| {
+                d.remove::<Option<(Tick, Tick)>>(draft_id);
+                d.remove::<Option<Tick>>(anchor_id);
+            });
+            self.song.loop_range = Some((a, b));
             self.set_song_mode(true);
             self.publish();
-            self.seek_tick(a);
+            // A new selection starts playing from its start; a resized one
+            // keeps the playhead where it is.
+            if resized.is_none() {
+                self.seek_tick(a);
+            }
             let tr = self.tr();
             self.say(
                 Tone::Quiet,
@@ -2425,8 +2486,13 @@ impl App {
                 ),
             );
         }
-        // The time selection: a band on the ruler and a wash over the tracks.
-        if let Some((a, b)) = self.song.loop_range {
+        // The time selection: a band on the ruler and a wash over the tracks
+        // (the draft while it is dragged).
+        let shown: Option<(Tick, Tick)> = ui
+            .data(|d| d.get_temp(draft_id))
+            .flatten()
+            .or(self.song.loop_range);
+        if let Some((a, b)) = shown {
             let xa = grid_l + a as f32 / BAR as f32 * bar_w;
             let xb = grid_l + b as f32 / BAR as f32 * bar_w;
             let band = Rect::from_min_max(pos2(xa, well.top()), pos2(xb, well.top() + 5.0));
@@ -2438,6 +2504,29 @@ impl App {
                     [pos2(x, well.top()), pos2(x, grid.bottom())],
                     Stroke::new(1.0_f32, t::wait().gamma_multiply(0.7)),
                 );
+            }
+        }
+
+        // The start marker: a flag on the ruler.
+        if self.song_mode
+            && let Some(t) = self.song.play_start
+        {
+            let x = x_of(t);
+            if x >= grid.left() && x <= grid.right() {
+                let top = well.top() + 2.0;
+                let bottom = well.top() + RULER_H - 2.0;
+                painter.line_segment(
+                    [pos2(x, top), pos2(x, bottom)],
+                    Stroke::new(1.5_f32, t::ok()),
+                );
+                painter.add(egui::Shape::convex_polygon(
+                    vec![pos2(x, top), pos2(x + 8.0, top + 4.0), pos2(x, top + 8.0)],
+                    t::ok(),
+                    Stroke::NONE,
+                ));
+                let flag = Rect::from_min_max(pos2(x - 3.0, top), pos2(x + 9.0, bottom));
+                ui.interact(flag, ui.id().with("start-marker"), Sense::hover())
+                    .on_hover_text(self.tr().pl_start_marker_tip);
             }
         }
 
