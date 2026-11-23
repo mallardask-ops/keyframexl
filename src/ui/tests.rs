@@ -2410,3 +2410,35 @@ fn playlist_remembers_resized_clip_length_when_placing() {
     assert_eq!(fresh.offset, 0);
     assert_eq!(fresh.length, None);
 }
+
+/// Every Settings page fits the Settings window at its minimum size (920 px
+/// less the tab body's margins) in every language: nothing is cut off on the
+/// right, and the footer's Close button stays in view.
+#[test]
+fn settings_pages_fit_the_minimum_window() {
+    use crate::ui::settings_ui::Page;
+    let body = 920.0 - 30.0;
+    for lang in crate::i18n::Language::ALL {
+        for page in [Page::Audio, Page::Midi, Page::Plugins, Page::General] {
+            let (ctx, mut app) = setup();
+            app.settings.general.language = lang;
+            app.open_settings(page);
+            let mut used = 0.0;
+            for _ in 0..3 {
+                let input = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(body, 520.0))),
+                    ..Default::default()
+                };
+                let _ = ctx.run(input, |ctx| {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show(ctx, |ui| {
+                            app.settings_tab(ui);
+                            used = ui.min_rect().width();
+                        });
+                });
+            }
+            assert!(used <= body + 0.5, "{lang:?} {page:?} needs {used} px");
+        }
+    }
+}

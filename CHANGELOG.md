@@ -170,6 +170,9 @@ still in review and not part of this release.
 ### Fixes
 - The updater no longer offers a release that has no build for your system
   (0.2.1 stable is Linux only; Windows stays on nightly builds).
+- Settings, Export and Project info windows can no longer be shrunk until
+  their content is cut off; long hints on the Plugins page wrap.
+- Plugins page: the Ukrainian "ready" count shows its number.
 - **Crash** when a tab group or a floating window was dragged by its grip
   over another panel (since 0.1.1).
 - **Export and FL Studio channels' pitch.** An export started with the pitch

@@ -533,9 +533,12 @@ impl App {
         let mut prefs = self.export_prefs.clone();
         let mut new_stem: Option<String> = None;
         let screen = ctx.screen_rect();
+        // Minimum: the tail row whole beside the scroll bar (Ukrainian is the
+        // widest), and the source and tail rows above the footer.
+        let min_win = vec2(480.0, 420.0);
         let max_win = vec2(
-            (screen.width() - 40.0).max(425.0),
-            (screen.height() - 40.0).max(300.0),
+            (screen.width() - 40.0).max(min_win.x),
+            (screen.height() - 40.0).max(min_win.y),
         );
         egui::Window::new(tr.exp_title)
             .id(egui::Id::new("export-window"))
@@ -543,7 +546,7 @@ impl App {
             .open(&mut open)
             .resizable(true)
             .default_size(vec2(580.0, 575.0))
-            .min_size(vec2(425.0, 300.0))
+            .min_size(min_win)
             .max_size(max_win)
             .default_pos(egui::pos2(screen.center().x - 290.0, 90.0))
             .show(ctx, |ui| {
