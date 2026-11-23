@@ -137,6 +137,9 @@ still in review and not part of this release.
   Move up / Move down; automation and open effect windows follow the slot.
 - Mixer slot right-click → Replace swaps the effect for another built-in or
   plugin.
+- Mixer: an insert's route button names where it goes ("→ M", "→ 2",
+  "→ M+1"), is outlined when it does not go only to Master, and its tooltip
+  lists every destination with the send level.
 - A new install of a stable release gets only stable updates; a nightly build
   keeps following nightlies. Existing settings keep their choice.
 - **Browser**: *All*, *Library* and *Files* sources with one search field,
