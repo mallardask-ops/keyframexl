@@ -1,7 +1,7 @@
-//! One layer's dry signal: the source through its pitch, filter and volume
-//! curves, before the layer's effects.
+//! One layer's dry signal: the source through its pitch, filter, morph, pan
+//! and volume curves, before the layer's effects.
 
-use super::{FilterMode, Layer, NoiseColor, RATE, Rng, Source, Wave};
+use super::{FilterMode, Layer, NoiseColor, RATE, Rng, Source, Wave, granular, modal};
 
 /// What the patch's knobs change in every layer.
 #[derive(Clone, Copy, Debug)]
@@ -21,16 +21,70 @@ pub(super) fn dry(layer: &Layer, ctx: &LayerCtx) -> Vec<f32> {
     let mut out = vec![0.0f32; frames * 2];
     let rate = RATE as f64;
     let mut rng = Rng::new(ctx.seed);
+    let mut rng_r = Rng::new(ctx.seed ^ 0xD1B5_4A32_D192_ED03);
+    let mut burst_rng = Rng::new(ctx.seed ^ 0x94D0_49BB_1331_11EB);
     let pitch = layer.pitch.scaled(0.0, ctx.sweep);
     // A filter sweep deepens around its starting point.
     let pivot = layer.cutoff.points.first().map_or(1.0, |p| p.v);
     let cutoff = layer.cutoff.scaled(pivot, ctx.sweep);
+    let has_pan_curve = !layer.pan_curve.is_flat_at(0.0);
+    let morph_flat = layer.morph.is_flat_at(0.5);
+
     let synth = match &layer.source {
         Source::Synth { patch, key } => synth_note(patch, *key, frames),
         _ => Vec::new(),
     };
+    let pre_rendered = match &layer.source {
+        Source::Modal {
+            material,
+            hz,
+            damping,
+            inharmonicity,
+            strike,
+        } => modal::render(
+            *material,
+            *hz,
+            *damping,
+            *inharmonicity,
+            *strike,
+            frames,
+            &pitch,
+            &layer.morph,
+            ctx.transpose,
+            ctx.seed,
+        ),
+        Source::Grain {
+            hz,
+            density,
+            grain_ms,
+            scatter,
+            spread,
+            spray,
+            sample,
+        } => granular::render(
+            *hz,
+            *density,
+            *grain_ms,
+            *scatter,
+            *spread,
+            *spray,
+            sample.as_ref(),
+            frames,
+            &pitch,
+            &layer.morph,
+            ctx.transpose,
+            ctx.seed,
+        ),
+        _ => Vec::new(),
+    };
+
     let mut st = State::default();
+    let mut st_r = State::default();
     let mut svf = [Svf::default(); 2];
+    // Deterministic staggered initial phases for unison voices 1..=3.
+    let mut uni_ph = [0.0f64, 0.17, 0.43, 0.71];
+    let mut uni_mod = [0.0f64; 4];
+    let mut burst_env = 1.0f64;
     // The last 3 ms fade out, so a layer cut off mid-sound does not click.
     let declick = (0.003 * rate) as usize;
     for i in 0..frames {
@@ -38,12 +92,22 @@ pub(super) fn dry(layer: &Layer, ctx: &LayerCtx) -> Vec<f32> {
         let t = i as f64 / rate;
         let semis = (pitch.at(x) + ctx.transpose) as f64;
         let ratio = 2f64.powf(semis / 12.0);
+        let morph_v = if morph_flat {
+            0.5
+        } else {
+            layer.morph.at(x).clamp(0.0, 1.0) as f64
+        };
         let s = match &layer.source {
             Source::Osc {
                 wave,
                 hz,
                 vibrato_hz,
                 vibrato,
+                fm_ratio,
+                fm_index,
+                unison,
+                detune,
+                shape,
             } => {
                 let vib = if *vibrato > 0.0 {
                     let v =
@@ -52,22 +116,110 @@ pub(super) fn dry(layer: &Layer, ctx: &LayerCtx) -> Vec<f32> {
                 } else {
                     1.0
                 };
-                let dt = (*hz as f64 * ratio * vib / rate).min(0.49);
-                let v = osc(*wave, st.phase, dt);
-                st.phase = (st.phase + dt).fract();
-                [v, v]
+                let ucount = (*unison).clamp(1, 4) as usize;
+                let base_fm = (*fm_index).max(0.0) as f64;
+                let base_shape = (*shape).clamp(0.0, 1.0) as f64;
+                let morph_delta = (morph_v - 0.5) * 2.0;
+
+                if ucount == 1 && base_fm == 0.0 && base_shape == 0.0 && morph_flat {
+                    // Exact fast path for classic patches.
+                    let dt = (*hz as f64 * ratio * vib / rate).min(0.49);
+                    let v = osc(*wave, st.phase, dt);
+                    st.phase = (st.phase + dt).fract();
+                    [v, v]
+                } else {
+                    // Morph modulates FM depth (if active), shape (if active), or adds subtle fold.
+                    let eff_fm = if base_fm > 0.0 {
+                        (base_fm * 2.0f64.powf(morph_delta * 1.5)).clamp(0.0, 12.0)
+                    } else if base_shape == 0.0 && morph_delta > 0.0 {
+                        morph_delta * 1.5
+                    } else {
+                        0.0
+                    };
+                    let eff_shape = if base_shape > 0.0 || base_fm == 0.0 {
+                        (base_shape + morph_delta * 0.45).clamp(0.0, 1.0)
+                    } else {
+                        base_shape
+                    };
+                    let fmr = (*fm_ratio).clamp(0.125, 16.0) as f64;
+                    let det = (*detune).clamp(0.0, 1.0) as f64;
+                    let gain = 1.0 / (ucount as f64).sqrt();
+                    let mut acc = [0.0f64; 2];
+                    for v_idx in 0..ucount {
+                        let spread = if ucount == 1 {
+                            0.0
+                        } else {
+                            (v_idx as f64 / (ucount - 1) as f64) * 2.0 - 1.0
+                        };
+                        let voice_det = 2.0f64.powf(spread * det * 0.45 / 12.0);
+                        let dt = (*hz as f64 * ratio * vib * voice_det / rate).min(0.49);
+                        let fm_offset = if eff_fm > 0.0 {
+                            let mdt = (dt * fmr).min(0.49);
+                            let m = (uni_mod[v_idx] * std::f64::consts::TAU).sin() * eff_fm * 0.35;
+                            uni_mod[v_idx] = (uni_mod[v_idx] + mdt).fract();
+                            m
+                        } else {
+                            0.0
+                        };
+                        let ph = (uni_ph[v_idx] + fm_offset).rem_euclid(1.0);
+                        let sample = osc_shaped(*wave, ph, dt, eff_shape);
+                        uni_ph[v_idx] = (uni_ph[v_idx] + dt).fract();
+                        let pan = spread * (0.75 * det.max(0.25));
+                        let gl = (1.0 - pan.max(0.0)) * gain;
+                        let gr = (1.0 + pan.min(0.0)) * gain;
+                        acc[0] += sample * gl;
+                        acc[1] += sample * gr;
+                    }
+                    acc
+                }
             }
-            Source::Noise { color, hz } => {
-                let v = noise(*color, *hz as f64 * ratio, &mut st, &mut rng);
-                [v, v]
+            Source::Noise {
+                color,
+                hz,
+                stereo_width,
+                burst,
+            } => {
+                let vl = noise(*color, *hz as f64 * ratio, &mut st, &mut rng);
+                let width = (*stereo_width).clamp(0.0, 1.0) as f64;
+                let mut pair = if width <= 1e-4 {
+                    [vl, vl]
+                } else {
+                    let vr = noise(*color, *hz as f64 * ratio, &mut st_r, &mut rng_r);
+                    [vl, vl * (1.0 - width) + vr * width]
+                };
+                let eff_burst = (*burst as f64 + (morph_v - 0.5) * 0.7).clamp(0.0, 1.0);
+                if eff_burst > 1e-3 {
+                    // Stochastic spark / debris burst gate.
+                    let trigger_p = (4.0 + (1.0 - eff_burst) * 35.0) / rate;
+                    if (burst_rng.unit() as f64) < trigger_p {
+                        burst_env = 0.55 + 0.45 * burst_rng.unit() as f64;
+                    }
+                    let decay = 0.9965 - eff_burst * 0.008;
+                    burst_env = (burst_env * decay).max(1.0 - eff_burst * 0.96);
+                    pair[0] *= burst_env;
+                    pair[1] *= burst_env;
+                }
+                pair
             }
             Source::Sample {
                 rate: sr,
                 frames: data,
                 reverse,
+                trim_start,
+                trim_end,
                 ..
             } => {
-                let v = play(data, st.phase, *reverse);
+                let n = data.len();
+                let lo = ((*trim_start).clamp(0.0, 0.99) * n as f32).floor() as usize;
+                let hi = ((*trim_end).clamp(0.01, 1.0) * n as f32)
+                    .ceil()
+                    .clamp((lo + 1) as f32, n as f32) as usize;
+                let slice = if lo < hi && hi <= n {
+                    &data[lo..hi]
+                } else {
+                    data.as_slice()
+                };
+                let v = play(slice, st.phase, *reverse);
                 st.phase += ratio * *sr as f64 / rate;
                 v
             }
@@ -75,6 +227,9 @@ pub(super) fn dry(layer: &Layer, ctx: &LayerCtx) -> Vec<f32> {
                 let v = play(&synth, st.phase, false);
                 st.phase += ratio;
                 v
+            }
+            Source::Modal { .. } | Source::Grain { .. } => {
+                pre_rendered.get(i).copied().unwrap_or([0.0; 2])
             }
         };
         let mut s = s;
@@ -91,8 +246,14 @@ pub(super) fn dry(layer: &Layer, ctx: &LayerCtx) -> Vec<f32> {
         if left < declick {
             amp *= left as f64 / declick as f64;
         }
-        out[i * 2] = (s[0] * amp) as f32;
-        out[i * 2 + 1] = (s[1] * amp) as f32;
+        let (pl, pr) = if has_pan_curve {
+            let p = layer.pan_curve.at(x).clamp(-1.0, 1.0) as f64;
+            (1.0 - p.max(0.0), 1.0 + p.min(0.0))
+        } else {
+            (1.0, 1.0)
+        };
+        out[i * 2] = (s[0] * amp * pl) as f32;
+        out[i * 2 + 1] = (s[1] * amp * pr) as f32;
     }
     out
 }
@@ -126,6 +287,30 @@ fn osc(wave: Wave, ph: f64, dt: f64) -> f64 {
         Wave::Saw => (2.0 * ph - 1.0 - blep(ph, dt)) * 0.5,
         Wave::Triangle => (4.0 * (ph - 0.5).abs() - 1.0) * 0.7,
         Wave::Sine => (ph * std::f64::consts::TAU).sin() * 0.7,
+    }
+}
+
+/// Shaped oscillator: PWM for pulse waves, smooth wavefold for Sine/Tri/Saw.
+fn osc_shaped(wave: Wave, ph: f64, dt: f64, shape: f64) -> f64 {
+    if shape <= 1e-4 {
+        return osc(wave, ph, dt);
+    }
+    let pulse = |w: f64| {
+        let w = w.clamp(0.04, 0.96);
+        let mut v = if ph < w { 1.0 } else { -1.0 };
+        v += blep(ph, dt);
+        v -= blep((ph - w).rem_euclid(1.0), dt);
+        v
+    };
+    match wave {
+        Wave::Square => pulse(0.5 - shape * 0.42) * 0.44,
+        Wave::Pulse25 => pulse(0.25 + shape * 0.55) * 0.46,
+        Wave::Pulse12 => pulse(0.125 + shape * 0.72) * 0.48,
+        Wave::Sine | Wave::Triangle | Wave::Saw => {
+            let base = osc(wave, ph, dt);
+            let drive = 1.0 + shape * 3.5;
+            (base * drive).sin() * 0.68
+        }
     }
 }
 

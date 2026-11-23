@@ -204,6 +204,8 @@ fn source_kind(s: &Source) -> usize {
         Source::Noise { .. } => 1,
         Source::Sample { .. } => 2,
         Source::Synth { .. } => 3,
+        Source::Modal { .. } => 4,
+        Source::Grain { .. } => 5,
     }
 }
 
@@ -903,6 +905,8 @@ impl App {
             frames: Arc::new(frames),
             reverse: false,
             from: Some(b),
+            trim_start: 0.0,
+            trim_end: 1.0,
         };
         match into {
             Into::Layer(i) if i < p.layers.len() => {
@@ -1064,6 +1068,7 @@ impl App {
             mono: view.mono,
             stem: p.name.clone(),
             seed: view.seed.wrapping_add(id),
+            ..export::Options::default()
         };
         match export::export(&p, &dir, &opt) {
             Ok(paths) => {
@@ -1124,6 +1129,8 @@ impl App {
             frames: Arc::new(frames),
             reverse: false,
             from: None,
+            trim_start: 0.0,
+            trim_end: 1.0,
         };
         l.name = name
             .rsplit_once('.')
@@ -1223,6 +1230,8 @@ fn layers_panel(
                         Source::Noise { color, .. } => tr.forge_noise_full(*color).to_string(),
                         Source::Sample { name, .. } => name.clone(),
                         Source::Synth { .. } => tr.forge_tide_synth_lbl.into(),
+                        Source::Modal { .. } => tr.forge_src_modal.into(),
+                        Source::Grain { .. } => tr.forge_src_grain.into(),
                     };
                     ui.label(
                         egui::RichText::new(what)
@@ -1420,6 +1429,7 @@ fn layer_editor(
             hz: f,
             vibrato_hz,
             vibrato,
+            ..
         } => {
             chips(
                 ui,
@@ -1465,7 +1475,7 @@ fn layer_editor(
                 );
             });
         }
-        Source::Noise { color, hz: f } => {
+        Source::Noise { color, hz: f, .. } => {
             chips(
                 ui,
                 ed,
@@ -1596,6 +1606,25 @@ fn layer_editor(
                 );
                 *key = k.round().clamp(0.0, 127.0) as u8;
             });
+        }
+        Source::Modal { hz: f, .. } => {
+            ui.label(
+                egui::RichText::new(format!("{} · {}", tr.forge_src_modal, hz(*f as f64)))
+                    .font(t::sans(13.0))
+                    .color(t::muted()),
+            );
+        }
+        Source::Grain {
+            density, grain_ms, ..
+        } => {
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} · {density:.0}/s · {grain_ms:.0} ms",
+                    tr.forge_src_grain
+                ))
+                .font(t::sans(13.0))
+                .color(t::muted()),
+            );
         }
     }
 

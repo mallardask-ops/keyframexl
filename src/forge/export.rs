@@ -1,5 +1,7 @@
 //! Files for a game: a sound and its variations as `name_01.wav`,
-//! `name_02.wav`… (or .ogg), trimmed, optionally normalised, at 44.1 or 48 kHz.
+//! `name_02.wav`… (16/24-bit WAV or OGG), trimmed (except seamless loops),
+//! optionally peak- or LUFS-normalized, at 44.1 or 48 kHz. Supports WYSIWYG
+//! export of pre-auditioned variations and multi-channel Sound Pack batch export.
 
 use super::{ForgePatch, Rendered, mutate};
 use std::path::{Path, PathBuf};
@@ -8,6 +10,8 @@ use std::path::{Path, PathBuf};
 pub enum FileFormat {
     /// 16-bit PCM: every engine reads it.
     Wav,
+    /// 24-bit PCM: studio mastering / high headroom.
+    Wav24,
     /// Ogg Vorbis: small, what most engines stream.
     Ogg,
 }
@@ -15,10 +19,23 @@ pub enum FileFormat {
 impl FileFormat {
     pub fn ext(self) -> &'static str {
         match self {
-            FileFormat::Wav => "wav",
+            FileFormat::Wav | FileFormat::Wav24 => "wav",
             FileFormat::Ogg => "ogg",
         }
     }
+}
+
+/// Output loudness target during export.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Loudness {
+    /// Keep each sound's authored mix level (preserves UI vs Weapon balance).
+    #[default]
+    AsMixed,
+    /// Normalize peak amplitude to target dBFS (e.g. −1.0 dB).
+    PeakDb(f32),
+    /// Normalize approximate integrated loudness to target LUFS (e.g. −14.0 LUFS),
+    /// soft-clamped below −0.5 dBFS peak to prevent clipping.
+    Lufs(f32),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -28,13 +45,16 @@ pub struct Options {
     pub format: FileFormat,
     /// 44_100 or 48_000.
     pub rate: u32,
-    /// Peak at −1 dBFS. Off keeps the sound's own level (recipes are made
-    /// at their category's level, so a set stays balanced).
+    /// Legacy peak-normalize flag (−1 dBFS). Honoured when `loudness` is `AsMixed`.
     pub normalize: bool,
+    /// Explicit loudness mode (`AsMixed`, `PeakDb`, `Lufs`).
+    pub loudness: Loudness,
     /// Left and right averaged into one channel (positioned sounds in a game).
     pub mono: bool,
     /// File names start with this ("jump" → jump_01.wav).
     pub stem: String,
+    /// Filename template without extension (`{name}` and `{nn}` / `{n}` placeholders).
+    pub template: String,
     /// Seeds the variations.
     pub seed: u64,
 }
@@ -46,9 +66,20 @@ impl Default for Options {
             format: FileFormat::Wav,
             rate: 48_000,
             normalize: false,
+            loudness: Loudness::AsMixed,
             mono: false,
             stem: "sound".into(),
+            template: "{name}_{nn}".into(),
             seed: 1,
+        }
+    }
+}
+
+impl Options {
+    fn effective_loudness(&self) -> Loudness {
+        match self.loudness {
+            Loudness::AsMixed if self.normalize => Loudness::PeakDb(-1.0),
+            other => other,
         }
     }
 }
@@ -68,6 +99,22 @@ pub fn stem_of(name: &str) -> String {
     if s.is_empty() { "sound".into() } else { s }
 }
 
+/// Format an output filename from stem, 1-based index, template and extension.
+pub fn format_filename(stem: &str, index_1based: usize, template: &str, ext: &str) -> String {
+    let safe_stem = stem_of(stem);
+    let tpl = if template.trim().is_empty() {
+        "{name}_{nn}"
+    } else {
+        template.trim()
+    };
+    let rendered = tpl
+        .replace("{name}", &safe_stem)
+        .replace("{nn}", &format!("{index_1based:02}"))
+        .replace("{n}", &index_1based.to_string());
+    let clean = stem_of(&rendered);
+    format!("{clean}.{ext}")
+}
+
 /// The patches an export writes: the sound as it is, then `count - 1` variations.
 pub fn patches(p: &ForgePatch, opt: &Options) -> Vec<ForgePatch> {
     let mut v = vec![p.clone()];
@@ -83,35 +130,72 @@ pub fn patches(p: &ForgePatch, opt: &Options) -> Vec<ForgePatch> {
 
 /// Render and write every file into `dir`. Returns the paths written.
 pub fn export(p: &ForgePatch, dir: &Path, opt: &Options) -> Result<Vec<PathBuf>, String> {
-    let stem = stem_of(&opt.stem);
+    export_patches(&patches(p, opt), dir, opt)
+}
+
+/// WYSIWYG export: render and write the exact approved patches into `dir`.
+pub fn export_patches(
+    list: &[ForgePatch],
+    dir: &Path,
+    opt: &Options,
+) -> Result<Vec<PathBuf>, String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let mut out = Vec::new();
-    for (i, patch) in patches(p, opt).iter().enumerate() {
-        let frames = finish(&super::render::render(patch), opt);
-        let path = dir.join(format!("{stem}_{:02}.{}", i + 1, opt.format.ext()));
-        match opt.format {
-            FileFormat::Wav if opt.mono => write_mono_wav(&path, &frames, opt.rate)?,
-            FileFormat::Wav => crate::render::write_wav_at(
-                &path,
-                &frames,
-                crate::render::Format::Wav16,
-                true,
-                opt.rate,
-            )?,
-            FileFormat::Ogg => write_ogg(&path, &frames, opt.rate, opt.mono)?,
-        }
+    for (i, patch) in list.iter().enumerate() {
+        let rendered = super::render::render(patch);
+        let frames = finish(&rendered, opt);
+        let fname = format_filename(&opt.stem, i + 1, &opt.template, opt.format.ext());
+        let path = dir.join(fname);
+        write_audio(&path, &frames, opt)?;
         out.push(path);
     }
     Ok(out)
 }
 
-/// The rendered sound as the file gets it: silence trimmed from the front,
-/// resampled, normalised.
+/// Batch Sound Pack export: export multiple `(stem, approved_patches)` channels
+/// into `dir` using shared format/rate/loudness settings.
+pub fn export_sound_pack(
+    channels: &[(String, Vec<ForgePatch>)],
+    dir: &Path,
+    opt: &Options,
+) -> Result<Vec<PathBuf>, String> {
+    let mut out = Vec::new();
+    for (stem, list) in channels {
+        if list.is_empty() {
+            continue;
+        }
+        let mut ch_opt = opt.clone();
+        ch_opt.stem = stem.clone();
+        out.extend(export_patches(list, dir, &ch_opt)?);
+    }
+    Ok(out)
+}
+
+fn write_audio(path: &Path, frames: &[[f32; 2]], opt: &Options) -> Result<(), String> {
+    match opt.format {
+        FileFormat::Wav if opt.mono => write_mono_wav(path, frames, opt.rate, 16),
+        FileFormat::Wav => {
+            crate::render::write_wav_at(path, frames, crate::render::Format::Wav16, true, opt.rate)
+        }
+        FileFormat::Wav24 if opt.mono => write_mono_wav(path, frames, opt.rate, 24),
+        FileFormat::Wav24 => {
+            crate::render::write_wav_at(path, frames, crate::render::Format::Wav24, false, opt.rate)
+        }
+        FileFormat::Ogg => write_ogg(path, frames, opt.rate, opt.mono),
+    }
+}
+
+/// The rendered sound as the file gets it: silence trimmed from the front
+/// (unless seamless loop), resampled, mono-folded, and loudness-matched.
 pub fn finish(r: &Rendered, opt: &Options) -> Vec<[f32; 2]> {
-    let first = r
-        .frames
-        .iter()
-        .position(|f| f[0].abs().max(f[1].abs()) > 1e-3)
-        .unwrap_or(0);
+    let first = if r.seamless_loop {
+        0
+    } else {
+        r.frames
+            .iter()
+            .position(|f| f[0].abs().max(f[1].abs()) > 1e-3)
+            .unwrap_or(0)
+    };
     let mut frames = resample(&r.frames[first..], r.rate, opt.rate);
     if opt.mono {
         for f in &mut frames {
@@ -119,16 +203,38 @@ pub fn finish(r: &Rendered, opt: &Options) -> Vec<[f32; 2]> {
             *f = [m, m];
         }
     }
-    if opt.normalize {
-        let peak = frames
-            .iter()
-            .map(|f| f[0].abs().max(f[1].abs()))
-            .fold(0.0, f32::max);
-        if peak > 1e-6 {
-            let g = 0.891 / peak;
-            for f in &mut frames {
-                f[0] *= g;
-                f[1] *= g;
+    match opt.effective_loudness() {
+        Loudness::AsMixed => {}
+        Loudness::PeakDb(target_db) => {
+            let peak = frames
+                .iter()
+                .map(|f| f[0].abs().max(f[1].abs()))
+                .fold(0.0, f32::max);
+            if peak > 1e-6 {
+                let target = 10f32.powf(target_db.clamp(-24.0, 0.0) / 20.0);
+                let g = target / peak;
+                for f in &mut frames {
+                    f[0] *= g;
+                    f[1] *= g;
+                }
+            }
+        }
+        Loudness::Lufs(target_lufs) => {
+            let cur = super::render::integrated_lufs(&frames, opt.rate);
+            if cur > -90.0 {
+                let mut g = 10f32.powf((target_lufs.clamp(-36.0, -4.0) - cur) / 20.0);
+                let peak = frames
+                    .iter()
+                    .map(|f| f[0].abs().max(f[1].abs()))
+                    .fold(0.0, f32::max);
+                // Guard against clipping above −0.5 dBFS.
+                if peak * g > 0.944 {
+                    g = 0.944 / peak.max(1e-6);
+                }
+                for f in &mut frames {
+                    f[0] *= g;
+                    f[1] *= g;
+                }
             }
         }
     }
@@ -177,19 +283,26 @@ pub fn resample(frames: &[[f32; 2]], from: u32, to: u32) -> Vec<[f32; 2]> {
         .collect()
 }
 
-/// One channel, 16-bit (the left of `frames`, already the mix).
-fn write_mono_wav(path: &Path, frames: &[[f32; 2]], rate: u32) -> Result<(), String> {
+/// One channel, 16- or 24-bit PCM (the left of `frames`, already the mix).
+fn write_mono_wav(path: &Path, frames: &[[f32; 2]], rate: u32, bits: u16) -> Result<(), String> {
     let err = |e: hound::Error| format!("{}: {e}", path.display());
     let spec = hound::WavSpec {
         channels: 1,
         sample_rate: rate,
-        bits_per_sample: 16,
+        bits_per_sample: bits,
         sample_format: hound::SampleFormat::Int,
     };
     let mut w = hound::WavWriter::create(path, spec).map_err(err)?;
-    for f in frames {
-        w.write_sample((f[0].clamp(-1.0, 1.0) * 32767.0).round() as i16)
-            .map_err(err)?;
+    if bits == 24 {
+        for f in frames {
+            w.write_sample((f[0].clamp(-1.0, 1.0) * 8_388_607.0).round() as i32)
+                .map_err(err)?;
+        }
+    } else {
+        for f in frames {
+            w.write_sample((f[0].clamp(-1.0, 1.0) * 32767.0).round() as i16)
+                .map_err(err)?;
+        }
     }
     w.finalize().map_err(err)
 }
@@ -236,7 +349,11 @@ mod tests {
     #[test]
     fn five_different_files_in_each_format() {
         let dir = tempfile::tempdir().unwrap();
-        for (format, rate) in [(FileFormat::Wav, 44_100), (FileFormat::Ogg, 48_000)] {
+        for (format, rate) in [
+            (FileFormat::Wav, 44_100),
+            (FileFormat::Wav24, 48_000),
+            (FileFormat::Ogg, 48_000),
+        ] {
             let opt = Options {
                 format,
                 rate,
@@ -253,7 +370,8 @@ mod tests {
             }
         }
         let r = hound::WavReader::open(dir.path().join("step_01.wav")).unwrap();
-        assert_eq!(r.spec().sample_rate, 44_100);
+        assert_eq!(r.spec().sample_rate, 48_000);
+        assert_eq!(r.spec().bits_per_sample, 24);
         assert_eq!(r.spec().channels, 2);
     }
 
@@ -269,9 +387,38 @@ mod tests {
             .iter()
             .map(|f| f[0].abs().max(f[1].abs()))
             .fold(0.0, f32::max);
-        assert!((peak - 0.891).abs() < 1e-3);
+        assert!((peak - 0.891).abs() < 2e-3);
         // Starts on the sound, not on silence.
         assert!(f[0][0].abs() > 1e-3 || f[0][1].abs() > 1e-3);
+    }
+
+    #[test]
+    fn lufs_normalization_and_sound_pack_export_work() {
+        let r = super::super::render::render(&Recipe::Hum.patch());
+        let opt = Options {
+            loudness: Loudness::Lufs(-16.0),
+            ..Options::default()
+        };
+        let f = finish(&r, &opt);
+        let lufs = super::super::render::integrated_lufs(&f, opt.rate);
+        assert!((lufs - (-16.0)).abs() < 1.0, "got {lufs} LUFS");
+
+        let dir = tempfile::tempdir().unwrap();
+        let pack = vec![
+            ("Jump".into(), vec![Recipe::Jump.patch()]),
+            (
+                "Coin".into(),
+                vec![
+                    Recipe::Coin.patch(),
+                    mutate::variation_at(&Recipe::Coin.patch(), 1, 7, 0.2),
+                ],
+            ),
+        ];
+        let paths = export_sound_pack(&pack, dir.path(), &Options::default()).unwrap();
+        assert_eq!(paths.len(), 3);
+        assert!(dir.path().join("jump_01.wav").is_file());
+        assert!(dir.path().join("coin_01.wav").is_file());
+        assert!(dir.path().join("coin_02.wav").is_file());
     }
 
     #[test]

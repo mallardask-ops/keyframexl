@@ -9,6 +9,15 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 See [docs/v0.2.1.md](docs/v0.2.1.md) for the Windows port and 0.2.1 plan.
 
 ### Engine and internals
+- **Forge DSP & data model rework (PR 1)**: expanded Forge to 8 layers with
+  2-op FM / unison / shape on oscillators, a physical `Modal` material
+  resonator (metal, wood, glass, stone, membrane), a `Grain` procedural &
+  sample-cloud texture engine, stereo/burst noise, non-destructive sample
+  trimming, `Pan` and `Morph` curves with one-click curve presets, equal-power
+  `Seamless Loop` rendering with integrated LUFS metering, per-layer
+  variation locking, and WYSIWYG / Sound Pack export with 24-bit WAV and
+  peak/LUFS loudness targets (preserving 100% `.kfxl` / `.kfxforge`
+  compatibility).
 - **Cross-OS `.kfxl` compatibility, native Windows FL Studio lookup & docs (W5)**:
   `resolve_plugin_path` now resolves hosted plugins across Linux and Windows by
   CLAP `#id`, cross-OS bundle/library stem (`.dll` ↔ `.so`, `.vst3`, `.clap`),

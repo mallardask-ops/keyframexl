@@ -10,18 +10,20 @@ use std::sync::Arc;
 
 pub mod curve;
 pub mod export;
+mod granular;
 mod layer;
 pub mod library;
+mod modal;
 pub mod mutate;
 pub mod recipes;
 pub mod render;
 
-pub use curve::{Curve, CurvePoint};
+pub use curve::{Curve, CurvePoint, CurvePreset};
 pub use render::Rendered;
 
 /// Forge renders at this rate; the engine resamples to its own.
 pub const RATE: u32 = 48_000;
-pub const MAX_LAYERS: usize = 6;
+pub const MAX_LAYERS: usize = 8;
 /// Longest layer, in seconds (start + length).
 pub const MAX_SECONDS: f32 = 8.0;
 /// Effects ring on at most this long after the last layer ends.
@@ -30,6 +32,59 @@ pub const MAX_TAIL: f32 = 4.0;
 pub const PITCH_RANGE: f32 = 48.0;
 /// The note that plays a sound at its own pitch (FL: C5).
 pub const ROOT_KEY: u8 = 60;
+
+fn default_one() -> f32 {
+    1.0
+}
+fn default_one_u8() -> u8 {
+    1
+}
+fn default_pan_curve() -> Curve {
+    Curve::flat(0.0)
+}
+fn default_morph_curve() -> Curve {
+    Curve::flat(0.5)
+}
+
+/// Physical material presets for [`Source::Modal`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ModalMaterial {
+    #[default]
+    Metal,
+    Wood,
+    Glass,
+    Stone,
+    Membrane,
+}
+
+impl ModalMaterial {
+    pub const ALL: [ModalMaterial; 5] = [
+        ModalMaterial::Metal,
+        ModalMaterial::Wood,
+        ModalMaterial::Glass,
+        ModalMaterial::Stone,
+        ModalMaterial::Membrane,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ModalMaterial::Metal => "Metal",
+            ModalMaterial::Wood => "Wood",
+            ModalMaterial::Glass => "Glass",
+            ModalMaterial::Stone => "Stone",
+            ModalMaterial::Membrane => "Membrane",
+        }
+    }
+}
+
+/// Embedded audio clip used by [`Source::Grain`] for sample-based clouds.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GrainSample {
+    pub name: String,
+    pub rate: u32,
+    #[serde(with = "crate::sampler::b64_frames")]
+    pub frames: Arc<Vec<[f32; 2]>>,
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Wave {
@@ -135,11 +190,32 @@ pub enum Source {
         vibrato_hz: f32,
         #[serde(default)]
         vibrato: f32,
+        /// 2-op FM modulator frequency ratio (1.0 = unison).
+        #[serde(default = "default_one")]
+        fm_ratio: f32,
+        /// 2-op FM modulation index (0 = off).
+        #[serde(default)]
+        fm_index: f32,
+        /// Unison voice count (1..=4).
+        #[serde(default = "default_one_u8")]
+        unison: u8,
+        /// Unison detune spread (0..1, up to ±45 cents).
+        #[serde(default)]
+        detune: f32,
+        /// Waveform shape / PWM / wavefold amount (0..1).
+        #[serde(default)]
+        shape: f32,
     },
     Noise {
         color: NoiseColor,
         /// Clock of chip noise and crackle density at pitch 0, in Hz.
         hz: f32,
+        /// Stereo decorrelation width (0 = mono, 1 = full stereo).
+        #[serde(default)]
+        stereo_width: f32,
+        /// Stochastic burst/spark gating (0 = continuous, 1 = sparse bursts).
+        #[serde(default)]
+        burst: f32,
     },
     /// A sound file, decoded into the project.
     Sample {
@@ -152,11 +228,47 @@ pub enum Source {
         /// The channel note it was bounced from, to bounce again.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         from: Option<Bounce>,
+        /// Non-destructive sample trim start (0..1).
+        #[serde(default)]
+        trim_start: f32,
+        /// Non-destructive sample trim end (0..1).
+        #[serde(default = "default_one")]
+        trim_end: f32,
     },
     /// One note of a Tide synth patch, played like a sample.
     Synth {
         patch: Box<crate::synth::SynthPatch>,
         key: u8,
+    },
+    /// Physical modal resonator tuned to real-world materials.
+    Modal {
+        material: ModalMaterial,
+        /// Fundamental resonance frequency in Hz.
+        hz: f32,
+        /// Damping (0 = long ring, 1 = dry crisp knock).
+        damping: f32,
+        /// Mode stiffness / inharmonicity (0..1).
+        inharmonicity: f32,
+        /// Exciter strike hardness (0 = soft mallet/scrape, 1 = sharp impact).
+        strike: f32,
+    },
+    /// Granular / texture cloud over procedural grains or an embedded sample.
+    Grain {
+        /// Base grain pitch in Hz (for procedural mode).
+        hz: f32,
+        /// Grain spawn density in grains per second (1..200).
+        density: f32,
+        /// Individual grain length in milliseconds (4..250).
+        grain_ms: f32,
+        /// Random pitch scatter per grain (0..1).
+        scatter: f32,
+        /// Stereo pan spread across grains (0..1).
+        spread: f32,
+        /// Timing / sample-position jitter spray (0..1).
+        spray: f32,
+        /// Optional embedded sample; when `None`, uses procedural grains.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sample: Option<GrainSample>,
     },
 }
 
@@ -177,6 +289,8 @@ impl Source {
             Source::Noise { .. } => "Noise",
             Source::Sample { .. } => "Sample",
             Source::Synth { .. } => "Synth",
+            Source::Modal { .. } => "Modal",
+            Source::Grain { .. } => "Grain",
         }
     }
     pub fn osc(wave: Wave, hz: f32) -> Self {
@@ -185,10 +299,40 @@ impl Source {
             hz,
             vibrato_hz: 0.0,
             vibrato: 0.0,
+            fm_ratio: 1.0,
+            fm_index: 0.0,
+            unison: 1,
+            detune: 0.0,
+            shape: 0.0,
         }
     }
     pub fn noise(color: NoiseColor, hz: f32) -> Self {
-        Source::Noise { color, hz }
+        Source::Noise {
+            color,
+            hz,
+            stereo_width: 0.0,
+            burst: 0.0,
+        }
+    }
+    pub fn modal(material: ModalMaterial, hz: f32) -> Self {
+        Source::Modal {
+            material,
+            hz,
+            damping: 0.45,
+            inharmonicity: 0.35,
+            strike: 0.75,
+        }
+    }
+    pub fn grain(hz: f32, density: f32, grain_ms: f32) -> Self {
+        Source::Grain {
+            hz,
+            density,
+            grain_ms,
+            scatter: 0.35,
+            spread: 0.55,
+            spray: 0.45,
+            sample: None,
+        }
     }
 }
 
@@ -200,6 +344,9 @@ pub struct Layer {
     /// The layer LED: off = muted.
     pub enabled: bool,
     pub solo: bool,
+    /// Locked layers are preserved unchanged during mutations/variations.
+    #[serde(default)]
+    pub locked: bool,
     /// Linear gain 0..2.
     pub gain: f32,
     /// −1..1.
@@ -217,6 +364,12 @@ pub struct Layer {
     pub cutoff: Curve,
     /// 0..1.
     pub resonance: f32,
+    /// Stereo pan modulation curve (−1..1; flat 0.0 is neutral).
+    #[serde(default = "default_pan_curve")]
+    pub pan_curve: Curve,
+    /// Source morph/modulation curve (0..1; flat 0.5 is neutral).
+    #[serde(default = "default_morph_curve")]
+    pub morph: Curve,
     /// The layer's own effects, before the mix.
     pub fx: Vec<crate::fx::FxSlot>,
 }
@@ -228,6 +381,7 @@ impl Default for Layer {
             source: Source::osc(Wave::Square, 440.0),
             enabled: true,
             solo: false,
+            locked: false,
             gain: 1.0,
             pan: 0.0,
             start: 0.0,
@@ -237,6 +391,8 @@ impl Default for Layer {
             filter: FilterMode::Off,
             cutoff: Curve::flat(1.0),
             resonance: 0.0,
+            pan_curve: default_pan_curve(),
+            morph: default_morph_curve(),
             fx: Vec::new(),
         }
     }
@@ -263,6 +419,18 @@ impl Layer {
         self.filter = mode;
         self.cutoff = cutoff;
         self.resonance = resonance;
+        self
+    }
+    pub fn with_pan_curve(mut self, c: Curve) -> Self {
+        self.pan_curve = c;
+        self
+    }
+    pub fn with_morph(mut self, c: Curve) -> Self {
+        self.morph = c;
+        self
+    }
+    pub fn with_locked(mut self, locked: bool) -> Self {
+        self.locked = locked;
         self
     }
     pub fn with_gain(mut self, gain: f32) -> Self {
@@ -342,6 +510,9 @@ pub struct ForgePatch {
     pub gain_db: f32,
     /// Seeds the noise, so the same patch always renders the same.
     pub seed: u64,
+    /// When true, tails fold into the start and the loop boundary is spliced seamlessly.
+    #[serde(default)]
+    pub seamless_loop: bool,
 }
 
 impl Default for ForgePatch {
@@ -361,6 +532,7 @@ impl ForgePatch {
             transpose: 0.0,
             gain_db: 0.0,
             seed: 1,
+            seamless_loop: false,
         }
     }
 
@@ -380,20 +552,81 @@ impl ForgePatch {
             l.pitch.tidy(-PITCH_RANGE, PITCH_RANGE);
             l.amp.tidy(0.0, 1.0);
             l.cutoff.tidy(0.0, 1.0);
+            l.pan_curve.tidy(-1.0, 1.0);
+            l.morph.tidy(0.0, 1.0);
             match &mut l.source {
                 Source::Osc {
                     hz,
                     vibrato_hz,
                     vibrato,
+                    fm_ratio,
+                    fm_index,
+                    unison,
+                    detune,
+                    shape,
                     ..
                 } => {
                     *hz = fin(*hz, 10.0, 12_000.0, 440.0);
                     *vibrato_hz = fin(*vibrato_hz, 0.0, 40.0, 0.0);
                     *vibrato = fin(*vibrato, 0.0, 12.0, 0.0);
+                    *fm_ratio = fin(*fm_ratio, 0.125, 16.0, 1.0);
+                    *fm_index = fin(*fm_index, 0.0, 8.0, 0.0);
+                    *unison = (*unison).clamp(1, 4);
+                    *detune = fin(*detune, 0.0, 1.0, 0.0);
+                    *shape = fin(*shape, 0.0, 1.0, 0.0);
                 }
-                Source::Noise { hz, .. } => *hz = fin(*hz, 10.0, 48_000.0, 4000.0),
-                Source::Sample { rate, .. } => *rate = (*rate).clamp(1000, 384_000),
+                Source::Noise {
+                    hz,
+                    stereo_width,
+                    burst,
+                    ..
+                } => {
+                    *hz = fin(*hz, 10.0, 48_000.0, 4000.0);
+                    *stereo_width = fin(*stereo_width, 0.0, 1.0, 0.0);
+                    *burst = fin(*burst, 0.0, 1.0, 0.0);
+                }
+                Source::Sample {
+                    rate,
+                    trim_start,
+                    trim_end,
+                    ..
+                } => {
+                    *rate = (*rate).clamp(1000, 384_000);
+                    *trim_start = fin(*trim_start, 0.0, 0.99, 0.0);
+                    *trim_end = fin(*trim_end, (*trim_start + 0.01).min(1.0), 1.0, 1.0);
+                }
                 Source::Synth { key, .. } => *key = (*key).min(127),
+                Source::Modal {
+                    hz,
+                    damping,
+                    inharmonicity,
+                    strike,
+                    ..
+                } => {
+                    *hz = fin(*hz, 20.0, 12_000.0, 440.0);
+                    *damping = fin(*damping, 0.0, 1.0, 0.45);
+                    *inharmonicity = fin(*inharmonicity, 0.0, 1.0, 0.35);
+                    *strike = fin(*strike, 0.0, 1.0, 0.75);
+                }
+                Source::Grain {
+                    hz,
+                    density,
+                    grain_ms,
+                    scatter,
+                    spread,
+                    spray,
+                    sample,
+                } => {
+                    *hz = fin(*hz, 20.0, 12_000.0, 600.0);
+                    *density = fin(*density, 1.0, 200.0, 36.0);
+                    *grain_ms = fin(*grain_ms, 4.0, 250.0, 24.0);
+                    *scatter = fin(*scatter, 0.0, 1.0, 0.35);
+                    *spread = fin(*spread, 0.0, 1.0, 0.55);
+                    *spray = fin(*spray, 0.0, 1.0, 0.45);
+                    if let Some(s) = sample {
+                        s.rate = s.rate.clamp(1000, 384_000);
+                    }
+                }
             }
             tidy_fx(&mut l.fx);
         }
@@ -719,12 +952,58 @@ mod tests {
     #[test]
     fn a_patch_with_missing_fields_opens() {
         let p: ForgePatch = serde_json::from_str(
-            r#"{"name":"Old","layers":[{"name":"A","source":{"Osc":{"wave":"Saw","hz":220.0}}}]}"#,
+            r#"{"name":"Old","layers":[{"name":"A","source":{"Osc":{"wave":"Saw","hz":220.0}}},{"name":"N","source":{"Noise":{"color":"White","hz":4000.0}}}]}"#,
         )
         .unwrap();
-        assert_eq!(p.layers.len(), 1);
+        assert_eq!(p.layers.len(), 2);
         assert_eq!(p.macros, Macros::default());
+        assert!(!p.seamless_loop);
+        assert!(!p.layers[0].locked);
+        assert!(p.layers[0].pan_curve.is_flat_at(0.0));
+        assert!(p.layers[0].morph.is_flat_at(0.5));
         assert!(ForgeSound::new(p).rendered.peak > 0.05);
+    }
+
+    #[test]
+    fn eight_layers_and_new_sources_roundtrip_serde() {
+        let mut p = ForgePatch::blank();
+        p.seamless_loop = true;
+        for i in 0..MAX_LAYERS {
+            let src = match i % 4 {
+                0 => Source::modal(ModalMaterial::Metal, 420.0 + i as f32 * 40.0),
+                1 => Source::grain(800.0, 32.0, 20.0),
+                2 => Source::Osc {
+                    wave: Wave::Sine,
+                    hz: 110.0,
+                    vibrato_hz: 0.0,
+                    vibrato: 0.0,
+                    fm_ratio: 2.0,
+                    fm_index: 1.5,
+                    unison: 2,
+                    detune: 0.3,
+                    shape: 0.2,
+                },
+                _ => Source::Noise {
+                    color: NoiseColor::Pink,
+                    hz: 4000.0,
+                    stereo_width: 0.7,
+                    burst: 0.3,
+                },
+            };
+            p.layers.push(
+                Layer::new(&format!("L{i}"), src, 0.35)
+                    .with_locked(i % 2 == 0)
+                    .with_pan_curve(CurvePreset::Ramp.build(-0.5, 0.5, 0.0))
+                    .with_morph(CurvePreset::Bell.build(0.1, 0.9, 0.5)),
+            );
+        }
+        assert_eq!(p.layers.len(), 8);
+        let json = serde_json::to_string(&p).unwrap();
+        let back: ForgePatch = serde_json::from_str(&json).unwrap();
+        assert_eq!(p, back);
+        let s = ForgeSound::new(back);
+        assert!(s.rendered.peak > 0.05 && s.rendered.peak <= 1.0);
+        assert!(s.rendered.seamless_loop);
     }
 
     /// A note at C5 plays the rendered sound as it is; an octave up, twice as fast.

@@ -1,5 +1,6 @@
 //! Offline render of a whole Forge patch: layers, their effects, the mix,
-//! master effects, the character knobs and a safety limiter.
+//! master effects, the character knobs, seamless loop splicing, loudness
+//! metering, and a safety limiter.
 
 use super::layer::{self, LayerCtx};
 use super::{ForgePatch, MAX_SECONDS, MAX_TAIL, RATE};
@@ -12,6 +13,10 @@ pub struct Rendered {
     pub frames: Vec<[f32; 2]>,
     /// Highest absolute sample.
     pub peak: f32,
+    /// Approximate integrated loudness in LUFS (K-weighted; −120 for silence).
+    pub lufs: f32,
+    /// True when rendered in seamless-loop mode.
+    pub seamless_loop: bool,
 }
 
 impl Rendered {
@@ -82,11 +87,46 @@ pub fn render(p: &ForgePatch) -> Rendered {
     for s in &mut mix {
         *s *= gain;
     }
-    let mut limit = FxSlot::new(FxKind::Limiter);
-    limit.params = vec![0.0, -1.0, 60.0];
-    run_chain(&[limit], &mut mix);
-    let mut frames: Vec<[f32; 2]> = mix
-        .as_chunks::<2>()
+
+    let frames = if p.seamless_loop {
+        render_seamless_loop(&mix, end, rate)
+    } else {
+        let mut limit = FxSlot::new(FxKind::Limiter);
+        limit.params = vec![0.0, -1.0, 60.0];
+        run_chain(&[limit], &mut mix);
+        let mut frames = sanitize_stereo(&mix);
+        // Drop the silent tail, keep 10 ms after the last sound, fade 5 ms.
+        let last = frames
+            .iter()
+            .rposition(|f| f[0].abs().max(f[1].abs()) > SILENT)
+            .map_or(0, |i| i + 1);
+        frames.truncate((last + rate / 100).min(frames.len()));
+        let fade = (rate / 200).min(frames.len());
+        let n = frames.len();
+        for (k, f) in frames[n - fade..].iter_mut().enumerate() {
+            let g = 1.0 - (k + 1) as f32 / fade as f32;
+            f[0] *= g;
+            f[1] *= g;
+        }
+        frames
+    };
+
+    let peak = frames
+        .iter()
+        .map(|f| f[0].abs().max(f[1].abs()))
+        .fold(0.0, f32::max);
+    let lufs = integrated_lufs(&frames, RATE);
+    Rendered {
+        rate: RATE,
+        frames,
+        peak,
+        lufs,
+        seamless_loop: p.seamless_loop,
+    }
+}
+
+fn sanitize_stereo(mix: &[f32]) -> Vec<[f32; 2]> {
+    mix.as_chunks::<2>()
         .0
         .iter()
         .map(|c| {
@@ -99,28 +139,145 @@ pub fn render(p: &ForgePatch) -> Rendered {
             };
             [ok(c[0]), ok(c[1])]
         })
-        .collect();
-    // Drop the silent tail, keep 10 ms after the last sound, fade 5 ms.
-    let last = frames
-        .iter()
-        .rposition(|f| f[0].abs().max(f[1].abs()) > SILENT)
-        .map_or(0, |i| i + 1);
-    frames.truncate((last + rate / 100).min(frames.len()));
-    let fade = (rate / 200).min(frames.len());
-    let n = frames.len();
-    for (k, f) in frames[n - fade..].iter_mut().enumerate() {
-        let g = 1.0 - (k + 1) as f32 / fade as f32;
-        f[0] *= g;
-        f[1] *= g;
+        .collect()
+}
+
+/// Fold FX tails back into the loop window, apply an equal-power overlap-add
+/// loop splice so frame `N-1` meets frame `0` with zero discontinuity, then
+/// run a warmed-up limiter so gain reduction is also continuous across the seam.
+fn render_seamless_loop(mix: &[f32], end: f32, rate: usize) -> Vec<[f32; 2]> {
+    let total_frames = mix.len() / 2;
+    let loop_frames = ((end * rate as f32).round() as usize)
+        .max(rate / 20)
+        .min(total_frames);
+    if loop_frames < 8 {
+        return Vec::new();
     }
-    let peak = frames
-        .iter()
-        .map(|f| f[0].abs().max(f[1].abs()))
-        .fold(0.0, f32::max);
-    Rendered {
-        rate: RATE,
-        frames,
-        peak,
+
+    // 1. Fold all tail spillover (reverbs, delays, long grains) modulo loop_frames.
+    let mut folded = vec![0.0f32; loop_frames * 2];
+    for (i, s) in mix.as_chunks::<2>().0.iter().enumerate() {
+        let dst = (i % loop_frames) * 2;
+        folded[dst] += s[0];
+        folded[dst + 1] += s[1];
+    }
+
+    // 2. Equal-power splice over `xfade` frames:
+    //    Y[0..X] = folded[0..X]*sin + folded[N..N+X]*cos
+    //    Y[X..N] = folded[X..N], where N = loop_frames - X.
+    //    Thus Y[N-1] = folded[N-1] connects directly to Y[0] = folded[N]!
+    let xfade = (loop_frames / 8).min(rate / 20).max(16);
+    let out_frames = loop_frames.saturating_sub(xfade).max(16);
+    let mut spliced = vec![0.0f32; out_frames * 2];
+    for i in 0..out_frames {
+        if i < xfade && out_frames + i < loop_frames {
+            let theta = (i as f32 / xfade as f32) * std::f32::consts::FRAC_PI_2;
+            let fin = theta.sin();
+            let fout = theta.cos();
+            let a = i * 2;
+            let b = (out_frames + i) * 2;
+            spliced[a] = folded[a] * fin + folded[b] * fout;
+            spliced[a + 1] = folded[a + 1] * fin + folded[b + 1] * fout;
+        } else {
+            spliced[i * 2] = folded[i * 2];
+            spliced[i * 2 + 1] = folded[i * 2 + 1];
+        }
+    }
+
+    // 3. Limiter with seamless warmup prefix from the end of the loop.
+    let warmup = out_frames.min(rate / 10);
+    let mut limited = Vec::with_capacity((warmup + out_frames) * 2);
+    limited.extend_from_slice(&spliced[(out_frames - warmup) * 2..]);
+    limited.extend_from_slice(&spliced);
+    let mut limit = FxSlot::new(FxKind::Limiter);
+    limit.params = vec![0.0, -1.0, 60.0];
+    run_chain(&[limit], &mut limited);
+
+    sanitize_stereo(&limited[warmup * 2..])
+}
+
+/// Approximate integrated loudness in LUFS using ITU-R BS.1770 K-weighting
+/// (high-shelf + high-pass filter) over the rendered audio.
+pub fn integrated_lufs(frames: &[[f32; 2]], rate: u32) -> f32 {
+    if frames.is_empty() {
+        return -120.0;
+    }
+    // Pre-filter (high-shelf +4 dB around 1681.97 Hz) and RLB high-pass (~38 Hz)
+    // computed cleanly for the active sample rate.
+    let fs = rate.max(8_000) as f64;
+    let shelf = Biquad::high_shelf(fs, 1681.974, 0.707175, 4.0);
+    let hp = Biquad::high_pass(fs, 38.135, 0.500327);
+    let mut s_l = shelf;
+    let mut s_r = shelf;
+    let mut h_l = hp;
+    let mut h_r = hp;
+    let mut energy = 0.0f64;
+    for f in frames {
+        let l = h_l.run(s_l.run(f[0] as f64));
+        let r = h_r.run(s_r.run(f[1] as f64));
+        energy += l * l + r * r;
+    }
+    let ms = energy / frames.len() as f64;
+    if ms <= 1e-12 {
+        -120.0
+    } else {
+        (-0.691 + 10.0 * ms.log10()).clamp(-120.0, 6.0) as f32
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Biquad {
+    b0: f64,
+    b1: f64,
+    b2: f64,
+    a1: f64,
+    a2: f64,
+    z1: f64,
+    z2: f64,
+}
+
+impl Biquad {
+    fn high_shelf(fs: f64, f0: f64, q: f64, gain_db: f64) -> Self {
+        let a = 10f64.powf(gain_db / 40.0);
+        let w0 = std::f64::consts::TAU * (f0 / fs).min(0.45);
+        let cw = w0.cos();
+        let sw = w0.sin();
+        let alpha = sw / (2.0 * q);
+        let two_sqrt_a_alpha = 2.0 * a.sqrt() * alpha;
+        let a0 = (a + 1.0) - (a - 1.0) * cw + two_sqrt_a_alpha;
+        Self {
+            b0: (a * ((a + 1.0) + (a - 1.0) * cw + two_sqrt_a_alpha)) / a0,
+            b1: (-2.0 * a * ((a - 1.0) + (a + 1.0) * cw)) / a0,
+            b2: (a * ((a + 1.0) + (a - 1.0) * cw - two_sqrt_a_alpha)) / a0,
+            a1: (2.0 * ((a - 1.0) - (a + 1.0) * cw)) / a0,
+            a2: ((a + 1.0) - (a - 1.0) * cw - two_sqrt_a_alpha) / a0,
+            z1: 0.0,
+            z2: 0.0,
+        }
+    }
+
+    fn high_pass(fs: f64, f0: f64, q: f64) -> Self {
+        let w0 = std::f64::consts::TAU * (f0 / fs).min(0.45);
+        let cw = w0.cos();
+        let sw = w0.sin();
+        let alpha = sw / (2.0 * q);
+        let a0 = 1.0 + alpha;
+        Self {
+            b0: ((1.0 + cw) * 0.5) / a0,
+            b1: -(1.0 + cw) / a0,
+            b2: ((1.0 + cw) * 0.5) / a0,
+            a1: (-2.0 * cw) / a0,
+            a2: (1.0 - alpha) / a0,
+            z1: 0.0,
+            z2: 0.0,
+        }
+    }
+
+    fn run(&mut self, x: f64) -> f64 {
+        let y = self.b0 * x + self.z1;
+        self.z1 = self.b1 * x - self.a1 * y + self.z2;
+        self.z2 = self.b2 * x - self.a2 * y;
+        y
     }
 }
 
@@ -240,6 +397,11 @@ mod tests {
             assert!(out.peak <= 1.0, "{r:?} clips");
             assert!(rms(&out) > 0.003, "{r:?} too quiet");
             assert!(
+                out.lufs > -60.0 && out.lufs < 3.0,
+                "{r:?} lufs {}",
+                out.lufs
+            );
+            assert!(
                 out.frames
                     .iter()
                     .all(|f| f[0].is_finite() && f[1].is_finite()),
@@ -324,6 +486,8 @@ mod tests {
                     frames: std::sync::Arc::new(tone),
                     reverse: true,
                     from: None,
+                    trim_start: 0.0,
+                    trim_end: 1.0,
                 },
                 0.2,
             )
@@ -366,5 +530,189 @@ mod tests {
         let s = ForgeSound::new(p);
         assert!(s.rendered.peak <= 1.0 && s.rendered.peak > 0.05);
         assert!(s.rendered.seconds() < 20.0);
+    }
+
+    #[test]
+    fn modal_materials_render_distinct_clean_impacts() {
+        let mut peaks = Vec::new();
+        let mut first_buf = None;
+        for mat in ModalMaterial::ALL {
+            let mut p = ForgePatch::blank();
+            p.layers.push(
+                Layer::new("Strike", Source::modal(mat, 380.0), 0.45).with_amp(Curve::flat(1.0)),
+            );
+            let r = render(&p);
+            assert!(r.peak > 0.08 && r.peak <= 1.0, "{mat:?} peak {}", r.peak);
+            assert!(
+                r.frames
+                    .iter()
+                    .all(|f| f[0].is_finite() && f[1].is_finite())
+            );
+            // Deterministic.
+            assert_eq!(r, render(&p));
+            if let Some(prev) = &first_buf {
+                assert_ne!(prev, &r.frames, "{mat:?} should differ from Metal");
+            } else {
+                first_buf = Some(r.frames.clone());
+            }
+            peaks.push(r.peak);
+        }
+        assert_eq!(peaks.len(), 5);
+    }
+
+    #[test]
+    fn granular_procedural_and_sample_clouds_render_stereo() {
+        let mut proc_patch = ForgePatch::blank();
+        proc_patch.layers.push(
+            Layer::new("Debris", Source::grain(900.0, 55.0, 22.0), 0.5)
+                .with_amp(Curve::flat(1.0))
+                .with_morph(CurvePreset::Bell.build(0.0, 1.0, 0.5)),
+        );
+        let r = render(&proc_patch);
+        assert!(r.peak > 0.05 && r.peak <= 1.0, "proc grain peak {}", r.peak);
+        assert!(
+            r.frames.iter().any(|f| (f[0] - f[1]).abs() > 0.02),
+            "should have stereo spread"
+        );
+        assert_eq!(r, render(&proc_patch), "granular must be deterministic");
+
+        // Sample-based granular cloud.
+        let tone: Vec<[f32; 2]> = (0..12_000)
+            .map(|i| {
+                let v = (i as f32 * 0.04).sin() * 0.6;
+                [v, v * 0.8]
+            })
+            .collect();
+        let mut samp_patch = ForgePatch::blank();
+        samp_patch.layers.push(
+            Layer::new(
+                "Cloud",
+                Source::Grain {
+                    hz: 440.0,
+                    density: 40.0,
+                    grain_ms: 35.0,
+                    scatter: 0.25,
+                    spread: 0.8,
+                    spray: 0.6,
+                    sample: Some(GrainSample {
+                        name: "tone".into(),
+                        rate: RATE,
+                        frames: Arc::new(tone),
+                    }),
+                },
+                0.4,
+            )
+            .with_amp(Curve::flat(1.0)),
+        );
+        let rs = render(&samp_patch);
+        assert!(
+            rs.peak > 0.05 && rs.peak <= 1.0,
+            "sample grain peak {}",
+            rs.peak
+        );
+    }
+
+    #[test]
+    fn osc_plus_fm_unison_shape_and_pan_curve_work() {
+        let mut base = ForgePatch::blank();
+        base.layers.push(
+            Layer::new("Base", Source::osc(Wave::Sine, 220.0), 0.25).with_amp(Curve::flat(0.9)),
+        );
+        let r_base = render(&base);
+
+        let mut fm = base.clone();
+        if let Source::Osc {
+            fm_ratio,
+            fm_index,
+            unison,
+            detune,
+            shape,
+            ..
+        } = &mut fm.layers[0].source
+        {
+            *fm_ratio = 2.5;
+            *fm_index = 2.2;
+            *unison = 3;
+            *detune = 0.6;
+            *shape = 0.4;
+        }
+        fm.layers[0].pan_curve = Curve::new(&[(0.0, -1.0, 0.0), (1.0, 1.0, 0.0)]);
+        let r_fm = render(&fm);
+        assert!(r_fm.peak > 0.1 && r_fm.peak <= 1.0);
+        assert_ne!(r_base.frames, r_fm.frames);
+        // Pan sweeps from left-heavy at start to right-heavy at end.
+        let n = r_fm.frames.len();
+        let head_l: f32 = r_fm.frames[..n / 5].iter().map(|f| f[0].abs()).sum();
+        let head_r: f32 = r_fm.frames[..n / 5].iter().map(|f| f[1].abs()).sum();
+        let tail_l: f32 = r_fm.frames[n * 4 / 5..].iter().map(|f| f[0].abs()).sum();
+        let tail_r: f32 = r_fm.frames[n * 4 / 5..].iter().map(|f| f[1].abs()).sum();
+        assert!(
+            head_l > head_r * 1.5,
+            "start should pan left: {head_l} vs {head_r}"
+        );
+        assert!(
+            tail_r > tail_l * 1.5,
+            "end should pan right: {tail_r} vs {tail_l}"
+        );
+    }
+
+    #[test]
+    fn sample_trim_slices_the_playback_region() {
+        // First half is silent, second half is a loud sine.
+        let mut data = vec![[0.0f32; 2]; 9600];
+        for (i, f) in data[4800..].iter_mut().enumerate() {
+            let v = (i as f32 * 0.06).sin() * 0.7;
+            *f = [v, v];
+        }
+        let mut p = ForgePatch::blank();
+        p.layers.push(
+            Layer::new(
+                "Trimmed",
+                Source::Sample {
+                    name: "half".into(),
+                    rate: RATE,
+                    frames: Arc::new(data),
+                    reverse: false,
+                    from: None,
+                    trim_start: 0.5,
+                    trim_end: 1.0,
+                },
+                0.1,
+            )
+            .with_amp(Curve::flat(1.0)),
+        );
+        let r = render(&p);
+        assert!(r.peak > 0.3, "trimmed region should immediately sound");
+        let early: f32 = r.frames[..200]
+            .iter()
+            .map(|f| f[0].abs())
+            .fold(0.0, f32::max);
+        assert!(early > 0.3, "should skip the silent first half");
+    }
+
+    #[test]
+    fn seamless_loop_has_continuous_seam_and_steady_energy() {
+        let mut p = ForgePatch::blank();
+        p.seamless_loop = true;
+        p.macros.space = 0.35;
+        p.layers.push(
+            Layer::new("Drone", Source::osc(Wave::Sine, 137.0), 0.6).with_amp(Curve::flat(0.75)),
+        );
+        let r = render(&p);
+        assert!(r.seamless_loop);
+        assert!(r.peak > 0.2 && r.peak <= 1.0);
+        // Check seam continuity: jump from last frame to first frame must be small (no click).
+        let first = r.frames.first().unwrap();
+        let last = r.frames.last().unwrap();
+        let seam_jump = (first[0] - last[0]).abs().max((first[1] - last[1]).abs());
+        assert!(seam_jump < 0.08, "loop seam clicked: jump = {seam_jump}");
+        // Must not fade to silence at the end like a one-shot.
+        let end_rms: f32 = (r.frames[r.frames.len() - 400..]
+            .iter()
+            .map(|f| f[0] * f[0] + f[1] * f[1])
+            .sum::<f32>()
+            / 800.0)
+            .sqrt();
+        assert!(end_rms > 0.1, "seamless loop faded out at end: {end_rms}");
     }
 }
