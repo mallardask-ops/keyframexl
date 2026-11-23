@@ -161,7 +161,13 @@ impl<Tab> DockArea<'_, Tab> {
         let bounds = self.window_bounds.unwrap();
         let tab_bar_height = self.style.as_ref().unwrap().tab_bar.height;
         let radius = self.style.as_ref().unwrap().tab_bar.corner_radius.nw;
-        let min = vec2(320.0, tab_bar_height + 140.0);
+        let min = self.dock_state[surf_index]
+            .iter()
+            .filter_map(|node| node.tabs())
+            .flatten()
+            .fold(vec2(320.0, tab_bar_height + 140.0), |min, tab| {
+                min.max(tab_viewer.min_window_size(tab))
+            });
 
         // Calculate fading of the window (if any)
         let (fade_factor, fade_style) = match fade_style {

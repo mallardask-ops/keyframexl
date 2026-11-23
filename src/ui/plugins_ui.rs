@@ -1923,7 +1923,7 @@ impl App {
                 tr.plg_counts,
                 &[
                     ("n", &list.len().to_string()),
-                    (tr.plg_st_ready, &ready.to_string()),
+                    ("ready", &ready.to_string()),
                     ("problems", &problems.to_string()),
                 ],
             )
@@ -1987,7 +1987,13 @@ impl App {
                     };
                     ui.horizontal(|ui| {
                         ui.add_space(16.0);
-                        ui.label(RichText::new(text).font(t::sans(13.0)).color(t::faint()));
+                        // Wraps: the yabridge hint must not widen the window.
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(text).font(t::sans(13.0)).color(t::faint()),
+                            )
+                            .wrap(),
+                        );
                     });
                     ui.add_space(8.0);
                 }
@@ -2393,10 +2399,13 @@ impl App {
                 {
                     s.plugins.extra_dirs.push(d);
                 }
-                ui.label(
-                    RichText::new(tr.plg_paths_note)
-                        .font(t::sans(12.0))
-                        .color(t::faint()),
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(tr.plg_paths_note)
+                            .font(t::sans(12.0))
+                            .color(t::faint()),
+                    )
+                    .wrap(),
                 );
             });
         });

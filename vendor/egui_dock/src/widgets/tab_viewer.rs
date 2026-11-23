@@ -1,5 +1,5 @@
 use crate::{NodeIndex, SurfaceIndex, TabStyle};
-use egui::{Id, Ui, WidgetText};
+use egui::{Id, Ui, Vec2, WidgetText};
 
 /// Defines how a tab should behave and be rendered inside a [`Tree`](crate::Tree).
 pub trait TabViewer {
@@ -96,5 +96,12 @@ pub trait TabViewer {
     /// By default, both scroll bars are shown.
     fn scroll_bars(&self, _tab: &Self::Tab) -> [bool; 2] {
         [true, true]
+    }
+
+    /// KeyFrameXL: the smallest floating window that still shows `tab` whole.
+    /// A window holding several tabs keeps the largest of their minimums
+    /// (never below the dock's own minimum, and never above the work area).
+    fn min_window_size(&self, _tab: &Self::Tab) -> Vec2 {
+        Vec2::ZERO
     }
 }

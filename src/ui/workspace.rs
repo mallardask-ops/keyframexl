@@ -608,6 +608,15 @@ impl egui_dock::TabViewer for Viewer<'_> {
         }
     }
 
+    fn min_window_size(&self, tab: &Tab) -> egui::Vec2 {
+        match tab {
+            // Section list, labels and the widest row (the buffer sizes) in
+            // full, in English and Ukrainian, with the footer's Close button.
+            Tab::Settings => egui::vec2(920.0, 520.0),
+            _ => egui::Vec2::ZERO,
+        }
+    }
+
     fn context_menu(
         &mut self,
         ui: &mut egui::Ui,

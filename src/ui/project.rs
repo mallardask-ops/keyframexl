@@ -26,6 +26,9 @@ pub fn autosave_path() -> Option<PathBuf> {
 /// Unsaved work goes to the autosave file this often (seconds).
 const AUTOSAVE_EVERY: f64 = 120.0;
 const AUTOSAVE_DEFAULT_MINUTES: u32 = 2;
+/// Smallest Project info window: the Details fields down to Genre, the tabs
+/// and the stats line whole, in English and Ukrainian.
+const INFO_MIN: egui::Vec2 = egui::vec2(460.0, 460.0);
 
 fn recent_path() -> Option<PathBuf> {
     Some(dirs::config_dir()?.join("keyframexl").join("recent.ron"))
@@ -182,8 +185,8 @@ impl App {
 
         let screen = ctx.screen_rect();
         let max_win = vec2(
-            (screen.width() - 40.0).max(420.0),
-            (screen.height() - 40.0).max(360.0),
+            (screen.width() - 40.0).max(INFO_MIN.x),
+            (screen.height() - 40.0).max(INFO_MIN.y),
         );
         let default_pos = egui::pos2(
             (screen.center().x - 250.0).max(24.0),
@@ -196,7 +199,7 @@ impl App {
             .collapsible(false)
             .resizable(true)
             .default_size(vec2(500.0, 560.0))
-            .min_size(vec2(420.0, 360.0))
+            .min_size(INFO_MIN)
             .max_size(max_win)
             .default_pos(default_pos)
             .show(ctx, |ui| {
