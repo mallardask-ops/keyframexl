@@ -238,19 +238,35 @@ fn looks_like_text(s: &str) -> bool {
     !(id_like || const_like)
 }
 
+fn collect_rs(root: &Path, dir: &Path, out: &mut Vec<(String, std::path::PathBuf)>) {
+    let mut entries: Vec<_> = std::fs::read_dir(dir)
+        .expect("src/ui")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .collect();
+    entries.sort();
+    for path in entries {
+        if path.is_dir() {
+            collect_rs(root, &path, out);
+        } else if path.extension().is_some_and(|x| x == "rs") {
+            let rel = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            out.push((rel, path));
+        }
+    }
+}
+
 /// `path: text` lines for every suspicious literal under `src/ui`.
 fn scan() -> BTreeSet<String> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ui");
     let mut out = BTreeSet::new();
-    let mut files: Vec<_> = std::fs::read_dir(&dir)
-        .expect("src/ui")
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == "rs"))
-        .collect();
-    files.sort();
-    for path in files {
-        let name = path.file_name().unwrap().to_string_lossy().to_string();
-        if skipped_file(&name) {
+    let mut files = Vec::new();
+    collect_rs(&dir, &dir, &mut files);
+    for (name, path) in files {
+        let base = path.file_name().unwrap().to_string_lossy();
+        if skipped_file(&base) {
             continue;
         }
         let src = std::fs::read_to_string(&path).unwrap();

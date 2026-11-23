@@ -578,6 +578,46 @@ define_strings! {
         forge_noise_white_full, forge_noise_pink_full, forge_noise_brown_full,
         forge_noise_crackle_full, forge_noise_digital_full,
         forge_flt_off, forge_flt_lp, forge_flt_hp, forge_flt_bp,
+        // Forge Studio UI rework
+        forge_tab_design, forge_tab_presets, forge_tab_variations, forge_tab_export,
+        forge_loop_btn, forge_loop_tip, forge_rr_btn, forge_rr_tip,
+        forge_auto_btn, forge_auto_tip, forge_ab_tip,
+        forge_init_btn, forge_init_tip, forge_to_playlist_btn, forge_to_playlist_tip,
+        forge_playlist_added, forge_stop_caps,
+        forge_sec_timeline, forge_hud_stats, forge_mode_oneshot, forge_mode_loop,
+        forge_lock_tip, forge_add_block_btn, forge_add_block_tip,
+        forge_timeline_hint, forge_layer_count,
+        forge_k_fm_idx, forge_k_fm_idx_hint, forge_k_fm_ratio, forge_k_fm_ratio_hint,
+        forge_k_unison, forge_k_unison_hint, forge_k_detune, forge_k_detune_hint,
+        forge_k_shape, forge_k_shape_hint,
+        forge_mat_metal, forge_mat_wood, forge_mat_glass, forge_mat_stone, forge_mat_membrane,
+        forge_k_damp, forge_k_damp_hint, forge_k_inharm, forge_k_inharm_hint,
+        forge_k_strike, forge_k_strike_hint,
+        forge_grain_proc, forge_grain_sample, forge_grain_clear,
+        forge_k_density, forge_k_density_hint, forge_k_grain_ms, forge_k_grain_ms_hint,
+        forge_k_scatter, forge_k_scatter_hint, forge_k_spread, forge_k_spread_hint,
+        forge_k_spray, forge_k_spray_hint,
+        forge_k_width, forge_k_width_hint, forge_k_burst, forge_k_burst_hint,
+        forge_k_trim_in, forge_k_trim_in_hint, forge_k_trim_out, forge_k_trim_out_hint,
+        forge_sec_curves, forge_line_pan, forge_line_morph,
+        forge_shape_drop, forge_shape_pluck, forge_shape_ramp,
+        forge_shape_bell, forge_shape_stutter, forge_shape_flat,
+        forge_curve_range_pitch, forge_curve_range_amp, forge_curve_range_filter,
+        forge_curve_range_pan, forge_curve_range_morph,
+        forge_search_hint, forge_sub_full, forge_sub_blocks, forge_cat_all, forge_cat_loops,
+        forge_inspire_btn, forge_inspire_tip, forge_block_added, forge_no_presets_match,
+        forge_block_sub_drop, forge_block_metal_strike, forge_block_wood_knock,
+        forge_block_glass_ping, forge_block_gravel_burst, forge_block_plasma_grain,
+        forge_block_stereo_whoosh, forge_block_air_tail,
+        forge_sec_var_rack, forge_k_spread_var, forge_k_spread_var_hint,
+        forge_reroll_all, forge_reroll_tip, forge_export_approved,
+        forge_locked_layers_lbl, forge_locked_none,
+        forge_var_use, forge_var_pin_tip, forge_var_reroll_tip, forge_var_play_tip,
+        forge_exp_scope, forge_exp_this_channel, forge_exp_sound_pack,
+        forge_exp_format, forge_exp_rate, forge_exp_channels, forge_exp_stereo,
+        forge_exp_loudness, forge_exp_as_mixed, forge_exp_peak, forge_exp_lufs,
+        forge_exp_template, forge_exp_preview_head, forge_exp_auditioned,
+        forge_exp_write_btn, forge_exp_pack_btn, forge_exp_pack_empty,
         // Plugin wrapper and plugin settings
         plg_opening_fl, plg_fl_output_taken, plg_fl_output_invalid, plg_fl_no_state, plg_page_plugin, plg_page_params, plg_page_settings, plg_crashed, plg_failed, plg_reload, plg_save_fx_preset, plg_load_fx_preset, plg_piano_roll_f7, plg_close_separate, plg_editor_separate, plg_outputs_hint, plg_outputs, plg_map_to_inserts, plg_map_to_inserts_tip, plg_unroute, plg_unroute_tip, plg_with_1_2, plg_route_each_pair, plg_card_channel, plg_mixer_insert, plg_mixer_insert_hint, plg_vol_pan, plg_k_volume, plg_k_volume_hint, plg_k_pan, plg_k_pan_hint, plg_stuck_notes, plg_stuck_notes_hint, plg_notes_off, plg_card_mixer_slot, plg_place, plg_on, plg_on_hint, plg_mix, plg_mix_hint, plg_mix_knob_hint, plg_card_processing, plg_process, plg_process_bridged, plg_process_inside, plg_latency, plg_latency_none, plg_change_in_settings, plg_card_state, plg_file, plg_saved_state, plg_saved_state_hint, plg_none_yet, plg_reload_tip, plg_reset_defaults, plg_reset_defaults_tip, plg_not_loaded_dot, plg_flex_standalone, plg_no_editor, plg_wayland_note, plg_hide_editor, plg_show_editor, plg_filter_params, plg_off, plg_st_not_loaded, plg_st_loading, plg_st_editor_open, plg_st_ready, plg_card_safety, plg_bridged, plg_bridged_hint, plg_search, plg_kind_all, plg_kind_instruments, plg_kind_effects, plg_kind_problems, plg_scanning, plg_rescan_all, plg_col_name, plg_col_type, plg_col_vendor, plg_col_status, plg_list_empty, plg_nothing_matches, plg_st_hidden, plg_st_hangs, plg_st_crashes, plg_instrument, plg_effect, plg_card_selected, plg_unknown_vendor, plg_via_yabridge, plg_no_own_editor, plg_add_to_rack, plg_show_in_folder, plg_probing, plg_rescan_this, plg_rescan_this_tip, plg_show_in_lists, plg_hide_from_lists, plg_hide_tip, plg_failed_test, plg_try_rack, plg_missing_hint, plg_card_windows, plg_system_wine, plg_wine_hint, plg_wine_from_path, plg_other, plg_other_tip, plg_no_wine, plg_dxvk_hint, plg_stop_it, plg_stop_it_tip, plg_wine_stopped, plg_card_folders, plg_missing, plg_add_folder, plg_paths_note, plg_no_presets, plg_preset, plg_fl_live_link, plg_link_not_running, plg_link_starting, plg_link_connected, plg_link_check, plg_link_error, plg_link_about, plg_link_not_measured, plg_link_chan_off, plg_link_no_sound, plg_link_sound_in, plg_link_running, plg_link_not_running_lc, plg_link_notes, plg_link_port_ready, plg_link_port_missing, plg_link_fl_listens, plg_link_input_open, plg_link_restart_fl, plg_link_sound, plg_link_plays_here, plg_link_no_sink, plg_link_flow, plg_link_delay, plg_link_gaps, plg_open_fl, plg_starting_fl, plg_reconnect, plg_reconnect_tip, plg_reconnecting, plg_flex_ready, plg_flex_needs, plg_yes, plg_no, plg_fl_not_found, plg_system_wine_missing, plg_fl_cert_note, plg_flex_not_vsti, plg_link_howto, plg_link_no_export, plg_reloading, plg_checking, plg_scan_done, plg_fl_connected, plg_audio_busy, plg_reload_err_tip, plg_outputs_summary, plg_mapped, plg_place_slot, plg_latency_buffer, plg_state_bytes, plg_reset_done, plg_n_params, plg_no_editor_window, plg_link_exists, plg_loading_name, plg_counts, plg_add_to, plg_try_add_to, plg_other_wine, plg_stop_wine_err, plg_no_saved_presets, plg_saved_presets, plg_link_delay_val, plg_link_last_sound, plg_link_gaps_val, plg_flex_facts,
         // Project info, unsaved changes, autosave
@@ -1328,6 +1368,29 @@ impl Strings {
             F::LowPass => self.forge_flt_lp,
             F::HighPass => self.forge_flt_hp,
             F::BandPass => self.forge_flt_bp,
+        }
+    }
+
+    pub fn forge_material(&self, m: keyframexl::forge::ModalMaterial) -> &'static str {
+        use keyframexl::forge::ModalMaterial as M;
+        match m {
+            M::Metal => self.forge_mat_metal,
+            M::Wood => self.forge_mat_wood,
+            M::Glass => self.forge_mat_glass,
+            M::Stone => self.forge_mat_stone,
+            M::Membrane => self.forge_mat_membrane,
+        }
+    }
+
+    pub fn forge_curve_preset(&self, p: keyframexl::forge::CurvePreset) -> &'static str {
+        use keyframexl::forge::CurvePreset as P;
+        match p {
+            P::Drop => self.forge_shape_drop,
+            P::Pluck => self.forge_shape_pluck,
+            P::Ramp => self.forge_shape_ramp,
+            P::Bell => self.forge_shape_bell,
+            P::Stutter => self.forge_shape_stutter,
+            P::Flat => self.forge_shape_flat,
         }
     }
 

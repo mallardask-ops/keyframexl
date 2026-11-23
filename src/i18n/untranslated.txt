@@ -10,16 +10,30 @@ browser.rs: Rendered
 deck.rs: REC {}:{:02}
 export.rs: 320 kbps
 export.rs: 32 float
-forge.rs: {:.1} kHz
-forge.rs: 2 KHZ
-forge.rs: 44.1 kHz
-forge.rs: 48 kHz
-forge.rs: Forge
-forge.rs: Forge bounce
-forge.rs: Noise
-forge.rs: Sample
-forge.rs: Synth
-forge.rs: Tone
+forge/curves.rs: 2 KHZ
+forge/mod.rs: {:.1} kHz
+forge/mod.rs: Forge
+forge/mod.rs: Forge bounce
+forge/mod.rs: Init
+forge/mod.rs: Strike
+forge/tabs.rs: 44.1 kHz
+forge/tabs.rs: 48 kHz
+forge/tabs.rs: Air Tail
+forge/tabs.rs: Glass Ping
+forge/tabs.rs: Gravel
+forge/tabs.rs: Metal Strike
+forge/tabs.rs: Plasma
+forge/tabs.rs: Sub Drop
+forge/tabs.rs: WAV 16
+forge/tabs.rs: WAV 24
+forge/tabs.rs: Whoosh
+forge/tabs.rs: Wood Knock
+forge/timeline.rs: Noise
+forge/timeline.rs: Sample
+forge/timeline.rs: Strike
+forge/timeline.rs: Synth
+forge/timeline.rs: Texture
+forge/timeline.rs: Tone
 fx_response.rs: 100 Hz – 10 kHz     ·     2 s
 fx_response.rs: 1 kHz SINE     ·     3 ms
 fx_response.rs: 20 Hz – 20 kHz     ·     ±12 dB
