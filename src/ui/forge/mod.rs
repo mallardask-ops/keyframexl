@@ -62,6 +62,7 @@ pub(super) enum PresetSub {
 pub(super) enum PresetFilter {
     #[default]
     All,
+    Loops,
     Category(Category),
     User,
 }

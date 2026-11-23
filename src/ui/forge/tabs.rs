@@ -270,6 +270,7 @@ pub(super) fn presets_tab(ui: &mut Ui, id: u64, p: &ForgePatch, view: &mut View)
                     }
                 };
                 tag_btn(tr.forge_cat_all, PresetFilter::All);
+                tag_btn(tr.forge_cat_loops, PresetFilter::Loops);
                 for cat in Category::ALL {
                     tag_btn(tr.forge_category(cat), PresetFilter::Category(cat));
                 }
@@ -286,6 +287,10 @@ pub(super) fn presets_tab(ui: &mut Ui, id: u64, p: &ForgePatch, view: &mut View)
                     {
                         continue;
                     }
+                    let patch = r.patch();
+                    if view.preset_filter == PresetFilter::Loops && !patch.seamless_loop {
+                        continue;
+                    }
                     let label = r.label();
                     let cat_lbl = tr.forge_category(cat);
                     if !q.is_empty()
@@ -294,11 +299,17 @@ pub(super) fn presets_tab(ui: &mut Ui, id: u64, p: &ForgePatch, view: &mut View)
                     {
                         continue;
                     }
-                    items.push((label.into(), cat_lbl.into(), r.patch()));
+                    items.push((label.into(), cat_lbl.into(), patch));
                 }
             }
-            if matches!(view.preset_filter, PresetFilter::All | PresetFilter::User) {
+            if matches!(
+                view.preset_filter,
+                PresetFilter::All | PresetFilter::Loops | PresetFilter::User
+            ) {
                 for u in user.iter() {
+                    if view.preset_filter == PresetFilter::Loops && !u.seamless_loop {
+                        continue;
+                    }
                     if !q.is_empty() && !u.name.to_lowercase().contains(&q) {
                         continue;
                     }
@@ -356,12 +367,17 @@ pub(super) fn presets_tab(ui: &mut Ui, id: u64, p: &ForgePatch, view: &mut View)
                                     t::mono(9.5),
                                     t::muted(),
                                 );
+                                let (badge, bcol) = if patch.seamless_loop {
+                                    (tr.forge_loop_btn.to_uppercase(), t::enc_green())
+                                } else {
+                                    (format!("{}L", patch.layers.len()), t::enc_blue())
+                                };
                                 ui.painter().text(
                                     r.right_center() + vec2(-9.0, 0.0),
                                     Align2::RIGHT_CENTER,
-                                    format!("{}L", patch.layers.len()),
+                                    badge,
                                     t::mono(10.0),
-                                    t::enc_blue(),
+                                    bcol,
                                 );
                                 if resp.clicked() {
                                     out.adopt = Some(patch.clone());

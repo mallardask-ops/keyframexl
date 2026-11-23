@@ -407,12 +407,18 @@ mod tests {
                     .all(|f| f[0].is_finite() && f[1].is_finite()),
                 "{r:?} NaN"
             );
-            // The sound ends quietly (faded), never on a click.
+            // One-shots fade cleanly to silence; seamless loops join smoothly across the seam.
+            let first = out.frames.first().unwrap();
             let last = out.frames.last().unwrap();
-            assert!(
-                last[0].abs() < 0.01 && last[1].abs() < 0.01,
-                "{r:?} ends loud"
-            );
+            if out.seamless_loop {
+                let jump = (first[0] - last[0]).abs().max((first[1] - last[1]).abs());
+                assert!(jump < 0.18, "{r:?} loop seam jump {jump}");
+            } else {
+                assert!(
+                    last[0].abs() < 0.01 && last[1].abs() < 0.01,
+                    "{r:?} ends loud"
+                );
+            }
         }
     }
 

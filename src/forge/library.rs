@@ -4,7 +4,10 @@
 //! shotgun; and recipes that a style's extra layers would spoil (UI ticks,
 //! a heartbeat) take only the light part of a style.
 
-use super::{Curve, FilterMode, ForgePatch, Layer, Macros, NoiseColor, Source, Wave};
+use super::{
+    Curve, CurvePreset, FilterMode, ForgePatch, Layer, Macros, ModalMaterial, NoiseColor, Source,
+    Wave,
+};
 use crate::fx::{FxKind, FxSlot};
 
 /// What a recipe is for (menus group by it; export levels follow it).
@@ -151,8 +154,93 @@ pub const RECIPES: [RecipeDef; 40] = [
 fn o(name: &str, wave: Wave, hz: f32, len: f32) -> Layer {
     Layer::new(name, Source::osc(wave, hz), len)
 }
+fn fm(
+    name: &str,
+    wave: Wave,
+    hz: f32,
+    fm_ratio: f32,
+    fm_index: f32,
+    unison: u8,
+    detune: f32,
+    len: f32,
+) -> Layer {
+    Layer::new(
+        name,
+        Source::Osc {
+            wave,
+            hz,
+            vibrato_hz: 0.0,
+            vibrato: 0.0,
+            fm_ratio,
+            fm_index,
+            unison,
+            detune,
+            shape: 0.0,
+        },
+        len,
+    )
+}
+fn m(
+    name: &str,
+    material: ModalMaterial,
+    hz: f32,
+    damping: f32,
+    inharmonicity: f32,
+    strike: f32,
+    len: f32,
+) -> Layer {
+    Layer::new(
+        name,
+        Source::Modal {
+            material,
+            hz,
+            damping,
+            inharmonicity,
+            strike,
+        },
+        len,
+    )
+    .with_amp(Curve::flat(1.0))
+}
+fn gr(
+    name: &str,
+    hz: f32,
+    density: f32,
+    grain_ms: f32,
+    scatter: f32,
+    spread: f32,
+    spray: f32,
+    len: f32,
+) -> Layer {
+    Layer::new(
+        name,
+        Source::Grain {
+            hz,
+            density,
+            grain_ms,
+            scatter,
+            spread,
+            spray,
+            sample: None,
+        },
+        len,
+    )
+    .with_amp(Curve::flat(1.0))
+}
 fn n(name: &str, color: NoiseColor, hz: f32, len: f32) -> Layer {
     Layer::new(name, Source::noise(color, hz), len)
+}
+fn ns(name: &str, color: NoiseColor, hz: f32, width: f32, burst: f32, len: f32) -> Layer {
+    Layer::new(
+        name,
+        Source::Noise {
+            color,
+            hz,
+            stereo_width: width,
+            burst,
+        },
+        len,
+    )
 }
 /// A curve from `(t, value, tension)` points.
 fn c(points: &[(f32, f32, f32)]) -> Curve {
@@ -262,28 +350,35 @@ fn sound(layers: Vec<Layer>, fx: Vec<FxSlot>, m: (f32, f32, f32, f32), seed: u64
     }
 }
 
+fn looped(layers: Vec<Layer>, fx: Vec<FxSlot>, m: (f32, f32, f32, f32), seed: u64) -> ForgePatch {
+    ForgePatch {
+        seamless_loop: true,
+        ..sound(layers, fx, m, seed)
+    }
+}
+
 // ---- UI
 
 fn ui_hover() -> ForgePatch {
     sound(
         vec![
-            o("Tick", Sin, 3200.0, 0.025)
-                .g(0.5)
-                .a(c(&[(0.0, 0.35, 0.0), (1.0, 0.0, 0.0)])),
-            n("Edge", Wh, 8000.0, 0.01).g(0.15).f(HP, flat(0.8), 0.1),
+            m("Tick", ModalMaterial::Glass, 2200.0, 0.85, 0.15, 0.65, 0.04).g(0.65),
+            ns("Air", Wh, 8000.0, 0.35, 0.0, 0.014)
+                .g(0.18)
+                .f(HP, flat(0.82), 0.1),
         ],
         vec![],
-        (0.45, 0.35, 0.0, 0.0),
+        (0.45, 0.4, 0.0, 0.0),
         11,
     )
 }
 fn ui_confirm() -> ForgePatch {
     sound(
         vec![
-            o("Ding", P25, 880.0, 0.06)
-                .g(0.8)
-                .a(c(&[(0.0, 0.85, 0.0), (1.0, 0.0, 0.0)])),
-            o("Dong", P25, 1320.0, 0.1).st(0.055).g(0.7).a(dec(-0.3)),
+            m("Chime", ModalMaterial::Glass, 880.0, 0.55, 0.1, 0.55, 0.14).g(0.75),
+            m("Ring", ModalMaterial::Glass, 1320.0, 0.45, 0.12, 0.65, 0.22)
+                .st(0.055)
+                .g(0.8),
         ],
         vec![],
         (0.5, 0.5, 0.0, 0.08),
@@ -293,13 +388,10 @@ fn ui_confirm() -> ForgePatch {
 fn ui_back() -> ForgePatch {
     sound(
         vec![
-            o("High", Tri, 660.0, 0.09)
-                .g(0.8)
-                .p(c(&[(0.0, 0.0, 0.0), (1.0, -5.0, 0.0)]))
-                .a(dec(-0.2)),
-            o("Low", Tri, 440.0, 0.12)
-                .st(0.07)
-                .g(0.7)
+            m("Tap", ModalMaterial::Wood, 640.0, 0.65, 0.2, 0.55, 0.1).g(0.8),
+            o("Drop", Tri, 440.0, 0.12)
+                .st(0.06)
+                .g(0.65)
                 .p(c(&[(0.0, 0.0, 0.0), (1.0, -7.0, 0.0)]))
                 .a(dec(-0.3)),
         ],
@@ -312,17 +404,13 @@ fn ui_error() -> ForgePatch {
     let env = || c(&[(0.0, 0.9, 0.0), (0.15, 1.0, 0.0), (1.0, 0.0, 0.0)]);
     sound(
         vec![
-            o("Buzz", Saw, 165.0, 0.22)
-                .g(0.7)
+            fm("Buzz", Saw, 165.0, 1.41, 1.2, 2, 0.35, 0.22)
+                .g(0.85)
                 .a(env())
                 .f(LP, flat(0.55), 0.35),
-            o("Beat", Saw, 172.0, 0.22)
-                .g(0.7)
-                .pan(0.2)
-                .a(env())
-                .f(LP, flat(0.55), 0.35),
+            m("Thud", ModalMaterial::Membrane, 110.0, 0.72, 0.3, 0.7, 0.16).g(0.55),
         ],
-        vec![drv(6.0, 5000.0, -4.0, 60.0)],
+        vec![drv(6.0, 5000.0, -4.0, 55.0)],
         (0.5, 0.55, 0.1, 0.0),
         14,
     )
@@ -330,11 +418,22 @@ fn ui_error() -> ForgePatch {
 fn ui_toggle() -> ForgePatch {
     sound(
         vec![
-            o("Click", Sq, 1500.0, 0.02).g(0.6).a(dec(-0.5)),
-            n("Air", Wh, 8000.0, 0.01).g(0.2).f(HP, flat(0.82), 0.0),
+            m(
+                "Switch",
+                ModalMaterial::Wood,
+                1280.0,
+                0.88,
+                0.25,
+                0.92,
+                0.035,
+            )
+            .g(0.9),
+            ns("Edge", Wh, 8000.0, 0.2, 0.0, 0.012)
+                .g(0.22)
+                .f(HP, flat(0.82), 0.0),
         ],
         vec![],
-        (0.48, 0.4, 0.0, 0.0),
+        (0.48, 0.45, 0.0, 0.0),
         15,
     )
 }
@@ -344,15 +443,14 @@ fn ui_toggle() -> ForgePatch {
 fn step_dirt() -> ForgePatch {
     sound(
         vec![
-            n("Scuff", Pk, 4000.0, 0.12)
-                .g(1.3)
+            ns("Scuff", Pk, 4000.0, 0.45, 0.15, 0.13)
+                .g(1.2)
                 .a(dec(-0.6))
                 .f(BP, flat(0.5), 0.25),
-            o("Thud", Sin, 72.0, 0.09)
-                .g(0.7)
-                .p(c(&[(0.0, 5.0, -0.5), (1.0, 0.0, 0.0)]))
-                .a(dec(-0.3)),
-            n("Grit", Cr, 2200.0, 0.06).g(0.3).a(dec(-0.3)),
+            m("Thud", ModalMaterial::Membrane, 82.0, 0.75, 0.25, 0.5, 0.12).g(0.8),
+            gr("Grit", 1100.0, 55.0, 14.0, 0.5, 0.4, 0.75, 0.09)
+                .g(0.45)
+                .a(dec(-0.4)),
         ],
         vec![],
         (0.5, 0.5, 0.0, 0.05),
@@ -362,15 +460,23 @@ fn step_dirt() -> ForgePatch {
 fn step_grass() -> ForgePatch {
     sound(
         vec![
-            n("Swish", Pk, 4000.0, 0.18)
+            ns("Swish", Pk, 4000.0, 0.55, 0.0, 0.18)
                 .g(1.1)
-                .a(c(&[(0.0, 0.0, 0.0), (0.12, 0.8, 0.0), (1.0, 0.0, 0.0)]))
-                .f(BP, flat(0.55), 0.15),
-            n("Crunch", Cr, 1500.0, 0.12).g(0.35).a(dec(-0.5)),
-            o("Thud", Sin, 80.0, 0.08)
-                .g(0.5)
-                .p(c(&[(0.0, 4.0, 0.0), (1.0, 0.0, 0.0)]))
-                .a(dec(-0.3)),
+                .a(c(&[(0.0, 0.0, 0.0), (0.12, 0.85, 0.0), (1.0, 0.0, 0.0)]))
+                .f(BP, flat(0.56), 0.15),
+            gr("Blades", 1600.0, 48.0, 16.0, 0.45, 0.5, 0.7, 0.14)
+                .g(0.42)
+                .a(dec(-0.5)),
+            m(
+                "Soft thud",
+                ModalMaterial::Membrane,
+                76.0,
+                0.82,
+                0.2,
+                0.35,
+                0.1,
+            )
+            .g(0.55),
         ],
         vec![],
         (0.5, 0.5, 0.0, 0.05),
@@ -380,16 +486,15 @@ fn step_grass() -> ForgePatch {
 fn step_gravel() -> ForgePatch {
     sound(
         vec![
-            n("Crunch", Cr, 900.0, 0.16)
-                .g(1.2)
-                .a(c(&[(0.0, 0.9, -0.3), (0.4, 0.6, 0.0), (1.0, 0.0, 0.0)]))
-                .f(BP, flat(0.62), 0.35),
-            n("Tick", Cr, 3000.0, 0.05).st(0.01).g(0.5).a(dec(-0.3)),
-            n("Tick 2", Cr, 2500.0, 0.06)
-                .st(0.07)
-                .g(0.4)
-                .pan(0.3)
-                .a(dec(-0.3)),
+            gr("Debris", 1350.0, 82.0, 12.0, 0.68, 0.65, 0.85, 0.18)
+                .g(1.1)
+                .a(c(&[(0.0, 0.95, -0.35), (0.45, 0.65, 0.0), (1.0, 0.0, 0.0)]))
+                .f(BP, flat(0.64), 0.3),
+            m("Stone", ModalMaterial::Stone, 420.0, 0.78, 0.55, 0.82, 0.1).g(0.7),
+            gr("Scatter", 2400.0, 60.0, 10.0, 0.7, 0.7, 0.9, 0.09)
+                .st(0.05)
+                .g(0.5)
+                .a(dec(-0.35)),
         ],
         vec![],
         (0.5, 0.55, 0.0, 0.05),
@@ -399,19 +504,14 @@ fn step_gravel() -> ForgePatch {
 fn step_wood() -> ForgePatch {
     sound(
         vec![
-            o("Knock", Sin, 130.0, 0.12)
-                .g(0.9)
-                .p(c(&[(0.0, 6.0, -0.6), (1.0, -2.0, 0.0)]))
-                .a(dec(-0.4)),
-            n("Body", Pk, 4000.0, 0.1)
-                .g(0.6)
-                .a(dec(-0.5))
-                .f(BP, flat(0.35), 0.6),
-            o("Creak", Saw, 90.0, 0.08)
-                .st(0.02)
-                .g(0.25)
-                .p(c(&[(0.0, 0.0, 0.0), (0.5, 2.0, 0.0), (1.0, 0.0, 0.0)]))
-                .a(c(&[(0.0, 0.0, 0.0), (0.3, 0.3, 0.0), (1.0, 0.0, 0.0)])),
+            m("Plank", ModalMaterial::Wood, 195.0, 0.62, 0.28, 0.72, 0.18).g(1.0),
+            ns("Sole", Pk, 4000.0, 0.3, 0.0, 0.08)
+                .g(0.5)
+                .a(dec(-0.55))
+                .f(BP, flat(0.42), 0.45),
+            m("Heel", ModalMaterial::Wood, 340.0, 0.75, 0.35, 0.85, 0.09)
+                .st(0.015)
+                .g(0.45),
         ],
         vec![],
         (0.5, 0.5, 0.0, 0.05),
@@ -421,56 +521,47 @@ fn step_wood() -> ForgePatch {
 fn step_metal() -> ForgePatch {
     sound(
         vec![
-            o("Ping", Sq, 523.0, 0.22)
-                .g(0.6)
-                .p(c(&[(0.0, 3.0, -0.7), (1.0, 0.0, 0.0)]))
+            m("Grate", ModalMaterial::Metal, 460.0, 0.58, 0.48, 0.86, 0.28).g(0.9),
+            m("Clank", ModalMaterial::Metal, 740.0, 0.68, 0.55, 0.92, 0.16)
+                .st(0.008)
+                .g(0.55),
+            ns("Scuff", Wh, 8000.0, 0.35, 0.0, 0.055)
+                .g(0.32)
                 .a(dec(-0.5))
-                .f(BP, flat(0.7), 0.55),
-            o("Ring", Sq, 787.0, 0.18)
-                .g(0.4)
-                .pan(0.25)
-                .a(dec(-0.5))
-                .f(BP, flat(0.7), 0.55),
-            n("Scuff", Wh, 8000.0, 0.06)
-                .g(0.3)
-                .a(dec(-0.5))
-                .f(HP, flat(0.8), 0.0),
+                .f(HP, flat(0.78), 0.0),
         ],
-        vec![ring(183.0, 25.0)],
-        (0.5, 0.5, 0.0, 0.05),
+        vec![],
+        (0.5, 0.5, 0.0, 0.08),
         25,
     )
 }
 fn step_concrete() -> ForgePatch {
     sound(
         vec![
-            n("Tap", Wh, 8000.0, 0.07)
-                .g(1.0)
+            m("Slab", ModalMaterial::Stone, 285.0, 0.82, 0.45, 0.88, 0.1).g(1.0),
+            ns("Tap", Wh, 8000.0, 0.25, 0.1, 0.055)
+                .g(0.75)
                 .a(dec(-0.7))
-                .f(HP, flat(0.7), 0.1),
-            o("Thud", Sin, 90.0, 0.07)
-                .g(0.6)
-                .p(c(&[(0.0, 4.0, -0.4), (1.0, 0.0, 0.0)]))
-                .a(dec(-0.4)),
-            n("Grit", Cr, 3500.0, 0.04).g(0.3).a(dec(-0.3)),
+                .f(HP, flat(0.68), 0.1),
+            gr("Grit", 2100.0, 45.0, 9.0, 0.55, 0.35, 0.7, 0.05)
+                .g(0.35)
+                .a(dec(-0.35)),
         ],
         vec![],
-        (0.48, 0.5, 0.0, 0.03),
+        (0.48, 0.5, 0.0, 0.04),
         26,
     )
 }
 fn step_snow() -> ForgePatch {
     sound(
         vec![
-            n("Crunch", Br, 4000.0, 0.22)
-                .g(0.9)
+            ns("Compress", Br, 4000.0, 0.5, 0.2, 0.22)
+                .g(0.95)
                 .a(c(&[(0.0, 0.0, 0.0), (0.2, 1.0, -0.2), (1.0, 0.0, 0.0)]))
                 .f(LP, flat(0.45), 0.1),
-            n("Squeak", Cr, 500.0, 0.18).g(0.4).a(c(&[
-                (0.0, 0.0, 0.0),
-                (0.3, 0.6, 0.0),
-                (1.0, 0.0, 0.0),
-            ])),
+            gr("Squeak", 950.0, 52.0, 18.0, 0.45, 0.55, 0.65, 0.2)
+                .g(0.55)
+                .a(c(&[(0.0, 0.0, 0.0), (0.25, 0.75, 0.0), (1.0, 0.0, 0.0)])),
         ],
         vec![],
         (0.5, 0.45, 0.0, 0.05),
@@ -483,57 +574,64 @@ fn step_snow() -> ForgePatch {
 fn swing() -> ForgePatch {
     sound(
         vec![
-            n("Air", Wh, 8000.0, 0.22)
-                .g(1.0)
+            ns("Air", Pk, 8000.0, 0.8, 0.0, 0.26)
+                .g(1.1)
                 .a(c(&[(0.0, 0.0, 0.0), (0.35, 1.0, -0.2), (1.0, 0.0, 0.0)]))
-                .f(BP, sweep(&[0.5, 0.75, 0.45]), 0.3),
-            o("Tone", Saw, 220.0, 0.2)
-                .g(0.25)
+                .f(BP, sweep(&[0.45, 0.78, 0.42]), 0.35)
+                .with_pan_curve(CurvePreset::Ramp.build(-0.75, 0.75, 0.0)),
+            fm("Edge", Saw, 210.0, 1.5, 0.6, 2, 0.25, 0.22)
+                .g(0.32)
                 .p(c(&[(0.0, -5.0, 0.0), (1.0, 7.0, 0.0)]))
-                .a(c(&[(0.0, 0.0, 0.0), (0.3, 0.25, 0.0), (1.0, 0.0, 0.0)]))
+                .a(c(&[(0.0, 0.0, 0.0), (0.3, 0.3, 0.0), (1.0, 0.0, 0.0)]))
                 .f(LP, flat(0.45), 0.15),
         ],
         vec![],
-        (0.5, 0.55, 0.0, 0.05),
+        (0.5, 0.55, 0.0, 0.06),
         31,
     )
 }
 fn clash() -> ForgePatch {
     sound(
         vec![
-            o("Blade", Sq, 1180.0, 0.35)
-                .g(0.5)
-                .a(dec(-0.5))
-                .f(BP, flat(0.65), 0.5),
-            o("Blade 2", Sq, 1790.0, 0.3)
-                .g(0.4)
-                .pan(0.3)
-                .a(dec(-0.5))
-                .f(BP, flat(0.65), 0.5),
-            n("Spark", Wh, 8000.0, 0.05)
-                .g(0.5)
-                .a(dec(-0.5))
-                .f(HP, flat(0.8), 0.0),
+            m("Blade", ModalMaterial::Metal, 920.0, 0.32, 0.55, 0.96, 0.55).g(0.9),
+            m(
+                "Blade 2",
+                ModalMaterial::Metal,
+                1410.0,
+                0.38,
+                0.68,
+                0.92,
+                0.45,
+            )
+            .st(0.006)
+            .g(0.65),
+            gr("Sparks", 3200.0, 75.0, 10.0, 0.75, 0.8, 0.85, 0.14)
+                .g(0.45)
+                .a(dec(-0.6)),
         ],
-        vec![ring(311.0, 30.0), rev(45.0, 50.0, 25.0)],
-        (0.5, 0.55, 0.0, 0.2),
+        vec![rev(45.0, 50.0, 22.0)],
+        (0.5, 0.58, 0.0, 0.18),
         32,
     )
 }
 fn pistol() -> ForgePatch {
     sound(
         vec![
-            n("Blast", Wh, 8000.0, 0.22)
+            m("Bolt", ModalMaterial::Metal, 760.0, 0.75, 0.45, 0.95, 0.08).g(0.65),
+            ns("Blast", Wh, 8000.0, 0.45, 0.1, 0.22)
                 .g(1.0)
                 .a(dec(-0.8))
-                .f(LP, sweep(&[0.92, 0.45]), 0.15),
-            o("Body", Sin, 95.0, 0.16)
+                .f(LP, sweep(&[0.92, 0.42]), 0.15),
+            fm("Body", Sin, 92.0, 2.0, 1.1, 1, 0.0, 0.17)
                 .g(1.1)
                 .p(c(&[(0.0, 16.0, -0.7), (1.0, -8.0, 0.0)]))
                 .a(dec(-0.3)),
-            n("Tail", Cr, 700.0, 0.4).st(0.02).g(0.3).a(dec(-0.5)),
+            gr("Tail", 900.0, 42.0, 16.0, 0.55, 0.65, 0.8, 0.38)
+                .st(0.02)
+                .g(0.35)
+                .a(dec(-0.55)),
         ],
-        vec![drv(12.0, 6000.0, -6.0, 80.0), rev(25.0, 50.0, 12.0)],
+        vec![drv(12.0, 6000.0, -6.0, 75.0), rev(25.0, 50.0, 12.0)],
         (0.5, 0.6, 0.2, 0.1),
         33,
     )
@@ -541,23 +639,24 @@ fn pistol() -> ForgePatch {
 fn shotgun() -> ForgePatch {
     sound(
         vec![
-            n("Blast", Wh, 8000.0, 0.35)
-                .g(0.9)
+            m("Action", ModalMaterial::Metal, 540.0, 0.72, 0.55, 0.96, 0.1).g(0.65),
+            ns("Blast", Wh, 8000.0, 0.65, 0.15, 0.36)
+                .g(0.95)
                 .a(dec(-0.55))
                 .f(LP, sweep(&[0.95, 0.35]), 0.1),
-            n("Boom", Br, 4000.0, 0.6)
+            ns("Boom", Br, 4000.0, 0.55, 0.0, 0.62)
                 .g(1.2)
                 .a(c(&[(0.0, 0.0, 0.0), (0.02, 1.0, -0.4), (1.0, 0.0, 0.0)]))
                 .f(LP, sweep(&[0.55, 0.3]), 0.15),
-            o("Sub", Sin, 48.0, 0.5)
+            fm("Sub", Sin, 48.0, 2.0, 0.9, 1, 0.0, 0.5)
                 .g(1.0)
                 .p(c(&[(0.0, 10.0, -0.5), (1.0, -6.0, 0.0)]))
                 .a(dec(-0.2)),
-            n("Debris", Cr, 500.0, 0.5)
+            gr("Debris", 780.0, 48.0, 18.0, 0.6, 0.75, 0.85, 0.5)
                 .st(0.05)
-                .g(0.4)
-                .a(dec(-0.4))
-                .f(HP, flat(0.5), 0.0),
+                .g(0.45)
+                .a(dec(-0.45))
+                .f(HP, flat(0.45), 0.0),
         ],
         vec![comp(-18.0, 4.0, 10.0, 120.0), rev(55.0, 50.0, 20.0)],
         (0.55, 0.6, 0.25, 0.2),
@@ -567,18 +666,27 @@ fn shotgun() -> ForgePatch {
 fn reload() -> ForgePatch {
     sound(
         vec![
-            o("Click", Sq, 1900.0, 0.015).g(0.7).a(dec(-0.5)),
-            n("Slide", Cr, 5000.0, 0.03)
+            m(
+                "Release",
+                ModalMaterial::Metal,
+                1550.0,
+                0.85,
+                0.45,
+                0.95,
+                0.045,
+            )
+            .g(0.85),
+            gr("Slide", 2400.0, 90.0, 9.0, 0.5, 0.3, 0.6, 0.045)
                 .st(0.07)
-                .g(0.5)
-                .a(dec(-0.3))
-                .f(BP, flat(0.75), 0.5),
-            o("Lock", Sq, 1200.0, 0.02).st(0.15).g(0.6).a(dec(-0.5)),
-            o("Body", Sin, 300.0, 0.08)
-                .st(0.17)
-                .g(0.3)
-                .p(c(&[(0.0, 0.0, 0.0), (1.0, -3.0, 0.0)]))
-                .a(dec(-0.4)),
+                .g(0.6)
+                .a(dec(-0.35))
+                .f(BP, flat(0.72), 0.4),
+            m("Lock", ModalMaterial::Metal, 980.0, 0.78, 0.5, 0.92, 0.06)
+                .st(0.15)
+                .g(0.85),
+            m("Body", ModalMaterial::Wood, 260.0, 0.78, 0.25, 0.65, 0.08)
+                .st(0.165)
+                .g(0.45),
         ],
         vec![trans(20.0, 0.0), rev(20.0, 50.0, 8.0)],
         (0.48, 0.5, 0.0, 0.05),
@@ -619,19 +727,18 @@ fn charge() -> ForgePatch {
 fn fireball() -> ForgePatch {
     sound(
         vec![
-            n("Roar", Br, 4000.0, 0.55)
+            ns("Roar", Br, 4000.0, 0.65, 0.15, 0.55)
                 .g(1.0)
                 .a(dec(-0.4))
                 .f(LP, sweep(&[0.7, 0.4]), 0.1),
-            n("Crackle", Cr, 600.0, 0.6).g(0.5).a(c(&[
-                (0.0, 0.0, 0.0),
-                (0.1, 1.0, 0.0),
-                (1.0, 0.0, 0.0),
-            ])),
-            n("Whoosh", Wh, 8000.0, 0.4)
-                .g(0.4)
-                .a(c(&[(0.0, 0.0, 0.0), (0.15, 0.8, 0.0), (1.0, 0.0, 0.0)]))
-                .f(BP, sweep(&[0.45, 0.8]), 0.3),
+            gr("Embers", 720.0, 62.0, 18.0, 0.6, 0.75, 0.8, 0.62)
+                .g(0.65)
+                .a(c(&[(0.0, 0.0, 0.0), (0.1, 1.0, 0.0), (1.0, 0.0, 0.0)])),
+            ns("Whoosh", Wh, 8000.0, 0.8, 0.0, 0.42)
+                .g(0.45)
+                .a(c(&[(0.0, 0.0, 0.0), (0.15, 0.85, 0.0), (1.0, 0.0, 0.0)]))
+                .f(BP, sweep(&[0.45, 0.82]), 0.3)
+                .with_pan_curve(CurvePreset::Ramp.build(-0.6, 0.6, 0.0)),
         ],
         vec![drv(8.0, 5000.0, -4.0, 50.0), rev(45.0, 50.0, 25.0)],
         (0.5, 0.6, 0.15, 0.2),
@@ -641,22 +748,34 @@ fn fireball() -> ForgePatch {
 fn ice() -> ForgePatch {
     sound(
         vec![
-            o("Shimmer", Tri, 1568.0, 0.7)
-                .g(0.4)
-                .p(c(&[(0.0, 0.0, 0.0), (1.0, -2.0, 0.0)]))
-                .a(c(&[(0.0, 0.0, 0.0), (0.1, 0.7, 0.0), (1.0, 0.0, 0.0)])),
-            o("Crystal", Sin, 2093.0, 0.6)
-                .st(0.05)
-                .g(0.3)
-                .pan(-0.3)
-                .a(dec(-0.4)),
-            n("Crack", Cr, 2500.0, 0.5)
-                .g(0.5)
-                .a(c(&[(0.0, 0.0, 0.0), (0.04, 1.0, -0.3), (1.0, 0.0, 0.0)]))
-                .f(HP, flat(0.75), 0.0),
+            m(
+                "Crystal",
+                ModalMaterial::Glass,
+                1380.0,
+                0.35,
+                0.25,
+                0.8,
+                0.7,
+            )
+            .g(0.7),
+            m(
+                "Shard",
+                ModalMaterial::Glass,
+                2093.0,
+                0.42,
+                0.35,
+                0.88,
+                0.55,
+            )
+            .st(0.04)
+            .g(0.55),
+            gr("Frost", 2600.0, 70.0, 14.0, 0.55, 0.8, 0.75, 0.52)
+                .g(0.55)
+                .a(c(&[(0.0, 0.0, 0.0), (0.04, 1.0, -0.35), (1.0, 0.0, 0.0)]))
+                .f(HP, flat(0.72), 0.0),
         ],
-        vec![cho(40.0, 0.4, 50.0), rev(60.0, 50.0, 30.0)],
-        (0.5, 0.5, 0.0, 0.35),
+        vec![cho(40.0, 0.4, 45.0), rev(60.0, 50.0, 28.0)],
+        (0.5, 0.5, 0.0, 0.32),
         43,
     )
 }
@@ -729,15 +848,23 @@ fn curse() -> ForgePatch {
 fn gem() -> ForgePatch {
     sound(
         vec![
-            o("One", Tri, 1047.0, 0.09).g(0.6),
-            o("Two", Tri, 1319.0, 0.12).st(0.07).g(0.6),
-            o("Three", Tri, 1568.0, 0.35).st(0.14).g(0.5).a(c(&[
-                (0.0, 0.7, 0.0),
-                (0.3, 0.5, -0.4),
-                (1.0, 0.0, 0.0),
-            ])),
+            m("One", ModalMaterial::Glass, 1047.0, 0.42, 0.1, 0.75, 0.22).g(0.65),
+            m("Two", ModalMaterial::Glass, 1319.0, 0.42, 0.1, 0.78, 0.26)
+                .st(0.065)
+                .g(0.65),
+            m(
+                "Three",
+                ModalMaterial::Glass,
+                1568.0,
+                0.35,
+                0.12,
+                0.82,
+                0.42,
+            )
+            .st(0.13)
+            .g(0.75),
         ],
-        vec![dly(1.0, 25.0, 18.0), rev(30.0, 50.0, 10.0)],
+        vec![dly(1.0, 25.0, 16.0), rev(30.0, 50.0, 12.0)],
         (0.5, 0.5, 0.0, 0.15),
         51,
     )
@@ -887,20 +1014,32 @@ fn door_creak() -> ForgePatch {
 fn door_slam() -> ForgePatch {
     sound(
         vec![
-            n("Slam", Wh, 8000.0, 0.25)
-                .g(0.9)
-                .a(dec(-0.6))
-                .f(LP, sweep(&[0.8, 0.4]), 0.1),
-            o("Ring", Sq, 320.0, 0.6)
-                .g(0.5)
-                .a(dec(-0.5))
-                .f(BP, flat(0.6), 0.6),
-            o("Sub", Sin, 55.0, 0.3)
-                .g(0.8)
-                .p(c(&[(0.0, 8.0, -0.5), (1.0, -5.0, 0.0)]))
-                .a(dec(-0.3)),
+            m(
+                "Wood slam",
+                ModalMaterial::Wood,
+                165.0,
+                0.58,
+                0.35,
+                0.92,
+                0.4,
+            )
+            .g(1.0),
+            m(
+                "Frame",
+                ModalMaterial::Membrane,
+                72.0,
+                0.52,
+                0.25,
+                0.78,
+                0.35,
+            )
+            .g(0.9),
+            ns("Air burst", Wh, 8000.0, 0.5, 0.0, 0.22)
+                .g(0.75)
+                .a(dec(-0.65))
+                .f(LP, sweep(&[0.8, 0.35]), 0.1),
         ],
-        vec![trans(30.0, 0.0), rev(50.0, 50.0, 25.0)],
+        vec![trans(30.0, 0.0), rev(50.0, 50.0, 22.0)],
         (0.55, 0.55, 0.1, 0.2),
         72,
     )
@@ -908,17 +1047,16 @@ fn door_slam() -> ForgePatch {
 fn gate() -> ForgePatch {
     sound(
         vec![
-            n("Chain", Cr, 150.0, 1.2)
-                .g(0.7)
-                .a(c(&[(0.0, 0.0, 0.0), (0.1, 1.0, -0.3), (1.0, 0.0, 0.0)]))
-                .f(BP, flat(0.65), 0.5),
-            o("Metal", Sq, 210.0, 1.0)
-                .g(0.4)
-                .a(dec(-0.6))
-                .f(BP, flat(0.55), 0.5),
-            n("Rattle", Cr, 700.0, 1.0).st(0.1).g(0.4).a(dec(-0.4)),
+            gr("Chains", 1250.0, 58.0, 16.0, 0.65, 0.65, 0.75, 1.2)
+                .g(0.8)
+                .a(c(&[(0.0, 0.0, 0.0), (0.1, 1.0, -0.25), (1.0, 0.0, 0.0)]))
+                .f(BP, flat(0.65), 0.45),
+            m("Iron", ModalMaterial::Metal, 210.0, 0.35, 0.6, 0.72, 1.05).g(0.75),
+            m("Latch", ModalMaterial::Metal, 480.0, 0.65, 0.5, 0.88, 0.25)
+                .st(0.92)
+                .g(0.65),
         ],
-        vec![rev(55.0, 50.0, 25.0)],
+        vec![rev(55.0, 50.0, 24.0)],
         (0.55, 0.55, 0.1, 0.25),
         73,
     )
@@ -926,16 +1064,19 @@ fn gate() -> ForgePatch {
 fn lever() -> ForgePatch {
     sound(
         vec![
-            o("Click", Sq, 1500.0, 0.02).g(0.6).a(dec(-0.5)),
-            o("Clunk", Sin, 120.0, 0.12)
-                .g(0.8)
-                .p(c(&[(0.0, 8.0, -0.4), (1.0, 0.0, 0.0)]))
-                .a(dec(-0.3)),
-            o("Spring", Sin, 400.0, 0.2)
-                .st(0.05)
-                .g(0.25)
-                .p(c(&[(0.0, 5.0, 0.0), (1.0, -2.0, 0.0)]))
-                .a(dec(-0.5)),
+            m("Click", ModalMaterial::Metal, 1420.0, 0.85, 0.4, 0.95, 0.04).g(0.8),
+            m("Clunk", ModalMaterial::Wood, 150.0, 0.68, 0.3, 0.8, 0.14).g(0.85),
+            m(
+                "Spring",
+                ModalMaterial::Metal,
+                520.0,
+                0.45,
+                0.55,
+                0.65,
+                0.24,
+            )
+            .st(0.05)
+            .g(0.4),
         ],
         vec![trans(25.0, 0.0)],
         (0.48, 0.5, 0.0, 0.05),
@@ -943,113 +1084,119 @@ fn lever() -> ForgePatch {
     )
 }
 
-// ---- Ambience (long one-shots; Size stays 0.5 so the length is as written)
+// ---- Ambience (seamless loops out of the box)
 
 fn wind() -> ForgePatch {
-    sound(
+    looped(
         vec![
-            n("Gust", Br, 4000.0, 8.0)
-                .g(0.9)
+            ns("Gust", Br, 4000.0, 0.85, 0.0, 6.0)
+                .g(0.95)
                 .a(c(&[
-                    (0.0, 0.3, 0.0),
-                    (0.2, 0.8, -0.2),
-                    (0.5, 0.5, 0.0),
-                    (0.8, 0.9, -0.2),
-                    (1.0, 0.3, 0.0),
+                    (0.0, 0.55, 0.0),
+                    (0.28, 0.88, -0.2),
+                    (0.62, 0.52, 0.0),
+                    (0.85, 0.82, -0.2),
+                    (1.0, 0.55, 0.0),
                 ]))
-                .f(BP, sweep(&[0.3, 0.5, 0.35, 0.55]), 0.25),
-            n("Whistle", Pk, 4000.0, 8.0)
-                .g(0.3)
-                .pan(0.3)
+                .f(BP, sweep(&[0.34, 0.52, 0.36, 0.48, 0.34]), 0.28),
+            ns("Whistle", Pk, 4000.0, 0.9, 0.0, 6.0)
+                .g(0.32)
                 .a(c(&[
-                    (0.0, 0.0, 0.0),
-                    (0.4, 0.35, 0.0),
-                    (0.7, 0.15, 0.0),
-                    (1.0, 0.0, 0.0),
+                    (0.0, 0.2, 0.0),
+                    (0.4, 0.4, 0.0),
+                    (0.75, 0.18, 0.0),
+                    (1.0, 0.2, 0.0),
                 ]))
-                .f(BP, sweep(&[0.65, 0.75]), 0.6),
-            n("Air", Wh, 8000.0, 8.0)
+                .f(BP, sweep(&[0.64, 0.74, 0.64]), 0.58),
+            ns("Air", Wh, 8000.0, 0.8, 0.0, 6.0)
                 .g(0.2)
-                .a(flat(0.25))
-                .f(LP, flat(0.5), 0.0),
+                .a(flat(0.28))
+                .f(LP, flat(0.48), 0.0),
         ],
-        vec![rev(70.0, 50.0, 30.0)],
-        (0.5, 0.45, 0.0, 0.5),
+        vec![rev(70.0, 50.0, 28.0)],
+        (0.5, 0.45, 0.0, 0.45),
         81,
     )
 }
 fn rain() -> ForgePatch {
-    sound(
+    looped(
         vec![
-            n("Hiss", Wh, 8000.0, 8.0)
-                .g(0.8)
+            ns("Hiss", Wh, 8000.0, 0.9, 0.0, 6.0)
+                .g(0.78)
                 .a(flat(0.6))
                 .f(HP, flat(0.55), 0.0),
-            n("Body", Pk, 4000.0, 8.0)
-                .g(0.6)
+            ns("Body", Pk, 4000.0, 0.85, 0.0, 6.0)
+                .g(0.62)
                 .a(flat(0.5))
                 .f(BP, flat(0.5), 0.2),
-            n("Drops", Cr, 120.0, 8.0).g(0.5).pan(-0.2).a(flat(0.4)),
+            gr("Drops", 1850.0, 64.0, 14.0, 0.6, 0.9, 0.85, 6.0).g(0.52),
         ],
         vec![rev(50.0, 50.0, 20.0)],
-        (0.5, 0.45, 0.0, 0.35),
+        (0.5, 0.45, 0.0, 0.32),
         82,
     )
 }
 fn fire() -> ForgePatch {
-    sound(
+    looped(
         vec![
-            n("Roar", Br, 4000.0, 6.0)
+            ns("Roar", Br, 4000.0, 0.75, 0.12, 5.0)
                 .g(1.0)
-                .a(c(&[(0.0, 0.6, 0.0), (0.5, 0.8, 0.0), (1.0, 0.6, 0.0)]))
+                .a(c(&[(0.0, 0.68, 0.0), (0.5, 0.82, 0.0), (1.0, 0.68, 0.0)]))
                 .f(LP, flat(0.4), 0.2),
-            n("Crackle", Cr, 250.0, 6.0).g(0.7).a(flat(0.7)),
-            n("Pops", Cr, 60.0, 6.0).g(0.4).a(flat(0.5)),
+            gr("Crackles", 1400.0, 55.0, 11.0, 0.65, 0.75, 0.88, 5.0).g(0.72),
+            ns("Sparks", Cr, 120.0, 0.7, 0.35, 5.0)
+                .g(0.45)
+                .a(flat(0.55)),
         ],
         vec![rev(35.0, 50.0, 12.0)],
-        (0.5, 0.45, 0.0, 0.2),
+        (0.5, 0.45, 0.0, 0.18),
         83,
     )
 }
 fn cave() -> ForgePatch {
-    sound(
+    looped(
         vec![
-            o("Drone", Sin, 55.0, 8.0).g(0.5).a(c(&[
-                (0.0, 0.3, 0.0),
-                (0.5, 0.4, 0.0),
-                (1.0, 0.3, 0.0),
-            ])),
-            o("Drip", Sin, 1400.0, 0.25).st(1.2).g(0.4).a(dec(-0.5)),
-            o("Drip 2", Sin, 1100.0, 0.3)
-                .st(4.0)
-                .g(0.3)
-                .pan(0.4)
-                .a(dec(-0.5)),
-            n("Air", Br, 4000.0, 8.0)
+            fm("Drone", Sin, 55.0, 1.5, 0.25, 2, 0.22, 6.0)
+                .g(0.55)
+                .a(c(&[(0.0, 0.35, 0.0), (0.5, 0.45, 0.0), (1.0, 0.35, 0.0)])),
+            m("Drip", ModalMaterial::Glass, 1380.0, 0.48, 0.08, 0.45, 0.28)
+                .st(1.1)
+                .g(0.42),
+            m(
+                "Drip 2",
+                ModalMaterial::Glass,
+                1080.0,
+                0.48,
+                0.08,
+                0.45,
+                0.3,
+            )
+            .st(3.4)
+            .g(0.35),
+            ns("Air", Br, 4000.0, 0.85, 0.0, 6.0)
                 .g(0.6)
-                .a(flat(0.4))
+                .a(flat(0.42))
                 .f(LP, flat(0.35), 0.0),
         ],
-        vec![dly(3.0, 20.0, 15.0), rev(90.0, 50.0, 45.0)],
-        (0.5, 0.4, 0.0, 0.6),
+        vec![dly(3.0, 20.0, 15.0), rev(90.0, 50.0, 42.0)],
+        (0.5, 0.4, 0.0, 0.55),
         84,
     )
 }
 fn machine_hum() -> ForgePatch {
-    sound(
+    looped(
         vec![
-            o("Hum", Saw, 50.0, 4.0)
+            fm("Turbine", Saw, 50.0, 2.0, 0.45, 3, 0.18, 4.0)
                 .g(0.8)
-                .a(c(&[(0.0, 0.0, 0.0), (0.05, 0.7, 0.0), (1.0, 0.7, 0.0)]))
-                .f(LP, flat(0.35), 0.4),
-            o("Octave", Saw, 100.0, 4.0)
-                .g(0.4)
-                .pan(0.2)
-                .a(c(&[(0.0, 0.0, 0.0), (0.05, 0.7, 0.0), (1.0, 0.7, 0.0)]))
-                .f(LP, flat(0.4), 0.2),
-            n("Rattle", Cr, 40.0, 4.0).g(0.3).a(flat(0.2)),
+                .a(flat(0.7))
+                .f(LP, flat(0.36), 0.4),
+            fm("Harmonic", Saw, 100.0, 1.5, 0.3, 2, 0.2, 4.0)
+                .g(0.42)
+                .a(flat(0.65))
+                .f(LP, flat(0.42), 0.25),
+            gr("Rattle", 420.0, 24.0, 14.0, 0.3, 0.45, 0.55, 4.0).g(0.28),
         ],
-        vec![trem(6.0, 20.0), rev(25.0, 50.0, 10.0)],
+        vec![trem(6.0, 18.0), rev(25.0, 50.0, 10.0)],
         (0.5, 0.5, 0.1, 0.1),
         85,
     )
