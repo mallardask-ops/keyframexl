@@ -1005,18 +1005,54 @@ impl App {
                 Rect::from_center_size(pos2(cx, r.bottom() - 16.0), vec2(STRIP_W - 16.0, 20.0));
             let resp = ui.interact(rr, ui.id().with(("mix-route", i)), Sense::click_and_drag());
             let on = track.to_master;
-            let face = if on {
+            // The button names where the strip goes: "→ M", "→ 2", "→ M+1".
+            let label = route_label(&track);
+            let routed = on || !track.sends.is_empty();
+            let face = if routed {
                 kit::control(p, rr, 4.0, kit::hover_amount(ui, &resp), false)
             } else {
                 kit::sunken(p, rr, 4.0)
             };
+            let elsewhere = routed && !(on && track.sends.is_empty());
+            if elsewhere {
+                p.rect_stroke(
+                    rr,
+                    4.0,
+                    Stroke::new(1.0_f32, t::focus()),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            let shown = kit::elide(p, &label, t::mono(12.0), rr.width() - 6.0);
             p.text(
                 face.center(),
                 Align2::CENTER_CENTER,
-                "→ M",
+                shown,
                 t::mono(12.0),
-                if on { t::text() } else { t::faint() },
+                if elsewhere {
+                    t::focus()
+                } else if on {
+                    t::text()
+                } else {
+                    t::faint()
+                },
             );
+            let resp = if routed && !ui.input(|i| i.pointer.any_down()) && self.route_drag.is_none()
+            {
+                let names: Vec<String> = on
+                    .then(|| self.mixer_name(0))
+                    .into_iter()
+                    .chain(track.sends.iter().map(|s| {
+                        format!(
+                            "{} ({:.0}%)",
+                            self.mixer_name(s.to as usize),
+                            s.level * 100.0
+                        )
+                    }))
+                    .collect();
+                resp.on_hover_text(format!("→ {}", names.join(", ")))
+            } else {
+                resp
+            };
             let mut edit = None;
             resp.context_menu(|ui| {
                 kit::menu_style(ui);
@@ -2974,4 +3010,40 @@ mod route_gesture_tests {
 struct FxSlotDrag {
     track: usize,
     k: usize,
+}
+
+/// What an insert's route button says: where it goes, "→ M", "→ 2", "→ M+1"
+/// (Master or the first send, then how many more), "→ –" when nowhere.
+fn route_label(track: &keyframexl::sequence::MixerTrack) -> String {
+    let outs: Vec<String> = track
+        .to_master
+        .then(|| "M".to_string())
+        .into_iter()
+        .chain(track.sends.iter().map(|s| s.to.to_string()))
+        .collect();
+    match outs.len() {
+        0 => "→ –".to_string(),
+        1 => format!("→ {}", outs[0]),
+        n => format!("→ {}+{}", outs[0], n - 1),
+    }
+}
+
+#[cfg(test)]
+mod route_label_tests {
+    use super::route_label;
+    use keyframexl::sequence::{MixerTrack, Send};
+
+    #[test]
+    fn the_route_button_names_its_destinations() {
+        let mut m = MixerTrack::new("Insert 1");
+        assert_eq!(route_label(&m), "→ M");
+        m.to_master = false;
+        m.sends = vec![Send { to: 2, level: 1.0 }];
+        assert_eq!(route_label(&m), "→ 2", "routed only to Insert 2");
+        m.to_master = true;
+        assert_eq!(route_label(&m), "→ M+1");
+        m.to_master = false;
+        m.sends.clear();
+        assert_eq!(route_label(&m), "→ –");
+    }
 }
