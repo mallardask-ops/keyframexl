@@ -282,6 +282,11 @@ impl Recipe {
                             hz: 750.0,
                             vibrato_hz: 28.0,
                             vibrato: 0.6,
+                            fm_ratio: 1.0,
+                            fm_index: 0.0,
+                            unison: 1,
+                            detune: 0.0,
+                            shape: 0.0,
                         },
                         0.26,
                     )
@@ -413,6 +418,11 @@ impl Recipe {
                             hz: 1760.0,
                             vibrato_hz: 6.0,
                             vibrato: 0.3,
+                            fm_ratio: 1.0,
+                            fm_index: 0.0,
+                            unison: 1,
+                            detune: 0.0,
+                            shape: 0.0,
                         },
                         0.9,
                     )
@@ -459,6 +469,11 @@ impl Recipe {
                             hz: 55.0,
                             vibrato_hz: 7.0,
                             vibrato: 1.0,
+                            fm_ratio: 1.0,
+                            fm_index: 0.0,
+                            unison: 1,
+                            detune: 0.0,
+                            shape: 0.0,
                         },
                         1.5,
                     )
@@ -511,6 +526,11 @@ impl Recipe {
                             hz: 110.0,
                             vibrato_hz: 0.4,
                             vibrato: 0.2,
+                            fm_ratio: 1.0,
+                            fm_index: 0.0,
+                            unison: 1,
+                            detune: 0.0,
+                            shape: 0.0,
                         },
                         2.5,
                     )
@@ -611,7 +631,7 @@ impl Style {
                                 w => w,
                             }
                         }
-                        Source::Noise { color, hz } => {
+                        Source::Noise { color, hz, .. } => {
                             *color = NoiseColor::Digital;
                             *hz = 8000.0;
                         }
