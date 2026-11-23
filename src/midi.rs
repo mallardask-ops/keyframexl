@@ -105,6 +105,8 @@ pub struct ImportReport {
     pub tempos: usize,
     pub meters: usize,
     pub ignored_pitch_bends: usize,
+    /// Pitch-bend ramps read back as piano-roll slides.
+    pub slides: usize,
     pub ignored_controllers: usize,
     pub repaired_notes: usize,
     pub names: Vec<String>,
@@ -1144,6 +1146,8 @@ struct DoneNote {
     end: Tick,
     pitch: u8,
     vel: u8,
+    /// Fine pitch in cents, from a pitch bend held at the note's start.
+    fine: f32,
 }
 
 struct GroupNotes {
@@ -1152,6 +1156,75 @@ struct GroupNotes {
     /// First CC7 (volume) and CC10 (pan) on this channel: the track's mix.
     volume: Option<u8>,
     pan: Option<u8>,
+    /// Pitch bends as (tick, semitones) under the channel's bend range.
+    bends: Vec<(Tick, f64)>,
+}
+
+/// A slide read back from pitch bends: (start, length, semitones from the
+/// highest note sounding at its start).
+struct ReadSlide {
+    start: Tick,
+    length: Tick,
+    semitones: f64,
+}
+
+/// Pitch bends back into what wrote them (`push_pitch_bends`): a bend held at
+/// a note's start is that note's fine pitch; a run of bends moving one way,
+/// one sampling step apart, is a slide that starts one step before its first
+/// bend (the step that still equals the old pitch is not written) and ends on
+/// its last. Returns the slides and how many bends they used.
+fn read_slides(notes: &mut [DoneNote], bends: &[(Tick, f64)]) -> (Vec<ReadSlide>, usize) {
+    let step = CC_STEP as Tick;
+    let mut slides = vec![];
+    let mut used = 0;
+    let mut cur = 0.0f64;
+    let mut i = 0;
+    while i < bends.len() {
+        let (t, v) = bends[i];
+        if notes.iter().any(|n| n.start == t) {
+            // Held from the note's start: fine pitch (export writes ±1 st at most).
+            if v.abs() <= 1.0 + 1e-6 {
+                for n in notes.iter_mut().filter(|n| n.start == t) {
+                    n.fine = (v * 100.0).clamp(-100.0, 100.0) as f32;
+                }
+                used += 1;
+            }
+            cur = v;
+            i += 1;
+            continue;
+        }
+        // One ramp: same direction, one step (at most two) apart, no note start inside.
+        let dir = (v - cur).signum();
+        let mut j = i;
+        while j + 1 < bends.len() {
+            let (tn, vn) = bends[j + 1];
+            if tn - bends[j].0 > 2 * step
+                || (vn - bends[j].1).signum() != dir
+                || notes.iter().any(|n| n.start == tn)
+            {
+                break;
+            }
+            j += 1;
+        }
+        let first_gap = if j > i { bends[i + 1].0 - t } else { step };
+        let start = if dir == 0.0 {
+            t
+        } else {
+            (t - first_gap.min(step)).max(0)
+        };
+        let (end, v_end) = bends[j];
+        if dir != 0.0 {
+            slides.push(ReadSlide {
+                start,
+                length: end - start,
+                semitones: v_end,
+            });
+            used += j - i + 1;
+        }
+        cur = v_end;
+        i = j + 1;
+    }
+    (slides, used)
 }
 
 fn scale_tick(t: u64, ppq: u64) -> Tick {
@@ -1194,6 +1267,9 @@ pub fn import_smf(
         let mut programs: BTreeMap<u8, u8> = BTreeMap::new();
         let mut mix: BTreeMap<u8, (Option<u8>, Option<u8>)> = BTreeMap::new();
         let mut rpn: BTreeMap<u8, (u8, u8)> = BTreeMap::new();
+        // Pitch bend range per channel in semitones (RPN 0,0; GM default 2).
+        let mut bend_range: BTreeMap<u8, f64> = BTreeMap::new();
+        let mut bends: BTreeMap<u8, Vec<(Tick, f64)>> = BTreeMap::new();
         let mut done: Vec<(usize, u8, DoneNote)> = vec![];
         // Pop the oldest open note on a key and end it at `end`.
         // Returns the finished note plus whether it needed a repair.
@@ -1213,6 +1289,7 @@ pub fn import_smf(
                     end: e,
                     pitch: key,
                     vel,
+                    fine: 0.0,
                 },
                 unclosed || fixed,
             ))
@@ -1254,7 +1331,20 @@ pub fn import_smf(
                                 done.push((ti, ch, dn));
                             }
                         }
-                        MidiMessage::PitchBend { .. } => pitch_bends += 1,
+                        MidiMessage::PitchBend { bend } => {
+                            pitch_bends += 1;
+                            let range = bend_range.get(&ch).copied().unwrap_or(2.0);
+                            let raw = bend.0.as_int() as f64 - 8192.0;
+                            let norm = if raw >= 0.0 {
+                                raw / 8191.0
+                            } else {
+                                raw / 8192.0
+                            };
+                            bends
+                                .entry(ch)
+                                .or_default()
+                                .push((scale_tick(abs, ppq_src), norm * range));
+                        }
                         // CC7 volume and CC10 pan set the channel's mix (first value
                         // wins, FL does the same); RPN 0,0 (pitch bend range) is
                         // recognised as setup; other controllers are counted.
@@ -1278,9 +1368,18 @@ pub fn import_smf(
                         {
                             rpn.entry(ch).or_insert((127, 127)).1 = value.as_int();
                         }
-                        MidiMessage::Controller { controller, .. }
+                        MidiMessage::Controller { controller, value }
                             if matches!(controller.as_int(), 6 | 38)
-                                && rpn.get(&ch) == Some(&(0, 0)) => {}
+                                && rpn.get(&ch) == Some(&(0, 0)) =>
+                        {
+                            let r = bend_range.entry(ch).or_insert(2.0);
+                            let v = value.as_int() as f64;
+                            if controller.as_int() == 6 {
+                                *r = v + r.fract();
+                            } else {
+                                *r = r.trunc() + v / 100.0;
+                            }
+                        }
                         MidiMessage::Controller { .. } => controllers += 1,
                         MidiMessage::ProgramChange { program } => {
                             programs.entry(ch).or_insert(program.as_int());
@@ -1327,6 +1426,7 @@ pub fn import_smf(
                     program: None,
                     volume: None,
                     pan: None,
+                    bends: vec![],
                 })
                 .notes
                 .push(n);
@@ -1337,9 +1437,22 @@ pub fn import_smf(
                 program: None,
                 volume: None,
                 pan: None,
+                bends: vec![],
             });
             g.volume = volume;
             g.pan = pan;
+        }
+        for (ch, list) in bends {
+            groups
+                .entry((ti, ch))
+                .or_insert(GroupNotes {
+                    notes: vec![],
+                    program: None,
+                    volume: None,
+                    pan: None,
+                    bends: vec![],
+                })
+                .bends = list;
         }
         for (ch, program) in programs {
             groups
@@ -1349,6 +1462,7 @@ pub fn import_smf(
                     program: None,
                     volume: None,
                     pan: None,
+                    bends: vec![],
                 })
                 .program = Some(program);
         }
@@ -1478,6 +1592,7 @@ pub fn import_smf(
         tempos: tempo_events,
         meters: meter_events,
         ignored_pitch_bends: pitch_bends,
+        slides: 0,
         ignored_controllers: controllers,
         repaired_notes: repaired,
         names: vec![],
@@ -1493,7 +1608,9 @@ pub fn import_smf(
         |work: &mut Song, inst: u64, notes: Vec<DoneNote>, report: &mut ImportReport| {
             for dn in notes {
                 let len = (dn.end - dn.start).max(1);
-                work.add_note(pid, Note::new(inst, dn.start, len, dn.pitch, dn.vel));
+                let mut note = Note::new(inst, dn.start, len, dn.pitch, dn.vel);
+                note.fine = dn.fine;
+                work.add_note(pid, note);
                 report.notes += 1;
             }
         };
@@ -1551,7 +1668,34 @@ pub fn import_smf(
                 report.names.push(name);
                 let mut notes = g.notes;
                 notes.sort_by_key(|n| (n.start, n.end));
+                let mut bends = g.bends;
+                bends.sort_by_key(|b| b.0);
+                let (slides, used) = read_slides(&mut notes, &bends);
+                report.ignored_pitch_bends -= used.min(report.ignored_pitch_bends);
+                let glides: Vec<crate::sequence::Glide> = slides
+                    .iter()
+                    .filter_map(|s| {
+                        // Relative to the highest note sounding where it starts.
+                        let base = notes
+                            .iter()
+                            .filter(|n| n.start <= s.start && n.end > s.start)
+                            .map(|n| n.pitch)
+                            .max()?;
+                        let target = (base as f64 + s.semitones).round().clamp(0.0, 127.0);
+                        Some(crate::sequence::Glide {
+                            start: s.start,
+                            length: s.length.max(0),
+                            target: target as u8,
+                            group: 0,
+                            instrument: id,
+                        })
+                    })
+                    .collect();
+                report.slides += glides.len();
                 add_notes(&mut work, id, notes, &mut report);
+                if let Some(p) = work.patterns.iter_mut().find(|p| p.id == pid) {
+                    std::sync::Arc::make_mut(p).slides.extend(glides);
+                }
             }
         }
     } else {
@@ -1658,6 +1802,12 @@ pub fn summary(report: &ImportReport) -> String {
         plural(report.meters, "meter change", "meter changes"),
         plural(report.ignored_pitch_bends, "pitch bend", "pitch bends"),
     ));
+    if report.slides > 0 {
+        s.push_str(&format!(
+            ", {} read",
+            plural(report.slides, "slide", "slides")
+        ));
+    }
     if report.ignored_controllers > 0 {
         s.push_str(&format!(
             ", {} ignored",
@@ -1835,16 +1985,17 @@ mod tests {
             }
         }
         assert_eq!(rep.ignored_controllers, 0);
-        assert!(
-            rep.ignored_pitch_bends > 0,
-            "demo Bass slide exports as pitch bends"
-        );
+        // The demo Bass slide goes out as pitch bends and comes back a slide.
+        assert_eq!(rep.slides, 1);
+        assert_eq!(rep.ignored_pitch_bends, 0);
+        let slide = |s: &Song, p: u64| {
+            let g = s.pattern(p).unwrap().slides[0];
+            (g.start, g.length, g.target)
+        };
+        assert_eq!(slide(&song, 1), slide(&into, rep.pattern));
         assert_eq!(
             summary(&rep),
-            format!(
-                "Imported 15 notes on 4 new channels into Pattern 2 at 120 BPM; 1 tempo change read, 1 meter change read, {} pitch bends ignored.",
-                rep.ignored_pitch_bends
-            )
+            "Imported 15 notes on 4 new channels into Pattern 2 at 120 BPM; 1 tempo change read, 1 meter change read, 0 pitch bends ignored, 1 slide read."
         );
     }
 
@@ -1995,6 +2146,58 @@ mod tests {
         assert_eq!(cc10s.first(), Some(&(0, 64)));
         assert!(cc10s.iter().any(|&(t, v)| t == BAR as u64 && v == 0));
         assert!(cc10s.iter().any(|&(_, v)| v >= 124));
+    }
+
+    #[test]
+    fn slides_and_fine_pitch_come_back_from_an_exported_file() {
+        let mut song = Song::default();
+        song.add_note(1, Note::new(4, 0, BAR, 60, 100));
+        let mut fine = Note::new(4, BAR, BAR, 62, 100);
+        fine.fine = 25.0;
+        song.add_note(1, fine);
+        std::sync::Arc::make_mut(&mut song.patterns[0]).length = 2 * BAR;
+        let wrote = vec![
+            crate::sequence::Glide {
+                start: 2 * STEP,
+                length: 4 * STEP,
+                target: 72,
+                group: 0,
+                instrument: 4,
+            },
+            crate::sequence::Glide {
+                start: 10 * STEP,
+                length: 2 * STEP,
+                target: 65,
+                group: 0,
+                instrument: 4,
+            },
+        ];
+        std::sync::Arc::make_mut(&mut song.patterns[0]).slides = wrote.clone();
+        let bytes = export_smf(&song, &MidiSource::Pattern(1), &ExportOptions::default());
+
+        let mut back = Song::default();
+        let rep = import_smf(&bytes, &mut back, &ImportOptions::default()).unwrap();
+        assert_eq!(rep.slides, 2, "{}", summary(&rep));
+        let p = back.pattern(rep.pattern).unwrap();
+        let read: Vec<(Tick, Tick, u8)> = p
+            .slides
+            .iter()
+            .map(|g| (g.start, g.length, g.target))
+            .collect();
+        assert_eq!(
+            read,
+            wrote
+                .iter()
+                .map(|g| (g.start, g.length, g.target))
+                .collect::<Vec<_>>()
+        );
+        assert!(p.slides.iter().all(|g| g.instrument == rep.channels[0]));
+        let fines: Vec<f32> = p.notes.iter().map(|n| n.fine).collect();
+        assert!(
+            (fines[0]).abs() < 0.5 && (fines[1] - 25.0).abs() < 0.5,
+            "{fines:?}"
+        );
+        assert_eq!(rep.ignored_pitch_bends, 0, "every bend was read");
     }
 
     #[test]

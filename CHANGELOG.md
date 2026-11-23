@@ -168,6 +168,9 @@ still in review and not part of this release.
 - The dark theme's Play button text is a little more readable.
 
 ### Fixes
+- MIDI import reads pitch bends back: a bend ramp becomes a piano-roll slide
+  and a bend held from a note's start becomes its fine pitch, so slides survive
+  a MIDI export and re-import (before, every bend was dropped).
 - The updater no longer offers a release that has no build for your system
   (0.2.1 stable is Linux only; Windows stays on nightly builds).
 - Settings, Export and Project info windows can no longer be shrunk until
