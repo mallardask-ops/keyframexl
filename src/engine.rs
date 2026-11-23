@@ -1491,6 +1491,9 @@ impl Engine {
     pub fn reserve(&mut self, tracks: usize, frames: usize) {
         self.grow_buses(tracks, frames);
         self.live_params.reserve(MAX_LIVE_PARAMS);
+        // Warm arc_swap's thread-local debt slot so the first audio block
+        // does not allocate it lazily inside `collect_hits`.
+        let _ = self.vocal.load();
         for c in &mut self.synth_fx {
             if c.buf.len() < frames * 2 {
                 c.buf.resize(frames * 2, 0.0);
