@@ -74,6 +74,7 @@ pub(super) fn stage_panel(
     ed: &mut Edit,
     id: u64,
     sound: &ForgeSound,
+    loading: bool,
     p: &mut ForgePatch,
     view: &mut View,
     jobs: &Bouncing,
@@ -118,7 +119,7 @@ pub(super) fn stage_panel(
                     .font(t::mono(10.0))
                     .color(mode_col),
             );
-            if sound.stale() {
+            if sound.stale() || loading {
                 ui.label(
                     egui::RichText::new(tr.forge_rendering_caps)
                         .font(t::mono(10.0))

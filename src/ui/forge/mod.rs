@@ -196,6 +196,8 @@ struct Playhead {
 pub(crate) struct Jobs {
     /// (channel, patch version, audio).
     renders: Vec<(u64, u64, mpsc::Receiver<Rendered>)>,
+    /// Background recipe load (level + render): (channel, auto_play, (patch, audio)).
+    recipe_load: Option<(u64, bool, mpsc::Receiver<(ForgePatch, Rendered)>)>,
     /// Variation rack generation: (channel, slots).
     variations: Option<(u64, mpsc::Receiver<Vec<VariationSlot>>)>,
     /// A channel note being bounced: (Forge channel, target, what, audio).
@@ -209,6 +211,7 @@ pub(crate) struct Jobs {
 impl Jobs {
     fn busy(&self) -> bool {
         !self.renders.is_empty()
+            || self.recipe_load.is_some()
             || self.variations.is_some()
             || self.bounce.is_some()
             || self.playhead.is_some()
@@ -590,6 +593,15 @@ impl App {
 
     /// Play channel `id`'s sound: now, or when its render lands.
     fn play_forge(&mut self, id: u64) {
+        if self
+            .forge_jobs
+            .recipe_load
+            .as_ref()
+            .is_some_and(|j| j.0 == id)
+        {
+            self.forge_jobs.play_when_ready = Some(id);
+            return;
+        }
         match self.song.instrument(id).map(|i| &i.kind) {
             Some(InstrumentKind::Forge { sound }) if sound.stale() => {
                 self.forge_jobs.play_when_ready = Some(id);
@@ -600,6 +612,15 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    /// Start loading & rendering a built-in recipe on a worker thread.
+    fn start_recipe_load(&mut self, id: u64, rec: Recipe, auto_play: bool) {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(rec.patch_and_render());
+        });
+        self.forge_jobs.recipe_load = Some((id, auto_play, rx));
     }
 
     /// Every frame: take finished work, start renders for stale sounds, advance playhead.
@@ -643,6 +664,30 @@ impl App {
                     let _ = tx.send(forge::render::render(&patch));
                 });
                 self.forge_jobs.renders.push((i.id, sound.version(), rx));
+            }
+        }
+        if let Some((inst, auto_play, rx)) = &self.forge_jobs.recipe_load {
+            match rx.try_recv() {
+                Ok((patch, rendered)) => {
+                    let (inst, auto_play) = (*inst, *auto_play);
+                    self.forge_jobs.recipe_load = None;
+                    let r = Arc::new(rendered);
+                    self.checkpoint();
+                    if let Some(s) = self.forge_sound_mut(inst) {
+                        s.edit(patch);
+                        let ver = s.version();
+                        s.install(ver, r.clone());
+                    }
+                    self.publish();
+                    if auto_play || self.forge_jobs.play_when_ready == Some(inst) {
+                        self.forge_jobs.play_when_ready = None;
+                        self.audition(inst, &r);
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.forge_jobs.recipe_load = None;
+                }
             }
         }
         self.poll_bounce();
@@ -720,6 +765,7 @@ impl App {
         let mut play = false;
         let mut stop = false;
         let mut adopt: Option<ForgePatch> = None;
+        let mut pick_recipe: Option<Recipe> = None;
         let mut hear: Option<Arc<Rendered>> = None;
         let mut save = false;
         let mut to_playlist = false;
@@ -911,11 +957,17 @@ impl App {
                             channels: &channels,
                             deleted: tr.forge_deleted_channel,
                         };
+                        let loading_recipe = self
+                            .forge_jobs
+                            .recipe_load
+                            .as_ref()
+                            .is_some_and(|j| j.0 == id);
                         let tl = timeline::stage_panel(
                             ui,
                             &mut ed,
                             id,
                             sound,
+                            loading_recipe,
                             &mut p,
                             &mut view,
                             &jobs,
@@ -994,6 +1046,10 @@ impl App {
                     }
                     Tab::Presets => {
                         let res = tabs::presets_tab(ui, id, &p, &mut view);
+                        if let Some(rec) = res.pick_recipe {
+                            pick_recipe = Some(rec);
+                            view.tab = Tab::Design;
+                        }
                         if let Some(np) = res.adopt {
                             adopt = Some(np);
                             view.tab = Tab::Design;
@@ -1034,6 +1090,9 @@ impl App {
                 }
             });
 
+        if let Some(rec) = pick_recipe {
+            self.start_recipe_load(id, rec, view.auto_audition);
+        }
         if let Some(np) = adopt {
             p = np;
             ed.started = true;
@@ -1944,6 +2003,20 @@ mod tests {
             rerolled[1].patch, first[1].patch,
             "unpinned slot must reroll"
         );
+    }
+
+    #[test]
+    fn background_recipe_load_installs_patch_and_audio_without_blocking() {
+        let mut app = app();
+        let id = app.add_forge();
+        app.start_recipe_load(id, Recipe::Lib(36), false);
+        assert!(app.forge_jobs.recipe_load.is_some());
+        settle(&mut app);
+        let s = sound(&app, id);
+        assert!(!s.stale());
+        assert_eq!(s.patch, Recipe::Lib(36).patch());
+        assert!(s.rendered.seamless_loop);
+        assert!(s.rendered.peak > 0.05);
     }
 
     #[test]

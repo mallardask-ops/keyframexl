@@ -220,9 +220,15 @@ pub(super) fn master_strip(ui: &mut Ui, ed: &mut Edit, id: u64, p: &mut ForgePat
 
 #[derive(Default)]
 pub(super) struct PresetsOut {
+    pub pick_recipe: Option<Recipe>,
     pub adopt: Option<ForgePatch>,
     pub append_layer: Option<(String, Layer)>,
     pub inspire: bool,
+}
+
+enum PresetItem {
+    Builtin(Recipe),
+    User(ForgePatch),
 }
 
 /// Tab 2: Searchable tagged preset browser + Layer Building Blocks.
@@ -279,7 +285,7 @@ pub(super) fn presets_tab(ui: &mut Ui, id: u64, p: &ForgePatch, view: &mut View)
             });
 
             let user = cached_user_sounds(ui.ctx());
-            let mut items: Vec<(String, String, ForgePatch)> = Vec::new();
+            let mut items: Vec<(String, String, usize, bool, PresetItem)> = Vec::new();
             if view.preset_filter != PresetFilter::User {
                 for r in Recipe::ALL {
                     let cat = r.category();
@@ -288,8 +294,8 @@ pub(super) fn presets_tab(ui: &mut Ui, id: u64, p: &ForgePatch, view: &mut View)
                     {
                         continue;
                     }
-                    let patch = r.patch();
-                    if view.preset_filter == PresetFilter::Loops && !patch.seamless_loop {
+                    let (layers_n, is_loop) = r.meta();
+                    if view.preset_filter == PresetFilter::Loops && !is_loop {
                         continue;
                     }
                     let label = r.label();
@@ -300,7 +306,13 @@ pub(super) fn presets_tab(ui: &mut Ui, id: u64, p: &ForgePatch, view: &mut View)
                     {
                         continue;
                     }
-                    items.push((label.into(), cat_lbl.into(), patch));
+                    items.push((
+                        label.into(),
+                        cat_lbl.into(),
+                        layers_n,
+                        is_loop,
+                        PresetItem::Builtin(r),
+                    ));
                 }
             }
             if matches!(
@@ -314,7 +326,13 @@ pub(super) fn presets_tab(ui: &mut Ui, id: u64, p: &ForgePatch, view: &mut View)
                     if !q.is_empty() && !u.name.to_lowercase().contains(&q) {
                         continue;
                     }
-                    items.push((u.name.clone(), tr.forge_my_sounds.into(), u.clone()));
+                    items.push((
+                        u.name.clone(),
+                        tr.forge_my_sounds.into(),
+                        u.layers.len(),
+                        u.seamless_loop,
+                        PresetItem::User(u.clone()),
+                    ));
                 }
             }
 
@@ -330,7 +348,7 @@ pub(super) fn presets_tab(ui: &mut Ui, id: u64, p: &ForgePatch, view: &mut View)
                 .show(ui, |ui| {
                     for row in items.chunks(cols) {
                         ui.horizontal(|ui| {
-                            for (name, cat_lbl, patch) in row {
+                            for (name, cat_lbl, layers_n, is_loop, item) in row {
                                 let (r, resp) =
                                     ui.allocate_exact_size(vec2(col_w, 42.0), Sense::click());
                                 let active = p.name == *name;
@@ -368,10 +386,10 @@ pub(super) fn presets_tab(ui: &mut Ui, id: u64, p: &ForgePatch, view: &mut View)
                                     t::mono(9.5),
                                     t::muted(),
                                 );
-                                let (badge, bcol) = if patch.seamless_loop {
+                                let (badge, bcol) = if *is_loop {
                                     (tr.forge_loop_btn.to_uppercase(), t::enc_green())
                                 } else {
-                                    (format!("{}L", patch.layers.len()), t::enc_blue())
+                                    (format!("{layers_n}L"), t::enc_blue())
                                 };
                                 ui.painter().text(
                                     r.right_center() + vec2(-9.0, 0.0),
@@ -381,7 +399,10 @@ pub(super) fn presets_tab(ui: &mut Ui, id: u64, p: &ForgePatch, view: &mut View)
                                     bcol,
                                 );
                                 if resp.clicked() {
-                                    out.adopt = Some(patch.clone());
+                                    match item {
+                                        PresetItem::Builtin(rec) => out.pick_recipe = Some(*rec),
+                                        PresetItem::User(patch) => out.adopt = Some(patch.clone()),
+                                    }
                                 }
                             }
                         });

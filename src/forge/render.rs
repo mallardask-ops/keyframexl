@@ -32,6 +32,33 @@ const BLOCK: usize = 512;
 const TEMPO: f32 = 120.0;
 
 pub fn render(p: &ForgePatch) -> Rendered {
+    let (mix, end) = mix_pre_gain(p);
+    finish_mix(mix, end, p)
+}
+
+/// Level `p.gain_db` to `peak` (rounded to 0.1 dB) and return the final rendered
+/// audio, running the expensive layer/FX synthesis only once.
+pub(super) fn level_and_render(p: &mut ForgePatch, peak: f32) -> Rendered {
+    let (pre_gain, end) = mix_pre_gain(p);
+    let mut rendered = finish_mix(pre_gain.clone(), end, p);
+    for _ in 0..4 {
+        if rendered.peak <= 1e-4 || (rendered.peak - peak).abs() < 0.02 * peak {
+            return rendered;
+        }
+        let db = p.gain_db + 20.0 * (peak / rendered.peak).log10();
+        let next = ((db * 10.0).round() / 10.0).clamp(-36.0, 12.0);
+        if (next - p.gain_db).abs() < 0.05 {
+            return rendered;
+        }
+        p.gain_db = next;
+        rendered = finish_mix(pre_gain.clone(), end, p);
+    }
+    rendered
+}
+
+/// Synthesize every layer, its layer FX, master FX, and character chain —
+/// everything upstream of `p.gain_db`.
+fn mix_pre_gain(p: &ForgePatch) -> (Vec<f32>, f32) {
     crate::denormal::flush_to_zero();
     let m = p.macros;
     let size = m.size - 0.5;
@@ -83,7 +110,13 @@ pub fn render(p: &ForgePatch) -> Rendered {
     }
     run_chain(&p.fx, &mut mix);
     run_chain(&character(m), &mut mix);
-    let gain = crate::fx::db(p.gain_db + (m.energy - 0.5) * 6.0);
+    (mix, end)
+}
+
+/// Apply output gain, seamless-loop splice or limiter + tail trim, and meter peak/LUFS.
+fn finish_mix(mut mix: Vec<f32>, end: f32, p: &ForgePatch) -> Rendered {
+    let rate = RATE as usize;
+    let gain = crate::fx::db(p.gain_db + (p.macros.energy - 0.5) * 6.0);
     for s in &mut mix {
         *s *= gain;
     }
