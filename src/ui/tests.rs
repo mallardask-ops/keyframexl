@@ -2580,3 +2580,44 @@ fn toolbar_button_uncovers_a_docked_panel_under_a_floating_window() {
     assert!(!folded(&mut app), "roll open again");
     assert!(app.ws.dock().find_tab(&roll).is_some());
 }
+
+/// Reordering mixer effects: the slot moves, the ones between shift, and its
+/// automation, open window and selection follow it.
+#[test]
+fn moving_an_effect_slot_takes_its_automation_and_window_along() {
+    use keyframexl::automation::{Envelope, Playback, Target};
+    use keyframexl::fx::{FxKind, FxSlot};
+    let mut app = app();
+    app.song.mixer[1].fx = vec![
+        FxSlot::new(FxKind::Delay),
+        FxSlot::new(FxKind::Reverb),
+        FxSlot::new(FxKind::Chorus),
+    ];
+    std::sync::Arc::make_mut(&mut app.song.patterns[0]).automation = Some(Envelope {
+        target: Target::FxMix { track: 1, slot: 0 },
+        points: vec![],
+        playback: Playback::default(),
+    });
+    app.fx_windows = vec![(1, 0), (1, 2)];
+    app.mix_sel = 1;
+    app.mix_slot = 0;
+    app.move_fx_slot(1, 0, 2);
+    let kinds: Vec<FxKind> = app.song.mixer[1].fx.iter().map(|s| s.kind).collect();
+    assert_eq!(kinds, vec![FxKind::Reverb, FxKind::Chorus, FxKind::Delay]);
+    assert_eq!(
+        app.song.patterns[0].automation.as_ref().unwrap().target,
+        Target::FxMix { track: 1, slot: 2 },
+        "the delay's automation follows it"
+    );
+    assert_eq!(
+        app.fx_windows,
+        vec![(1, 2), (1, 1)],
+        "windows follow their slots"
+    );
+    assert_eq!(app.mix_slot, 2, "the selection follows the moved slot");
+    assert!(app.status.1.contains("slot 3"), "{}", app.status.1);
+    // One undo step puts it back.
+    app.undo();
+    let kinds: Vec<FxKind> = app.song.mixer[1].fx.iter().map(|s| s.kind).collect();
+    assert_eq!(kinds, vec![FxKind::Delay, FxKind::Reverb, FxKind::Chorus]);
+}

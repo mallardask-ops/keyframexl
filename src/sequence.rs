@@ -1036,6 +1036,39 @@ impl Song {
         mapped
     }
 
+    /// Move effect slot `from` to `to` on mixer insert `track` (FL: drag a
+    /// slot in the list); the slots between shift by one. Automation of every
+    /// moved slot follows it. False when there is nothing to move.
+    pub fn move_fx_slot(&mut self, track: usize, from: usize, to: usize) -> bool {
+        let Some(m) = self.mixer.get_mut(track) else {
+            return false;
+        };
+        let n = m.fx.len();
+        if from >= n || to >= n || from == to {
+            return false;
+        }
+        let slot = m.fx.remove(from);
+        m.fx.insert(to, slot);
+        for pattern in self
+            .patterns
+            .iter_mut()
+            .filter(|p| p.automation.is_some())
+            .map(std::sync::Arc::make_mut)
+        {
+            if let Some(env) = &mut pattern.automation {
+                use crate::automation::Target::*;
+                if let FxParam { track: t, slot, .. }
+                | FxMix { track: t, slot }
+                | FxEnabled { track: t, slot } = &mut env.target
+                    && *t as usize == track
+                {
+                    *slot = moved_slot_index(*slot as usize, from, to) as u8;
+                }
+            }
+        }
+        true
+    }
+
     /// Remove an insert and its automation, keeping other routes attached.
     pub fn remove_track(&mut self, at: usize) {
         if at == 0 || at >= self.mixer.len() {
@@ -2037,6 +2070,19 @@ pub fn tick_frames(
     match table {
         Some(m) => m.frames_at(t) as u64,
         None => (steps(t) * seconds_per_step(song.tempo) * rate as f64) as u64,
+    }
+}
+
+/// Where slot `k` ends up when slot `from` moves to `to` (the others shift).
+pub fn moved_slot_index(k: usize, from: usize, to: usize) -> usize {
+    if k == from {
+        to
+    } else if from < to && k > from && k <= to {
+        k - 1
+    } else if to < from && k >= to && k < from {
+        k + 1
+    } else {
+        k
     }
 }
 
