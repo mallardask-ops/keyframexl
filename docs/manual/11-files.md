@@ -52,7 +52,8 @@ one, it shows the release notes, downloads the archive (`.tar.gz` on Linux,
 `.zip` on Windows), checks its SHA-256, installs it in place of the running
 program and restarts.
 
-*Settings → General → Nightly builds* follows the nightly prerelease made
-for every change; switch it off to get only stable versions. *Check
+By default only stable versions are offered. *Settings → General → Nightly
+builds* also follows the nightly prerelease, built once a day from the latest
+changes. *Check
 automatically* looks at every start. A copy run from a cargo `target/`
 folder is not replaced: update the source and build again.

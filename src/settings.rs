@@ -347,6 +347,7 @@ pub struct GeneralSettings {
     /// Automatically check GitHub Releases once per day for newer versions.
     pub check_updates: bool,
     /// Follow nightly builds (GitHub prereleases) instead of stable releases only.
+    /// Off for new installs; a settings file that has it keeps its value.
     pub nightly_updates: bool,
     /// Unix timestamp (seconds) of the last automatic update check.
     pub last_update_check: u64,
@@ -428,7 +429,7 @@ impl Default for GeneralSettings {
             deck_monitor: DeckMonitor::Scope,
             theme: ThemeMode::Dark,
             check_updates: true,
-            nightly_updates: true,
+            nightly_updates: false,
             last_update_check: 0,
             skipped_version: None,
             show_welcome: true,
@@ -472,6 +473,13 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_installs_follow_stable_but_saved_choice_is_kept() {
+        assert!(!Settings::default().general.nightly_updates);
+        let saved: Settings = ron::from_str("(general: (nightly_updates: true))").unwrap();
+        assert!(saved.general.nightly_updates);
+    }
 
     #[test]
     fn settings_round_trip_and_old_files_load() {
