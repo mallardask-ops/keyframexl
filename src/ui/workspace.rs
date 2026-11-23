@@ -208,6 +208,12 @@ fn find_kind(d: &DockState<Tab>, kind: Kind) -> Option<(SurfaceIndex, NodeIndex)
 fn focus(d: &mut DockState<Tab>, at: (SurfaceIndex, NodeIndex, TabIndex)) {
     d.set_active_tab(at);
     d.set_focused_node_and_surface((at.0, at.1));
+    // A floating window comes out from under the others.
+    if !at.0.is_main()
+        && let Some(w) = d.get_window_state_mut(at.0)
+    {
+        w.raise();
+    }
 }
 
 /// The focused leaf when a panel may join it: not a tool window (an
@@ -299,7 +305,11 @@ impl App {
                     let d = self.ws.dock();
                     let is_focused = focused(d).is_some_and(|f| f == tab);
                     match find(d, &tab) {
-                        Some(at) if is_focused => {
+                        // Closes only a window in plain view: one hidden under
+                        // another floating window comes to the front instead.
+                        Some(at)
+                            if is_focused && (at.0.is_main() || d.top_window() == Some(at.0)) =>
+                        {
                             d.remove_tab(at);
                         }
                         Some(at) => focus(d, at),

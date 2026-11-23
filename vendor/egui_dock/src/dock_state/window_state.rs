@@ -45,6 +45,16 @@ pub struct WindowState {
     /// KeyFrameXL: the work-area bounds used when `screen_rect` was last resolved.
     #[cfg_attr(feature = "serde", serde(default))]
     last_bounds: Option<Rect>,
+
+    /// KeyFrameXL: bring this window to the front on its next frame (asked by
+    /// code, e.g. a toolbar button for a window hidden under another).
+    #[cfg_attr(feature = "serde", serde(skip))]
+    raise: bool,
+
+    /// KeyFrameXL: stacking order among floating windows; the highest was
+    /// raised last (0: not shown yet).
+    #[cfg_attr(feature = "serde", serde(skip))]
+    z: u64,
 }
 
 /// Normalized `[0..1]` coordinates of `r` inside `bounds`.
@@ -148,6 +158,8 @@ impl Default for WindowState {
             restore: None,
             norm_rect: None,
             last_bounds: None,
+            raise: false,
+            z: 0,
         }
     }
 }
@@ -156,6 +168,25 @@ impl WindowState {
     /// Create a default window state.
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    /// KeyFrameXL: bring the window to the front on its next frame.
+    pub fn raise(&mut self) -> &mut Self {
+        self.raise = true;
+        self
+    }
+
+    pub(crate) fn take_raise(&mut self) -> bool {
+        std::mem::take(&mut self.raise)
+    }
+
+    /// KeyFrameXL: stacking order; the highest is in front.
+    pub fn z(&self) -> u64 {
+        self.z
+    }
+
+    pub(crate) fn set_z(&mut self, z: u64) {
+        self.z = z;
     }
 
     /// Set the position for this window in screen coordinates.
