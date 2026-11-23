@@ -334,8 +334,8 @@ pub fn render_range(
     // The first frame and how many: the whole loop, or the selection.
     let (first, length) = match range {
         Some((a, b)) => {
-            let table = (!song.tempo_map.is_empty())
-                .then(|| crate::tempo::TempoTable::build(&song.tempo_map, song.tempo, rate));
+            let table = crate::tempo::effective_tempo_map(song)
+                .map(|m| crate::tempo::TempoTable::build(&m, song.tempo, rate));
             let (s, e) = (
                 crate::sequence::tick_frames(song, table.as_ref(), a, rate),
                 crate::sequence::tick_frames(song, table.as_ref(), b, rate),

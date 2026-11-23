@@ -946,11 +946,22 @@ impl Song {
                 match &mut env.target {
                     MixerVolume { track }
                     | MixerPan { track }
+                    | MixerSep { track }
+                    | MixerEq { track, .. }
                     | FxParam { track, .. }
                     | FxMix { track, .. }
+                    | FxEnabled { track, .. }
                         if *track as usize >= at =>
                     {
                         *track += 1
+                    }
+                    SendLevel { track, to } => {
+                        if *track as usize >= at {
+                            *track += 1;
+                        }
+                        if *to as usize >= at {
+                            *to += 1;
+                        }
                     }
                     _ => {}
                 }
@@ -1114,17 +1125,33 @@ impl Song {
         {
             if let Some(env) = &mut pattern.automation {
                 use crate::automation::Target::*;
-                let track = match &mut env.target {
+                match &mut env.target {
                     MixerVolume { track }
                     | MixerPan { track }
+                    | MixerSep { track }
+                    | MixerEq { track, .. }
                     | FxParam { track, .. }
-                    | FxMix { track, .. } => track,
+                    | FxMix { track, .. }
+                    | FxEnabled { track, .. } => {
+                        if *track as usize == at {
+                            pattern.automation = None;
+                        } else if *track as usize > at {
+                            *track -= 1;
+                        }
+                    }
+                    SendLevel { track, to } => {
+                        if *track as usize == at || *to as usize == at {
+                            pattern.automation = None;
+                        } else {
+                            if *track as usize > at {
+                                *track -= 1;
+                            }
+                            if *to as usize > at {
+                                *to -= 1;
+                            }
+                        }
+                    }
                     _ => continue,
-                };
-                if *track as usize == at {
-                    pattern.automation = None;
-                } else if *track as usize > at {
-                    *track -= 1;
                 }
             }
         }
@@ -2136,8 +2163,8 @@ pub fn wrap_frame(pos: u64, (start, end): (u64, u64)) -> u64 {
 
 /// Frames in one pass of the pattern, or of the playlist in song mode.
 pub fn loop_frames(song: &Song, pattern_id: u64, song_mode: bool, rate: u32) -> u64 {
-    if song_mode && !song.tempo_map.is_empty() {
-        let table = crate::tempo::TempoTable::build(&song.tempo_map, song.tempo, rate);
+    if song_mode && let Some(map) = crate::tempo::effective_tempo_map(song) {
+        let table = crate::tempo::TempoTable::build(&map, song.tempo, rate);
         return table.frames_at(song.end_bar_tick()) as u64;
     }
     let st = if song_mode {

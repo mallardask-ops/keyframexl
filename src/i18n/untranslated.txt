@@ -2,11 +2,14 @@
 # product names, default data names (channel, pattern, preset names).
 # Format: "<file>: <literal>", \n for a newline. Kept in sync by
 # scan_tests::ui_has_no_new_english_literals.
+automation.rs: {:.1} kHz
+automation.rs: {v:.1} BPM
 browser.rs: KeyFrame Tide ({})
 browser.rs: Libraries
 browser.rs: Packs
 browser.rs: Recorded
 browser.rs: Rendered
+deck.rs: 120.0 BPM
 deck.rs: REC {}:{:02}
 export.rs: 320 kbps
 export.rs: 32 float

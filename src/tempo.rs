@@ -392,6 +392,190 @@ impl TempoTable {
     }
 }
 
+/// Zero-allocation hash of everything that affects the song's effective tempo
+/// map (`song.tempo`, `song.tempo_map`, and active `Target::Tempo` playlist clips).
+pub fn tempo_signature(song: &crate::sequence::Song) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut mix = |v: u64| {
+        h ^= v;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    };
+    mix(song.tempo.to_bits());
+    mix(song.tempo_map.points.len() as u64);
+    for p in &song.tempo_map.points {
+        mix(p.tick as u64);
+        mix(p.bpm.to_bits());
+        mix(p.shape as u64);
+    }
+    for clip in &song.clips {
+        if clip.muted || song.track_muted(clip.track) {
+            continue;
+        }
+        let Some(pat) = song.patterns.iter().find(|p| p.id == clip.pattern) else {
+            continue;
+        };
+        let Some(env) = &pat.automation else {
+            continue;
+        };
+        if env.target != crate::automation::Target::Tempo {
+            continue;
+        }
+        mix(clip.start as u64);
+        mix(clip.offset as u64);
+        mix(clip.length.unwrap_or(-1) as u64);
+        mix(pat.length as u64);
+        mix(env.playback as u64);
+        mix(env.points.len() as u64);
+        for pt in &env.points {
+            mix(pt.tick as u64);
+            mix(pt.value.to_bits() as u64);
+            mix(pt.tension.to_bits() as u64);
+        }
+    }
+    h
+}
+
+/// True when the song has either a manual `tempo_map` or any active
+/// `Target::Tempo` automation clip in the playlist.
+pub fn has_tempo_automation(song: &crate::sequence::Song) -> bool {
+    if !song.tempo_map.is_empty() {
+        return true;
+    }
+    song.clips.iter().any(|c| {
+        !c.muted
+            && !song.track_muted(c.track)
+            && song
+                .patterns
+                .iter()
+                .find(|p| p.id == c.pattern)
+                .and_then(|p| p.automation.as_ref())
+                .is_some_and(|e| e.target == crate::automation::Target::Tempo)
+    })
+}
+
+/// Combined tempo map from `song.tempo_map` plus any active `Target::Tempo`
+/// automation clips in the playlist (`None` for a completely flat-tempo song).
+pub fn effective_tempo_map(song: &crate::sequence::Song) -> Option<TempoMap> {
+    let mut has_clip = false;
+    let mut ticks: Vec<Tick> = Vec::new();
+    for clip in song
+        .clips
+        .iter()
+        .filter(|c| !c.muted && !song.track_muted(c.track))
+    {
+        let Some(pat) = song.patterns.iter().find(|p| p.id == clip.pattern) else {
+            continue;
+        };
+        let Some(env) = &pat.automation else {
+            continue;
+        };
+        if env.target != crate::automation::Target::Tempo {
+            continue;
+        }
+        has_clip = true;
+        let plen = pat.length.max(1);
+        let len = clip.length.unwrap_or(plen - clip.offset).max(1);
+        ticks.push(clip.start.max(0));
+        ticks.push((clip.start + len).max(0));
+        if env.playback == crate::automation::Playback::Clip {
+            let mut base = clip.start - clip.offset;
+            let clip_end = clip.start + len;
+            while base < clip_end {
+                for (i, pt) in env.points.iter().enumerate() {
+                    let t0 = base + pt.tick;
+                    if t0 >= clip.start && t0 <= clip_end {
+                        ticks.push(t0);
+                    }
+                    if pt.tension.abs() >= 1e-3
+                        && let Some(next) = env.points.get(i + 1)
+                    {
+                        let t1 = (base + next.tick).min(clip_end);
+                        let mut s = (t0 + STEP).max(clip.start);
+                        while s < t1 {
+                            ticks.push(s);
+                            s += STEP;
+                        }
+                    }
+                }
+                base += plen;
+            }
+        } else {
+            let clip_end = clip.start + len;
+            for (i, pt) in env.points.iter().enumerate() {
+                let t0 = clip.start + pt.tick - clip.offset;
+                if t0 >= clip.start && t0 <= clip_end {
+                    ticks.push(t0);
+                }
+                if env.playback == crate::automation::Playback::Hold
+                    && pt.tension.abs() >= 1e-3
+                    && let Some(next) = env.points.get(i + 1)
+                {
+                    let t1 = (clip.start + next.tick - clip.offset).min(clip_end);
+                    let mut s = (t0 + STEP).max(clip.start);
+                    while s < t1 {
+                        ticks.push(s);
+                        s += STEP;
+                    }
+                }
+            }
+        }
+    }
+    if !has_clip {
+        return (!song.tempo_map.is_empty()).then(|| song.tempo_map.clone());
+    }
+    ticks.push(0);
+    for p in &song.tempo_map.points {
+        ticks.push(p.tick.max(0));
+    }
+    ticks.sort_unstable();
+    ticks.dedup();
+
+    let base_table = (!song.tempo_map.is_empty())
+        .then(|| TempoTable::build(&song.tempo_map, song.tempo, 48_000));
+    let mut vals = Vec::with_capacity(8);
+    let mut eval = |t: Tick| -> f64 {
+        crate::automation::values_at(song, t, &mut vals);
+        if let Some(v) = crate::automation::find(&vals, crate::automation::Target::Tempo) {
+            clean_bpm(v as f64, song.tempo)
+        } else if let Some(bt) = &base_table {
+            clean_bpm(bt.bpm_at(t), song.tempo)
+        } else {
+            clean_bpm(song.tempo, song.tempo)
+        }
+    };
+
+    let mut points = Vec::with_capacity(ticks.len() * 2);
+    for (idx, &t) in ticks.iter().enumerate() {
+        let bpm = eval(t);
+        if idx > 0 {
+            let prev_t = ticks[idx - 1];
+            if t > prev_t + 1 {
+                let left = eval(t - 1);
+                if (left - bpm).abs() > 0.05 {
+                    points.push(TempoPoint {
+                        tick: t - 1,
+                        bpm: left,
+                        shape: TempoShape::Step,
+                    });
+                }
+            }
+        }
+        let shape = if idx + 1 < ticks.len() {
+            TempoShape::Linear
+        } else {
+            TempoShape::Step
+        };
+        points.push(TempoPoint {
+            tick: t,
+            bpm,
+            shape,
+        });
+    }
+    let mut map = TempoMap { points };
+    normalize_tempo_map(&mut map, song.tempo);
+    Some(map)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -143,6 +143,7 @@ impl App {
                 return;
             }
             let mut swing = self.song.swing;
+            kit::automatable(ui, keyframexl::automation::Target::Swing);
             let (_, started, changed) = kit::knob(
                 ui,
                 &kit::Knob {
@@ -162,7 +163,7 @@ impl App {
             }
             if changed {
                 self.song.swing = swing;
-                self.publish();
+                self.publish_param(keyframexl::automation::Target::Swing, swing as f32);
                 self.say(
                     Tone::Quiet,
                     crate::i18n::fill(

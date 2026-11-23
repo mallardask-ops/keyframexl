@@ -477,16 +477,22 @@ impl App {
                     hint: &hint,
                 };
                 let mut v = self.song.mixer[track].eq[b] as f64;
+                let target = keyframexl::automation::Target::MixerEq {
+                    track: track as u16,
+                    band: b as u8,
+                };
+                kit::automatable(ui, target);
                 let (_, started, changed) = kit::knob(ui, &knob, &mut v);
                 if started {
                     self.checkpoint();
                 }
                 if changed {
-                    self.song.mixer[track].eq[b] = (v as f32).clamp(
+                    let val = (v as f32).clamp(
                         -keyframexl::sequence::EQ_RANGE,
                         keyframexl::sequence::EQ_RANGE,
                     );
-                    self.publish();
+                    self.song.mixer[track].eq[b] = val;
+                    self.publish_param(target, val);
                 }
             }
         });
@@ -828,14 +834,17 @@ impl App {
                 fmt: &sep_fmt,
                 hint: tr.mixer_sep_hint,
             };
+            let sep_target = keyframexl::automation::Target::MixerSep { track: i as u16 };
+            kit::automatable(ui, sep_target);
             let (_, started, changed) =
                 kit::mini_knob(ui, sep_r, ui.id().with(("mix-sep", i)), &spec, &mut sep);
             if started {
                 self.checkpoint();
             }
             if changed {
-                self.song.mixer[i].sep = sep as f32;
-                self.publish();
+                let v = sep as f32;
+                self.song.mixer[i].sep = v;
+                self.publish_param(sep_target, v);
             }
         }
         let mut pan = track.pan as f64;
@@ -1404,13 +1413,17 @@ impl App {
                                 fmt: &sep_fmt,
                                 hint: tr.mixer_sep_hint,
                             };
+                            let sep_target =
+                                keyframexl::automation::Target::MixerSep { track: i as u16 };
+                            kit::automatable(ui, sep_target);
                             let (_, started, changed) = kit::knob(ui, &sep_knob, &mut sep);
                             if started {
                                 self.checkpoint();
                             }
                             if changed {
-                                self.song.mixer[i].sep = sep as f32;
-                                self.publish();
+                                let v = sep as f32;
+                                self.song.mixer[i].sep = v;
+                                self.publish_param(sep_target, v);
                             }
                         });
                         ui.add_space(6.0);
@@ -1549,6 +1562,11 @@ impl App {
                     fmt: &|v| format!("{:.0}%", v * 100.0),
                     hint: tr.mixer_slot_mix_hint,
                 };
+                let mix_target = keyframexl::automation::Target::FxMix {
+                    track: track as u16,
+                    slot: k as u8,
+                };
+                kit::automatable(ui, mix_target);
                 let (_, started, changed) = kit::mini_knob(
                     ui,
                     mr,
@@ -1562,13 +1580,7 @@ impl App {
                 if changed {
                     let v = mix as f32;
                     self.song.mixer[track].fx[k].mix = v;
-                    self.publish_param(
-                        keyframexl::automation::Target::FxMix {
-                            track: track as u16,
-                            slot: k as u8,
-                        },
-                        v,
-                    );
+                    self.publish_param(mix_target, v);
                 }
             }
             None => {
@@ -2210,7 +2222,8 @@ impl App {
                         }
                         FxKind::Time => {
                             let mut params = slot.params.clone();
-                            let (started, changed) = super::fx_views::time(ui, &mut params);
+                            let (started, changed) =
+                                super::fx_views::time(ui, track, k, &mut params);
                             if started {
                                 self.checkpoint();
                             }
@@ -2723,14 +2736,20 @@ impl App {
                     fmt: &|v| format!("{:.0}%", v * 100.0),
                     hint: tr.mixer_send_hint,
                 };
+                let send_target = keyframexl::automation::Target::SendLevel {
+                    track: track as u16,
+                    to: s.to,
+                };
+                kit::automatable(ui, send_target);
                 let (_, started, changed) =
                     kit::mini_knob(ui, r, ui.id().with(("send", track, si)), &spec, &mut lv);
                 if started {
                     self.checkpoint();
                 }
                 if changed {
-                    self.song.mixer[track].sends[si].level = lv as f32;
-                    self.publish();
+                    let v = lv as f32;
+                    self.song.mixer[track].sends[si].level = v;
+                    self.publish_param(send_target, v);
                 }
                 if kit::tool_button(ui, "×", kit::Kind::Ghost, true)
                     .on_hover_text(tr.mixer_remove_send)

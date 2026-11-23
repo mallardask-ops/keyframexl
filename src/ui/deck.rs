@@ -1125,6 +1125,7 @@ impl App {
                 if tempo != self.edited_tempo() {
                     self.set_edited_tempo(tempo);
                     self.publish();
+                    kit::note_tweaked(ui.ctx(), keyframexl::automation::Target::Tempo);
                     self.say(
                         Tone::Quiet,
                         crate::i18n::fill(tr.status_tempo_set, &[("bpm", &format!("{tempo:.1}"))]),
@@ -1192,9 +1193,50 @@ impl App {
                 tempo += (d / 50.0) as f64 * if fractional { 0.1 } else { 1.0 };
             }
         }
-        if r.secondary_clicked() {
+        let mut reset_tempo = false;
+        let mut paste_tempo: Option<f64> = None;
+        let bpm_clip_id = egui::Id::new("kfxl-tempo-clip");
+        r.context_menu(|ui| {
+            kit::menu_style(ui);
+            let default_bpm = "120.0 BPM";
+            if ui
+                .button(tr.kit_reset)
+                .on_hover_text(crate::i18n::fill(
+                    tr.kit_reset_back_to,
+                    &[("value", default_bpm)],
+                ))
+                .clicked()
+            {
+                reset_tempo = true;
+                ui.close_menu();
+            }
+            if ui.button(tr.kit_type_value).clicked() {
+                ui.data_mut(|m| m.insert_temp(type_id, String::new()));
+                ui.close_menu();
+            }
+            ui.separator();
+            if ui.button(tr.kit_copy_value).clicked() {
+                ui.ctx().data_mut(|d| d.insert_temp(bpm_clip_id, before));
+                ui.ctx().copy_text(format!("{before:.1}"));
+                ui.close_menu();
+            }
+            let copied: Option<f64> = ui.ctx().data(|d| d.get_temp(bpm_clip_id));
+            let paste = ui.add_enabled(copied.is_some(), egui::Button::new(tr.kit_paste_value));
+            if let Some(v) = copied
+                && paste.clicked()
+            {
+                paste_tempo = Some(v);
+                ui.close_menu();
+            }
+            ui.separator();
+            kit::auto_menu_item(ui, keyframexl::automation::Target::Tempo);
+        });
+        if reset_tempo {
             self.checkpoint();
             tempo = 120.0;
+        } else if let Some(v) = paste_tempo {
+            self.checkpoint();
+            tempo = v;
         }
         if r.double_clicked() {
             // Empty with the current tempo as a hint: typing replaces it.
@@ -1240,6 +1282,7 @@ impl App {
         if tempo != before {
             self.set_edited_tempo(tempo);
             self.publish();
+            kit::note_tweaked(ui.ctx(), keyframexl::automation::Target::Tempo);
             let bpm_s = format!("{tempo:.1}");
             if self.tempo_table().is_some() {
                 let at = self.playhead_tick();
