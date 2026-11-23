@@ -1,17 +1,21 @@
 name: Nightly
 
-# Every push to main publishes a nightly prerelease
-# (v<version>-nightly[.rc.N].<UTC yyyymmddHHMM>). Stable releases still come from
-# pushing a vX.Y.Z tag (release.yml). The in-app updater follows nightlies
-# when Settings → General → Nightly builds is on (the default).
+# Once a day (03:00 UTC) main publishes a nightly prerelease
+# (v<version>-nightly[.rc.N].<UTC yyyymmddHHMM>), but only when code changed
+# since the last nightly. Run it by hand from the Actions tab for a build now.
+# Stable releases still come from pushing a vX.Y.Z tag (release.yml). The
+# in-app updater follows nightlies when Settings → General → Nightly builds
+# is on, so every nightly reaches users: see docs/development.md §4.
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
+  schedule:
+    - cron: "0 3 * * *"
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Publish even if nothing but docs changed since the last nightly"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -44,8 +48,20 @@ jobs:
           set -euo pipefail
           # A commit that is itself a stable release gets no nightly.
           if git tag --points-at HEAD | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "HEAD is a stable release; no nightly."
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+          # Nothing but docs since the last nightly (or HEAD already has one):
+          # skip, unless a manual run asked to force it.
+          last=$(git tag --sort=-creatordate --merged HEAD | grep -E -- '-nightly\.' | head -n1 || true)
+          if [[ -n "$last" && "${{ inputs.force }}" != "true" ]]; then
+            changed=$(git diff --name-only "$last" HEAD -- . ':(exclude)*.md' ':(exclude)docs/**' | wc -l)
+            if [[ "$changed" -eq 0 ]]; then
+              echo "No code changes since ${last}; no nightly."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
           fi
           base=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
           if [[ "$base" == *-nightly* ]]; then
@@ -113,7 +129,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Test
-        run: cargo test --lib && cargo test --bin keyframexl
+        run: cargo test --locked
 
       - name: Build nightly binary
         env:
@@ -178,7 +194,7 @@ jobs:
           "CPAL_ASIO_DIR=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Test
-        run: cargo test --lib && cargo test --bin keyframexl
+        run: cargo test --locked
 
       - name: Build nightly binary
         env:
