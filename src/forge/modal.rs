@@ -6,6 +6,8 @@
 use super::{ModalMaterial, RATE, Rng};
 
 const MODES: usize = 8;
+/// Update mode coefficients every N frames when curves move (1.5 kHz control rate).
+const CTRL_BLOCK: usize = 32;
 
 /// Relative partial frequency ratios, mode gains, and decay-rate multipliers
 /// for each physical material.
@@ -69,6 +71,15 @@ struct Mode {
     im: f64,
 }
 
+#[derive(Clone, Copy, Default)]
+struct Coeff {
+    active: bool,
+    c: f64,
+    s: f64,
+    out_l: f64,
+    out_r: f64,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render(
     material: ModalMaterial,
@@ -98,7 +109,6 @@ pub(super) fn render(
     let mut pan_r = [0.707f64; MODES];
     for k in 0..MODES {
         let base_r = prof.ratios[k];
-        // Blend between harmonic-ish and material/stiff stretched ratios.
         let warped =
             base_r.powf(0.85 + inharm * 0.35) * (1.0 + inharm * prof.stiffness * (k * k) as f64);
         let jitter = 1.0 + rng.signed() as f64 * 0.004 * (0.2 + inharm);
@@ -115,28 +125,53 @@ pub(super) fn render(
         pan_r[k] = angle.sin();
     }
 
-    // Exciter burst duration: hard strike = crisp 1.5 ms impulse; soft strike = longer 22 ms mallet/scrape.
     let exciter_ms = 1.5 + (1.0 - strike_v) * 20.0;
     let exciter_frames = ((exciter_ms * 0.001 * rate).round() as usize).max(4);
     let mut exc_lp = 0.0f64;
-    // Cutoff for exciter noise: bright for hard strike, mellow for soft strike.
     let exc_alpha = (0.04 + strike_v * 0.92).clamp(0.02, 0.98);
 
-    // Overall T60 scales exponentially with damping (damp 0 => 3.5x longer, damp 1 => 0.08x crisp knock).
     let base_t60 = prof.base_t60 * 0.08f64.powf(damp - 0.5).clamp(0.06, 4.0);
     let max_hz = rate * 0.44;
+    let static_curves = pitch.is_flat_at(pitch.at(0.0)) && morph.is_flat_at(morph.at(0.0));
 
-    for (i, frame) in out.iter_mut().enumerate() {
-        let x = i as f32 / frames.max(1) as f32;
+    let compute_coeffs = |x: f32| -> ([Coeff; MODES], f64) {
         let semis = (pitch.at(x) + transpose) as f64;
         let ratio = 2f64.powf(semis / 12.0);
         let morph_v = morph.at(x).clamp(0.0, 1.0) as f64;
-        // Morph 0.5 is neutral: <0.5 darker/more damped, >0.5 brighter/longer ring + subtle scrape.
         let morph_delta = (morph_v - 0.5) * 2.0;
         let brightness = (1.0 + morph_delta * 0.65).clamp(0.3, 1.8);
         let t60_scale = 2.0f64.powf(morph_delta * 0.8);
+        let mut coeffs = [Coeff::default(); MODES];
+        for k in 0..MODES {
+            let hz = (base_hz as f64 * ratio * mode_ratios[k]).min(max_hz);
+            if hz < 20.0 || hz >= max_hz * 0.995 {
+                continue;
+            }
+            let w = std::f64::consts::TAU * hz / rate;
+            let t60 = (base_t60 * t60_scale / prof.decay_mul[k]).max(0.004);
+            let radius = (-6.907755278982137 / (t60 * rate)).exp().min(0.99995);
+            let mode_tilt =
+                (1.0 / (1.0 + k as f64 * (0.55 - 0.42 * strike_v))).powf(1.0 / brightness);
+            coeffs[k] = Coeff {
+                active: true,
+                c: w.cos() * radius,
+                s: w.sin() * radius,
+                out_l: mode_tilt * pan_l[k],
+                out_r: mode_tilt * pan_r[k],
+            };
+        }
+        (coeffs, morph_delta)
+    };
 
-        // Build exciter sample.
+    let (mut coeffs, mut morph_delta) = compute_coeffs(0.0);
+    let exc_direct = 0.28 + 0.22 * strike_v;
+
+    for (i, frame) in out.iter_mut().enumerate() {
+        if !static_curves && i > 0 && i % CTRL_BLOCK == 0 {
+            let x = i as f32 / frames.max(1) as f32;
+            (coeffs, morph_delta) = compute_coeffs(x);
+        }
+
         let mut exc = 0.0;
         if i < exciter_frames {
             let env = (std::f64::consts::PI * i as f64 / exciter_frames as f64).sin();
@@ -145,42 +180,28 @@ pub(super) fn render(
             let impulse = if i == 0 { 0.85 * strike_v } else { 0.0 };
             exc = (impulse + exc_lp * env * (0.45 + 0.55 * strike_v)) * 0.42;
         } else if morph_delta > 0.15 {
-            // Subtle continuous excitation when morph is pushed high (bow/scrape texture).
             let raw = rng.signed() as f64;
             exc_lp += exc_alpha * (raw - exc_lp);
             exc = exc_lp * (morph_delta - 0.15) * 0.025;
         }
 
-        let mut l = exc * (0.28 + 0.22 * strike_v);
+        let mut l = exc * exc_direct;
         let mut r = l;
 
         for k in 0..MODES {
-            let hz = (base_hz as f64 * ratio * mode_ratios[k]).min(max_hz);
-            if hz < 20.0 || hz >= max_hz * 0.995 {
+            let cf = coeffs[k];
+            if !cf.active {
                 continue;
             }
-            let w = std::f64::consts::TAU * hz / rate;
-            let t60 = (base_t60 * t60_scale / prof.decay_mul[k]).max(0.004);
-            // Pole radius r = 10^(-3 / (t60 * rate)) gives -60 dB at t60.
-            let radius = (-6.907755278982137 / (t60 * rate)).exp().min(0.99995);
-            let c = w.cos() * radius;
-            let s = w.sin() * radius;
-
             let m = &mut modes[k];
-            let next_re = m.re * c - m.im * s + exc * prof.amps[k];
-            let next_im = m.re * s + m.im * c;
+            let next_re = m.re * cf.c - m.im * cf.s + exc * prof.amps[k];
+            let next_im = m.re * cf.s + m.im * cf.c;
             m.re = next_re;
             m.im = next_im;
-
-            // Mode high-frequency tilt shaped by strike hardness & morph brightness.
-            let mode_tilt =
-                (1.0 / (1.0 + k as f64 * (0.55 - 0.42 * strike_v))).powf(1.0 / brightness);
-            let y = m.im * mode_tilt;
-            l += y * pan_l[k];
-            r += y * pan_r[k];
+            l += next_im * cf.out_l;
+            r += next_im * cf.out_r;
         }
 
-        // Gentle normalization so peaks land cleanly around ~0.65 without harsh clipping.
         frame[0] = (l * 0.45).tanh();
         frame[1] = (r * 0.45).tanh();
     }

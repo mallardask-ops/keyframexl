@@ -3,6 +3,7 @@
 
 use super::{
     PresetFilter, PresetSub, Tab, VariationSlot, View, cached_user_sounds, fx_list, knob, wave,
+    wrapped_chips_idx,
 };
 use crate::i18n::fill;
 use crate::theme as t;
@@ -219,9 +220,15 @@ pub(super) fn master_strip(ui: &mut Ui, ed: &mut Edit, id: u64, p: &mut ForgePat
 
 #[derive(Default)]
 pub(super) struct PresetsOut {
+    pub pick_recipe: Option<Recipe>,
     pub adopt: Option<ForgePatch>,
     pub append_layer: Option<(String, Layer)>,
     pub inspire: bool,
+}
+
+enum PresetItem {
+    Builtin(Recipe),
+    User(ForgePatch),
 }
 
 /// Tab 2: Searchable tagged preset browser + Layer Building Blocks.
@@ -270,6 +277,7 @@ pub(super) fn presets_tab(ui: &mut Ui, id: u64, p: &ForgePatch, view: &mut View)
                     }
                 };
                 tag_btn(tr.forge_cat_all, PresetFilter::All);
+                tag_btn(tr.forge_cat_loops, PresetFilter::Loops);
                 for cat in Category::ALL {
                     tag_btn(tr.forge_category(cat), PresetFilter::Category(cat));
                 }
@@ -277,13 +285,17 @@ pub(super) fn presets_tab(ui: &mut Ui, id: u64, p: &ForgePatch, view: &mut View)
             });
 
             let user = cached_user_sounds(ui.ctx());
-            let mut items: Vec<(String, String, ForgePatch)> = Vec::new();
+            let mut items: Vec<(String, String, usize, bool, PresetItem)> = Vec::new();
             if view.preset_filter != PresetFilter::User {
                 for r in Recipe::ALL {
                     let cat = r.category();
                     if let PresetFilter::Category(want) = view.preset_filter
                         && want != cat
                     {
+                        continue;
+                    }
+                    let (layers_n, is_loop) = r.meta();
+                    if view.preset_filter == PresetFilter::Loops && !is_loop {
                         continue;
                     }
                     let label = r.label();
@@ -294,15 +306,33 @@ pub(super) fn presets_tab(ui: &mut Ui, id: u64, p: &ForgePatch, view: &mut View)
                     {
                         continue;
                     }
-                    items.push((label.into(), cat_lbl.into(), r.patch()));
+                    items.push((
+                        label.into(),
+                        cat_lbl.into(),
+                        layers_n,
+                        is_loop,
+                        PresetItem::Builtin(r),
+                    ));
                 }
             }
-            if matches!(view.preset_filter, PresetFilter::All | PresetFilter::User) {
+            if matches!(
+                view.preset_filter,
+                PresetFilter::All | PresetFilter::Loops | PresetFilter::User
+            ) {
                 for u in user.iter() {
+                    if view.preset_filter == PresetFilter::Loops && !u.seamless_loop {
+                        continue;
+                    }
                     if !q.is_empty() && !u.name.to_lowercase().contains(&q) {
                         continue;
                     }
-                    items.push((u.name.clone(), tr.forge_my_sounds.into(), u.clone()));
+                    items.push((
+                        u.name.clone(),
+                        tr.forge_my_sounds.into(),
+                        u.layers.len(),
+                        u.seamless_loop,
+                        PresetItem::User(u.clone()),
+                    ));
                 }
             }
 
@@ -318,7 +348,7 @@ pub(super) fn presets_tab(ui: &mut Ui, id: u64, p: &ForgePatch, view: &mut View)
                 .show(ui, |ui| {
                     for row in items.chunks(cols) {
                         ui.horizontal(|ui| {
-                            for (name, cat_lbl, patch) in row {
+                            for (name, cat_lbl, layers_n, is_loop, item) in row {
                                 let (r, resp) =
                                     ui.allocate_exact_size(vec2(col_w, 42.0), Sense::click());
                                 let active = p.name == *name;
@@ -356,15 +386,23 @@ pub(super) fn presets_tab(ui: &mut Ui, id: u64, p: &ForgePatch, view: &mut View)
                                     t::mono(9.5),
                                     t::muted(),
                                 );
+                                let (badge, bcol) = if *is_loop {
+                                    (tr.forge_loop_btn.to_uppercase(), t::enc_green())
+                                } else {
+                                    (format!("{layers_n}L"), t::enc_blue())
+                                };
                                 ui.painter().text(
                                     r.right_center() + vec2(-9.0, 0.0),
                                     Align2::RIGHT_CENTER,
-                                    format!("{}L", patch.layers.len()),
+                                    badge,
                                     t::mono(10.0),
-                                    t::enc_blue(),
+                                    bcol,
                                 );
                                 if resp.clicked() {
-                                    out.adopt = Some(patch.clone());
+                                    match item {
+                                        PresetItem::Builtin(rec) => out.pick_recipe = Some(*rec),
+                                        PresetItem::User(patch) => out.adopt = Some(patch.clone()),
+                                    }
                                 }
                             }
                         });
@@ -663,17 +701,29 @@ pub(super) fn export_tab(
     };
 
     panel(ui, tr.forge_sec_export, t::enc_green(), |ui| {
-        let wide = ui.available_width() >= 580.0;
-        if wide {
-            ui.columns(2, |cols| {
-                export_options_ui(&mut cols[0], id, view, file_count, forge_channel_count);
-                export_preview_ui(
-                    &mut cols[1],
-                    p,
-                    view,
-                    file_count,
-                    forge_channel_count,
-                    &mut out,
+        let inner_w = ui.available_width();
+        if inner_w >= 620.0 {
+            let gap = 12.0;
+            let col_w = ((inner_w - gap) * 0.5).floor();
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                ui.allocate_ui_with_layout(
+                    vec2(col_w, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_width(col_w);
+                        ui.set_max_width(col_w);
+                        export_options_ui(ui, id, view, file_count, forge_channel_count);
+                    },
+                );
+                ui.allocate_ui_with_layout(
+                    vec2(col_w, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_width(col_w);
+                        ui.set_max_width(col_w);
+                        export_preview_ui(ui, p, view, file_count, forge_channel_count, &mut out);
+                    },
                 );
             });
         } else {
@@ -688,7 +738,7 @@ pub(super) fn export_tab(
 
 fn export_options_ui(
     ui: &mut Ui,
-    id: u64,
+    _id: u64,
     view: &mut View,
     file_count: usize,
     forge_channel_count: usize,
@@ -701,60 +751,42 @@ fn export_options_ui(
             tr.forge_exp_sound_pack,
             &[("n", &forge_channel_count.to_string())],
         );
-        if let (Some(i), _) = kit::chips(
+        if let Some(i) = wrapped_chips_idx(
             ui,
-            &format!("forge-exp-scope-{id}"),
             &[this_lbl.as_str(), pack_lbl.as_str()],
             usize::from(view.export_pack),
-            None,
         ) {
             view.export_pack = i == 1;
         }
     });
     ui.horizontal_wrapped(|ui| {
         ui.label(egui::RichText::new(tr.forge_exp_format).color(t::muted()));
-        if let (Some(i), _) = kit::chips(
-            ui,
-            &format!("forge-exp-fmt-{id}"),
-            &["WAV 16", "WAV 24", "OGG"],
-            view.format_idx,
-            None,
-        ) {
+        if let Some(i) = wrapped_chips_idx(ui, &["WAV 16", "WAV 24", "OGG"], view.format_idx) {
             view.format_idx = i;
         }
     });
     ui.horizontal_wrapped(|ui| {
         ui.label(egui::RichText::new(tr.forge_exp_rate).color(t::muted()));
-        if let (Some(i), _) = kit::chips(
-            ui,
-            &format!("forge-exp-rate-{id}"),
-            &["48 kHz", "44.1 kHz"],
-            usize::from(view.rate_44),
-            None,
-        ) {
+        if let Some(i) = wrapped_chips_idx(ui, &["48 kHz", "44.1 kHz"], usize::from(view.rate_44)) {
             view.rate_44 = i == 1;
         }
     });
     ui.horizontal_wrapped(|ui| {
         ui.label(egui::RichText::new(tr.forge_exp_channels).color(t::muted()));
-        if let (Some(i), _) = kit::chips(
+        if let Some(i) = wrapped_chips_idx(
             ui,
-            &format!("forge-exp-ch-{id}"),
             &[tr.forge_exp_stereo, tr.forge_mono],
             usize::from(view.mono),
-            None,
         ) {
             view.mono = i == 1;
         }
     });
     ui.horizontal_wrapped(|ui| {
         ui.label(egui::RichText::new(tr.forge_exp_loudness).color(t::muted()));
-        if let (Some(i), _) = kit::chips(
+        if let Some(i) = wrapped_chips_idx(
             ui,
-            &format!("forge-exp-loud-{id}"),
             &[tr.forge_exp_as_mixed, tr.forge_exp_peak, tr.forge_exp_lufs],
             view.loudness_idx,
-            None,
         ) {
             view.loudness_idx = i;
         }

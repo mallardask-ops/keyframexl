@@ -1758,7 +1758,7 @@ pub const UK: Strings = Strings {
     forge_bounce_silence: "{name} зіграв тишу. Завантажте звук у той канал або виберіть іншу ноту.",
     forge_layers_full_bounce: "Вісім шарів — максимум: видаліть один і зведіть знову.",
     forge_bounced_ok: "{name} зведено у звук. Ctrl+Z скасовує.",
-    forge_saved_ok: "{name} збережено в {path}. Тепер він є в «Почати з».",
+    forge_saved_ok: "{name} збережено в {path}. Тепер він є в «Пресети й блоки».",
     forge_save_err: "Не вдалося зберегти звук: {err}",
     forge_export_dlg_title: "Експортувати звуки в цю теку",
     forge_export_err: "Експорт зупинено: {err}. Уже записані файли збережено.",

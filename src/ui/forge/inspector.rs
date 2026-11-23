@@ -1,7 +1,9 @@
 //! Forge selected-layer inspector: source selector (`Osc+`, `Modal`, `Grain`,
 //! `Noise`, `Sample`, `Tide`), source DSP knobs, timing/level knobs, and Layer FX.
 
-use super::{Bouncing, Into, View, chips, fx_list, hz, knob, source_color, source_kind};
+use super::{
+    Bouncing, Into, View, chips, fx_list, hz, knob, source_color, source_kind, wrapped_chips_idx,
+};
 use crate::i18n::fill;
 use crate::theme as t;
 use crate::ui::kit;
@@ -68,7 +70,7 @@ pub(super) fn inspector_panel(
                 );
             });
 
-            // Source switcher.
+            // Source switcher (wrapping so long localized labels never push the column wide).
             let kinds = [
                 tr.forge_src_osc,
                 tr.forge_src_modal,
@@ -78,7 +80,7 @@ pub(super) fn inspector_panel(
                 tr.forge_src_synth,
             ];
             let at = source_kind(&l.source);
-            if let (Some(k), _) = kit::chips(ui, &format!("{salt}-src"), &kinds, at, None)
+            if let Some(k) = wrapped_chips_idx(ui, &kinds, at)
                 && k != at
             {
                 match k {

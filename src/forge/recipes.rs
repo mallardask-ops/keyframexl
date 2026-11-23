@@ -32,19 +32,6 @@ fn fx(kind: FxKind, set: &[(usize, f32)]) -> FxSlot {
     s
 }
 
-/// Set the patch's gain so it renders with this peak, rounded to 0.1 dB.
-/// Drive, dirt and the limiter are not linear: a few passes settle it.
-fn level(p: &mut ForgePatch, peak: f32) {
-    for _ in 0..4 {
-        let r = super::render::render(p);
-        if r.peak <= 1e-4 || (r.peak - peak).abs() < 0.02 * peak {
-            break;
-        }
-        let db = p.gain_db + 20.0 * (peak / r.peak).log10();
-        p.gain_db = ((db * 10.0).round() / 10.0).clamp(-36.0, 12.0);
-    }
-}
-
 /// Volume that starts at full and falls away, faster with lower `tension`.
 fn decay(tension: f32) -> Curve {
     Curve::new(&[(0.0, 1.0, tension), (1.0, 0.0, 0.0)])
@@ -181,18 +168,45 @@ impl Recipe {
         }
     }
 
+    /// Lightweight metadata `(layer_count, seamless_loop)` without rendering audio.
+    pub fn meta(self) -> (usize, bool) {
+        static META: [std::sync::OnceLock<(usize, bool)>; 51] =
+            [const { std::sync::OnceLock::new() }; 51];
+        let i = Recipe::ALL.iter().position(|r| *r == self).unwrap_or(0);
+        *META[i].get_or_init(|| {
+            let p = self.raw_patch();
+            (p.layers.len(), p.seamless_loop)
+        })
+    }
+
     /// The recipe at its category's level (cached: levelling renders it once).
     pub fn patch(self) -> ForgePatch {
+        self.cached_or_init().0
+    }
+
+    /// Levelled patch plus its rendered audio (for background loading without a double render).
+    pub fn patch_and_render(self) -> (ForgePatch, super::Rendered) {
+        let (p, first) = self.cached_or_init();
+        let r = first.unwrap_or_else(|| super::render::render(&p));
+        (p, r)
+    }
+
+    fn cached_or_init(self) -> (ForgePatch, Option<super::Rendered>) {
         static CACHE: [std::sync::OnceLock<ForgePatch>; 51] =
             [const { std::sync::OnceLock::new() }; 51];
         let i = Recipe::ALL.iter().position(|r| *r == self).unwrap_or(0);
-        CACHE[i]
+        let mut first_render = None;
+        let p = CACHE[i]
             .get_or_init(|| {
                 let mut p = self.raw_patch();
-                level(&mut p, self.category().peak());
+                first_render = Some(super::render::level_and_render(
+                    &mut p,
+                    self.category().peak(),
+                ));
                 p
             })
-            .clone()
+            .clone();
+        (p, first_render)
     }
 
     /// The recipe in a game style (or as made), honouring `light_style`.
@@ -722,7 +736,10 @@ mod tests {
     fn recipes_are_tidy_and_distinct() {
         let mut seen = Vec::new();
         for r in Recipe::ALL {
-            let p = r.patch();
+            let meta = r.meta();
+            let (p, rendered) = r.patch_and_render();
+            assert_eq!(meta, (p.layers.len(), p.seamless_loop), "{r:?} meta");
+            assert_eq!(rendered, super::super::render::render(&p), "{r:?} render");
             let mut t = p.clone();
             t.tidy();
             assert_eq!(t, p, "{r:?} is not already tidy");

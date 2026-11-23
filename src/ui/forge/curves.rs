@@ -1,7 +1,7 @@
 //! Forge curve editor: Pitch, Volume, Filter, Pan, and Morph contours with
 //! one-click shape presets, semitone snap, tension bending, and ghost waveform.
 
-use super::{Line, View, chips, cutoff_hz, hz, knob, wave};
+use super::{Line, View, chips, cutoff_hz, hz, knob, wave, wrapped_chips_idx};
 use crate::i18n::fill;
 use crate::theme as t;
 use crate::ui::kit;
@@ -35,9 +35,8 @@ pub(super) fn curves_panel(
         ];
         let at = lines.iter().position(|v| *v == view.line).unwrap_or(0);
         ui.horizontal_wrapped(|ui| {
-            if let (Some(i), _) = kit::chips(
+            if let Some(i) = wrapped_chips_idx(
                 ui,
-                &format!("{salt}-line"),
                 &[
                     tr.forge_line_pitch,
                     tr.forge_line_volume,
@@ -46,7 +45,6 @@ pub(super) fn curves_panel(
                     tr.forge_line_morph,
                 ],
                 at,
-                None,
             ) {
                 view.line = lines[i];
             }
