@@ -42,7 +42,7 @@ pub(super) const FX_MENU: [FxKind; 14] = [
     FxKind::Transient,
 ];
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum Tab {
     #[default]
     Design,
@@ -267,17 +267,57 @@ pub(super) fn knob(
     *v = x as f32;
 }
 
-/// A pick among a few options (chips): one undo step per pick.
+/// A pick among a few options (wrapping hardware chips): never overflows a narrow column.
+pub(super) fn wrapped_chips_idx(ui: &mut Ui, names: &[&str], at: usize) -> Option<usize> {
+    let mut picked = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+        for (i, label) in names.iter().enumerate() {
+            let active = i == at;
+            let galley = ui.painter().layout_no_wrap(
+                (*label).to_string(),
+                t::sans(12.0),
+                if active { t::text() } else { t::muted() },
+            );
+            let size = vec2(galley.size().x + 14.0, 24.0);
+            let (r, resp) = ui.allocate_exact_size(size, Sense::click());
+            let fill = if active {
+                t::selection()
+            } else if resp.hovered() {
+                t::ctl_hover()
+            } else {
+                t::sunken()
+            };
+            let stroke = Stroke::new(1.0_f32, if active { t::strong() } else { t::line() });
+            ui.painter()
+                .rect(r, 5.0, fill, stroke, egui::StrokeKind::Inside);
+            ui.painter().galley(
+                pos2(
+                    r.center().x - galley.size().x * 0.5,
+                    r.center().y - galley.size().y * 0.5,
+                ),
+                galley,
+                if active { t::text() } else { t::muted() },
+            );
+            if resp.clicked() && !active {
+                picked = Some(i);
+            }
+        }
+    });
+    picked
+}
+
+/// A pick among a few options (wrapping chips): one undo step per pick.
 pub(super) fn chips<T: Copy + PartialEq>(
     ui: &mut Ui,
     ed: &mut Edit,
-    id: &str,
+    _id: &str,
     items: &[T],
     names: &[&str],
     value: &mut T,
 ) {
     let at = items.iter().position(|v| v == value).unwrap_or(0);
-    if let (Some(i), _) = kit::chips(ui, id, names, at, None)
+    if let Some(i) = wrapped_chips_idx(ui, names, at)
         && i != at
     {
         *value = items[i];
@@ -349,7 +389,15 @@ pub(super) fn fx_list(ui: &mut Ui, ed: &mut Edit, salt: &str, fx: &mut Vec<FxSlo
                     ed.started = true;
                     ed.changed = true;
                 }
-                let (r, _) = ui.allocate_exact_size(vec2(96.0, 20.0), Sense::hover());
+                let lbl = slot.kind.label().to_uppercase();
+                let lbl_w = ui
+                    .painter()
+                    .layout_no_wrap(lbl, t::mono(10.0), t::text())
+                    .size()
+                    .x
+                    .max(88.0)
+                    + 12.0;
+                let (r, _) = ui.allocate_exact_size(vec2(lbl_w, 20.0), Sense::hover());
                 kit::caps(
                     ui.painter(),
                     r.left_center(),
@@ -847,10 +895,14 @@ impl App {
 
         ui.separator();
 
-        // Main workspace content for the active tab.
+        // Main workspace content for the active tab, strictly bounded to viewport width
+        // (leaving room for the vertical scrollbar so right borders never clip).
+        let content_w = (ui.available_width() - 12.0).max(260.0);
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                ui.set_width(content_w);
+                ui.set_max_width(content_w);
                 ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
                 match view.tab {
                     Tab::Design => {
@@ -884,33 +936,42 @@ impl App {
                         if let Some(l) = p.layers.get_mut(view.layer) {
                             let salt = format!("forge-{id}-{}", view.layer);
                             let ghost = &sound.rendered.frames;
-                            let wide = ui.available_width() >= 640.0;
+                            let wide = content_w >= 720.0;
                             if wide {
-                                ui.columns(2, |cols| {
-                                    let insp = inspector::inspector_panel(
-                                        &mut cols[0],
-                                        &mut ed,
-                                        id,
-                                        l,
-                                        &view,
-                                        &jobs,
+                                let gap = 8.0;
+                                let col_w = ((content_w - gap) * 0.5).floor();
+                                ui.horizontal_top(|ui| {
+                                    ui.spacing_mut().item_spacing.x = gap;
+                                    ui.allocate_ui_with_layout(
+                                        vec2(col_w, 0.0),
+                                        egui::Layout::top_down(egui::Align::Min),
+                                        |ui| {
+                                            ui.set_width(col_w);
+                                            ui.set_max_width(col_w);
+                                            let insp = inspector::inspector_panel(
+                                                ui, &mut ed, id, l, &view, &jobs,
+                                            );
+                                            if insp.load_sample.is_some() {
+                                                load_sample = insp.load_sample;
+                                            }
+                                            if insp.load_grain_sample.is_some() {
+                                                load_grain_sample = insp.load_grain_sample;
+                                            }
+                                            if insp.bounce.is_some() {
+                                                bounce = insp.bounce;
+                                            }
+                                        },
                                     );
-                                    if insp.load_sample.is_some() {
-                                        load_sample = insp.load_sample;
-                                    }
-                                    if insp.load_grain_sample.is_some() {
-                                        load_grain_sample = insp.load_grain_sample;
-                                    }
-                                    if insp.bounce.is_some() {
-                                        bounce = insp.bounce;
-                                    }
-                                    curves::curves_panel(
-                                        &mut cols[1],
-                                        &mut ed,
-                                        &salt,
-                                        l,
-                                        &mut view,
-                                        ghost,
+                                    ui.allocate_ui_with_layout(
+                                        vec2(col_w, 0.0),
+                                        egui::Layout::top_down(egui::Align::Min),
+                                        |ui| {
+                                            ui.set_width(col_w);
+                                            ui.set_max_width(col_w);
+                                            curves::curves_panel(
+                                                ui, &mut ed, &salt, l, &mut view, ghost,
+                                            );
+                                        },
                                     );
                                 });
                             } else {
@@ -1747,6 +1808,49 @@ mod tests {
         };
         assert_eq!(sound.patch, Recipe::Jump.patch());
         assert!(sound.rendered.peak > 0.05);
+    }
+
+    #[test]
+    fn all_tabs_stay_inside_window_bounds_in_en_and_uk() {
+        for lang in [
+            crate::i18n::Language::English,
+            crate::i18n::Language::Ukrainian,
+        ] {
+            let mut app = App::with_song(keyframexl::sequence::Song::default(), None);
+            app.settings.general.language = lang;
+            let id = app.add_forge();
+            let ctx = egui::Context::default();
+            t::setup(&ctx);
+            crate::i18n::set_ctx_lang(&ctx, lang);
+            let mut tab = super::super::Tab::Instrument { id };
+            for (win_w, win_h) in [(880.0_f32, 640.0_f32), (1180.0_f32, 680.0_f32)] {
+                for mode in [Tab::Design, Tab::Presets, Tab::Variations, Tab::Export] {
+                    let view_key = egui::Id::new(("forge-view", id));
+                    ctx.data_mut(|d| {
+                        let mut v: View = d.get_temp(view_key).unwrap_or_default();
+                        v.tab = mode;
+                        d.insert_temp(view_key, v);
+                    });
+                    let mut used_right = 0.0_f32;
+                    for _ in 0..2 {
+                        let input = egui::RawInput {
+                            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(win_w, win_h))),
+                            ..Default::default()
+                        };
+                        let _ = ctx.run(input, |ctx| {
+                            egui::CentralPanel::default().show(ctx, |ui| {
+                                app.tab_ui(ui, &mut tab);
+                                used_right = ui.min_rect().right();
+                            });
+                        });
+                    }
+                    assert!(
+                        used_right <= win_w + 1.0,
+                        "Forge tab {mode:?} ({lang:?}) overflowed {win_w}px window: used_right={used_right}"
+                    );
+                }
+            }
+        }
     }
 
     fn app() -> App {

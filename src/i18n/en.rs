@@ -1646,7 +1646,7 @@ pub const EN: Strings = Strings {
     forge_bounce_silence: "{name} played silence. Load a sound into that channel, or pick another note.",
     forge_layers_full_bounce: "Eight layers is the most: delete one, then bounce again.",
     forge_bounced_ok: "{name} bounced into the sound. Ctrl+Z undoes.",
-    forge_saved_ok: "Saved {name} to {path}. It is in Start from now.",
+    forge_saved_ok: "Saved {name} to {path}. It is in Presets & Blocks now.",
     forge_save_err: "Could not save the sound: {err}",
     forge_export_dlg_title: "Export sounds into this folder",
     forge_export_err: "Export stopped: {err}. Files written before it are kept.",

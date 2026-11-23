@@ -148,7 +148,7 @@ pub(super) fn stage_panel(
         // Layer timeline rows.
         let solo_any = p.layers.iter().any(|l| l.solo);
         let mut remove = None;
-        let meta_w = (ui.available_width() * 0.34).clamp(180.0, 250.0);
+        let panel_inner_w = ui.available_width();
 
         for (i, l) in p.layers.iter_mut().enumerate() {
             let selected = view.layer == i;
@@ -168,13 +168,23 @@ pub(super) fn stage_panel(
                     .corner_radius(CornerRadius::same(5))
                     .inner_margin(egui::Margin::symmetric(5, 3))
                     .show(ui, |ui| {
+                        let row_w = (panel_inner_w - 10.0).max(200.0);
+                        ui.set_width(row_w);
+                        ui.set_max_width(row_w);
+                        let spacing = 5.0;
+                        let del_w = 22.0;
+                        let meta_w = (row_w * 0.27).clamp(155.0, 210.0);
+                        let track_w = (row_w - meta_w - del_w - spacing * 2.0).max(60.0);
+
                         ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 5.0;
-                            // Left meta controls.
+                            ui.spacing_mut().item_spacing.x = spacing;
+                            // Left fixed-width meta column so all timeline tracks align vertically.
                             ui.allocate_ui_with_layout(
                                 vec2(meta_w, 22.0),
                                 egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
+                                    ui.set_min_width(meta_w);
+                                    ui.set_max_width(meta_w);
                                     if crate::ui::settings_ui::kit_switch(ui, &mut l.enabled) {
                                         ed.started = true;
                                         ed.changed = true;
@@ -233,8 +243,7 @@ pub(super) fn stage_panel(
                                 },
                             );
 
-                            // Right interactive clip track.
-                            let track_w = (ui.available_width() - 24.0).max(80.0);
+                            // Right interactive clip track (exact budgeted width).
                             let (tr_rect, tr_resp) = ui
                                 .allocate_exact_size(vec2(track_w, 24.0), Sense::click_and_drag());
                             let p_draw = ui.painter();
@@ -364,7 +373,14 @@ pub(super) fn stage_panel(
                             }
 
                             if ui
-                                .small_button("×")
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("×")
+                                            .font(t::mono(11.0))
+                                            .color(t::muted()),
+                                    )
+                                    .min_size(vec2(del_w, 20.0)),
+                                )
                                 .on_hover_text(tr.forge_delete_layer_tip)
                                 .clicked()
                             {
@@ -522,24 +538,18 @@ pub(super) fn stage_panel(
                 }
             });
 
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    egui::RichText::new(fill(
-                        tr.forge_layer_count,
-                        &[
-                            ("n", &p.layers.len().to_string()),
-                            ("max", &MAX_LAYERS.to_string()),
-                        ],
-                    ))
-                    .font(t::mono(10.0))
-                    .color(t::faint()),
-                );
-                ui.label(
-                    egui::RichText::new(tr.forge_timeline_hint)
-                        .font(t::mono(9.5))
-                        .color(t::faint()),
-                );
-            });
+            ui.label(
+                egui::RichText::new(fill(
+                    tr.forge_layer_count,
+                    &[
+                        ("n", &p.layers.len().to_string()),
+                        ("max", &MAX_LAYERS.to_string()),
+                    ],
+                ))
+                .font(t::mono(10.0))
+                .color(t::faint()),
+            )
+            .on_hover_text(tr.forge_timeline_hint);
         });
     });
 

@@ -3,6 +3,7 @@
 
 use super::{
     PresetFilter, PresetSub, Tab, VariationSlot, View, cached_user_sounds, fx_list, knob, wave,
+    wrapped_chips_idx,
 };
 use crate::i18n::fill;
 use crate::theme as t;
@@ -679,17 +680,29 @@ pub(super) fn export_tab(
     };
 
     panel(ui, tr.forge_sec_export, t::enc_green(), |ui| {
-        let wide = ui.available_width() >= 580.0;
-        if wide {
-            ui.columns(2, |cols| {
-                export_options_ui(&mut cols[0], id, view, file_count, forge_channel_count);
-                export_preview_ui(
-                    &mut cols[1],
-                    p,
-                    view,
-                    file_count,
-                    forge_channel_count,
-                    &mut out,
+        let inner_w = ui.available_width();
+        if inner_w >= 620.0 {
+            let gap = 12.0;
+            let col_w = ((inner_w - gap) * 0.5).floor();
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                ui.allocate_ui_with_layout(
+                    vec2(col_w, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_width(col_w);
+                        ui.set_max_width(col_w);
+                        export_options_ui(ui, id, view, file_count, forge_channel_count);
+                    },
+                );
+                ui.allocate_ui_with_layout(
+                    vec2(col_w, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_width(col_w);
+                        ui.set_max_width(col_w);
+                        export_preview_ui(ui, p, view, file_count, forge_channel_count, &mut out);
+                    },
                 );
             });
         } else {
@@ -704,7 +717,7 @@ pub(super) fn export_tab(
 
 fn export_options_ui(
     ui: &mut Ui,
-    id: u64,
+    _id: u64,
     view: &mut View,
     file_count: usize,
     forge_channel_count: usize,
@@ -717,60 +730,42 @@ fn export_options_ui(
             tr.forge_exp_sound_pack,
             &[("n", &forge_channel_count.to_string())],
         );
-        if let (Some(i), _) = kit::chips(
+        if let Some(i) = wrapped_chips_idx(
             ui,
-            &format!("forge-exp-scope-{id}"),
             &[this_lbl.as_str(), pack_lbl.as_str()],
             usize::from(view.export_pack),
-            None,
         ) {
             view.export_pack = i == 1;
         }
     });
     ui.horizontal_wrapped(|ui| {
         ui.label(egui::RichText::new(tr.forge_exp_format).color(t::muted()));
-        if let (Some(i), _) = kit::chips(
-            ui,
-            &format!("forge-exp-fmt-{id}"),
-            &["WAV 16", "WAV 24", "OGG"],
-            view.format_idx,
-            None,
-        ) {
+        if let Some(i) = wrapped_chips_idx(ui, &["WAV 16", "WAV 24", "OGG"], view.format_idx) {
             view.format_idx = i;
         }
     });
     ui.horizontal_wrapped(|ui| {
         ui.label(egui::RichText::new(tr.forge_exp_rate).color(t::muted()));
-        if let (Some(i), _) = kit::chips(
-            ui,
-            &format!("forge-exp-rate-{id}"),
-            &["48 kHz", "44.1 kHz"],
-            usize::from(view.rate_44),
-            None,
-        ) {
+        if let Some(i) = wrapped_chips_idx(ui, &["48 kHz", "44.1 kHz"], usize::from(view.rate_44)) {
             view.rate_44 = i == 1;
         }
     });
     ui.horizontal_wrapped(|ui| {
         ui.label(egui::RichText::new(tr.forge_exp_channels).color(t::muted()));
-        if let (Some(i), _) = kit::chips(
+        if let Some(i) = wrapped_chips_idx(
             ui,
-            &format!("forge-exp-ch-{id}"),
             &[tr.forge_exp_stereo, tr.forge_mono],
             usize::from(view.mono),
-            None,
         ) {
             view.mono = i == 1;
         }
     });
     ui.horizontal_wrapped(|ui| {
         ui.label(egui::RichText::new(tr.forge_exp_loudness).color(t::muted()));
-        if let (Some(i), _) = kit::chips(
+        if let Some(i) = wrapped_chips_idx(
             ui,
-            &format!("forge-exp-loud-{id}"),
             &[tr.forge_exp_as_mixed, tr.forge_exp_peak, tr.forge_exp_lufs],
             view.loudness_idx,
-            None,
         ) {
             view.loudness_idx = i;
         }
