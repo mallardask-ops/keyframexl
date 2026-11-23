@@ -166,6 +166,8 @@ still in review and not part of this release.
 - The dark theme's Play button text is a little more readable.
 
 ### Fixes
+- The updater no longer offers a release that has no build for your system
+  (0.2.1 stable is Linux only; Windows stays on nightly builds).
 - **Crash** when a tab group or a floating window was dragged by its grip
   over another panel (since 0.1.1).
 - **Export and FL Studio channels' pitch.** An export started with the pitch

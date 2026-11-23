@@ -329,6 +329,16 @@ pub fn parse_release_json(body: &str, current: &Version) -> Result<UpdateOutcome
     evaluate_release(&v, current, current.is_prerelease())
 }
 
+/// Whether `release` can update this OS. A release that lists files but none
+/// for `target` (e.g. a Linux-only stable) is not an update here; one with no
+/// file list at all is still offered, as a link to its page.
+fn has_build_for(release: &serde_json::Value, target: AssetTarget) -> bool {
+    match release.get("assets").and_then(|a| a.as_array()) {
+        Some(assets) if !assets.is_empty() => pick_asset_for_target(assets, target).is_some(),
+        _ => true,
+    }
+}
+
 /// Evaluate a GitHub `/releases` list (nightly channel): the highest
 /// non-draft release wins, prereleases included when `allow_pre`.
 pub fn parse_releases_list_json(
@@ -336,12 +346,22 @@ pub fn parse_releases_list_json(
     current: &Version,
     allow_pre: bool,
 ) -> Result<UpdateOutcome, String> {
+    parse_releases_list_json_for(body, current, allow_pre, AssetTarget::current())
+}
+
+fn parse_releases_list_json_for(
+    body: &str,
+    current: &Version,
+    allow_pre: bool,
+    target: AssetTarget,
+) -> Result<UpdateOutcome, String> {
     let v: serde_json::Value =
         serde_json::from_str(body).map_err(|e| format!("Invalid releases response: {e}"))?;
     let arr = v.as_array().ok_or("Releases response is not a list")?;
     let best = arr
         .iter()
         .filter(|r| !r.get("draft").and_then(|b| b.as_bool()).unwrap_or(false))
+        .filter(|r| has_build_for(r, target))
         .filter_map(|r| {
             let ver = Version::parse(r.get("tag_name")?.as_str()?)?;
             let pre = r
@@ -353,7 +373,7 @@ pub fn parse_releases_list_json(
         })
         .max_by(|a, b| a.0.cmp(&b.0));
     match best {
-        Some((_, r)) => evaluate_release(r, current, allow_pre),
+        Some((_, r)) => evaluate_release_for(r, current, allow_pre, target),
         None => Ok(UpdateOutcome::UpToDate { latest: None }),
     }
 }
@@ -388,6 +408,9 @@ fn evaluate_release_for(
         .unwrap_or(false)
         || remote.is_prerelease();
     if is_pre && !allow_pre {
+        return Ok(UpdateOutcome::UpToDate { latest: None });
+    }
+    if !has_build_for(v, target) {
         return Ok(UpdateOutcome::UpToDate { latest: None });
     }
     if remote <= *current {
@@ -1487,6 +1510,49 @@ mod tests {
             info.version,
             seen.len()
         );
+    }
+
+    #[test]
+    fn release_without_a_build_for_this_os_is_not_offered() {
+        let nightly = Version::parse("0.2.1-nightly.202611230300").unwrap();
+        // 0.2.1 stable ships Linux only; Windows nightly users keep their nightly.
+        let linux_only = r#"{"tag_name": "v0.2.1", "prerelease": false, "draft": false,
+            "assets": [
+                {"name": "keyframexl-linux-x86_64.tar.gz", "browser_download_url": "https://example.com/l"},
+                {"name": "keyframexl-linux-x86_64.tar.gz.sha256", "browser_download_url": "https://example.com/l.sha"}
+            ]}"#;
+        let json: serde_json::Value = serde_json::from_str(linux_only).unwrap();
+        assert!(matches!(
+            evaluate_release_for(&json, &nightly, false, AssetTarget::Linux).unwrap(),
+            UpdateOutcome::Available(_)
+        ));
+        assert_eq!(
+            evaluate_release_for(&json, &nightly, false, AssetTarget::Windows).unwrap(),
+            UpdateOutcome::UpToDate { latest: None }
+        );
+
+        // In a list the newest release with a Windows build wins on Windows.
+        let list = format!(
+            r#"[{linux_only},
+            {{"tag_name": "v0.2.1-nightly.202611240300", "prerelease": true, "draft": false,
+             "assets": [
+                {{"name": "keyframexl-linux-x86_64.tar.gz", "browser_download_url": "https://example.com/n-l"}},
+                {{"name": "keyframexl-windows-x86_64.zip", "browser_download_url": "https://example.com/n-w"}}
+             ]}}]"#
+        );
+        let UpdateOutcome::Available(win) =
+            parse_releases_list_json_for(&list, &nightly, true, AssetTarget::Windows).unwrap()
+        else {
+            panic!("expected the Windows nightly");
+        };
+        assert_eq!(win.version, "0.2.1-nightly.202611240300");
+        assert_eq!(win.asset_url.as_deref(), Some("https://example.com/n-w"));
+        let UpdateOutcome::Available(lin) =
+            parse_releases_list_json_for(&list, &nightly, true, AssetTarget::Linux).unwrap()
+        else {
+            panic!("expected the Linux stable");
+        };
+        assert_eq!(lin.version, "0.2.1");
     }
 
     #[test]
