@@ -330,8 +330,15 @@ impl WindowState {
         self.minimized = !self.minimized;
     }
 
+    /// KeyFrameXL: whether the window is folded to its title bar.
     #[inline(always)]
-    pub(crate) fn is_minimized(&self) -> bool {
+    pub fn is_minimized(&self) -> bool {
         self.minimized
+    }
+
+    /// KeyFrameXL: fold the window to its title bar, or open it again.
+    pub fn set_minimized(&mut self, minimized: bool) -> &mut Self {
+        self.minimized = minimized;
+        self
     }
 }
