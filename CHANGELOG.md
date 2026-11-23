@@ -8,6 +8,9 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 
 See [docs/v0.2.1.md](docs/v0.2.1.md) for the Windows port and 0.2.1 plan.
 
+### Changed
+- **Keyframe Forge Studio UI rework**: replaced the vertical form and fixed game-style buttons with a tabbed studio workspace (`Design`, `Presets & Blocks`, `Variations`, `Export`) featuring an interactive multi-layer timeline (drag to move/trim, drop audio files, lock layers), live playhead, `Loop` / `Round-Robin` / `Auto-Audition` / `A-B` controls, one-click curve shapes with `Pan` and `Morph` lines, searchable presets & Layer Building Blocks, WYSIWYG / Sound Pack export, and one-click `→ Playlist` rendering.
+
 ### Engine and internals
 - **Forge DSP & data model rework (PR 1)**: expanded Forge to 8 layers with
   2-op FM / unison / shape on oscillators, a physical `Modal` material

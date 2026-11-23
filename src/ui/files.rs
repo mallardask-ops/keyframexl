@@ -754,6 +754,7 @@ impl App {
                 crate::audio::Preview {
                     frames: Arc::new(frames),
                     rate,
+                    looping: false,
                 }
             }));
         });

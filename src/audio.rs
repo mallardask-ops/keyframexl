@@ -10,10 +10,11 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering},
 };
 
-/// A file played from the browser, outside the song (FL: preview).
+/// A file played from the browser or Forge audition, outside the song (FL: preview).
 pub struct Preview {
     pub frames: Arc<Vec<[f32; 2]>>,
     pub rate: u32,
+    pub looping: bool,
 }
 
 /// Mixes a preview clip into an output block; owns its play position.
@@ -46,12 +47,20 @@ impl PreviewPlayer {
         let Some(clip) = &self.clip else { return };
         let step = clip.rate as f64 / rate as f64;
         let n = clip.frames.len();
+        if n < 2 {
+            done.store(true, Ordering::Relaxed);
+            return;
+        }
         for f in data.as_chunks_mut::<2>().0 {
-            let i = self.pos as usize;
-            if i + 1 >= n {
-                done.store(true, Ordering::Relaxed);
-                break;
+            if self.pos >= (n - 1) as f64 {
+                if clip.looping {
+                    self.pos = self.pos.rem_euclid((n - 1) as f64);
+                } else {
+                    done.store(true, Ordering::Relaxed);
+                    break;
+                }
             }
+            let i = self.pos as usize;
             let fr = (self.pos - i as f64) as f32;
             let (a, b) = (clip.frames[i], clip.frames[i + 1]);
             f[0] += (a[0] + (b[0] - a[0]) * fr) * 0.8;
