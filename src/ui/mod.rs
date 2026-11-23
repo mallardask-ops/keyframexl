@@ -1781,9 +1781,23 @@ impl App {
         self.say(Tone::Quiet, tr.status_rec_from_first_note);
     }
 
+    /// Where Stop rewinds to: the loop's start (bar 1, or the time
+    /// selection), or in Song mode the start marker when it lies inside the loop.
+    pub(crate) fn stop_position(&self) -> u64 {
+        let (start, end) = self.loop_bounds();
+        if self.song_mode
+            && let Some(t) = self.song.play_start
+        {
+            let at = self.tick_frame_at(t);
+            if (start..end).contains(&at) {
+                return at;
+            }
+        }
+        start
+    }
+
     pub(crate) fn stop(&mut self) {
-        // Stop rewinds to the loop's start: bar 1, or the time selection.
-        let (start, _) = self.loop_bounds();
+        let start = self.stop_position();
         self.waiting_input = false;
         if let Some(a) = &self.audio {
             a.count_in.store(0, Ordering::Relaxed);

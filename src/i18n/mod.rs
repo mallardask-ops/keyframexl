@@ -283,7 +283,8 @@ define_strings! {
         pl_clip_sliced, pl_placed_at_track, pl_marker_tip, pl_marker_header,
         pl_loop_to_next_marker, pl_remove_marker, pl_marker_removed, pl_add_marker_at,
         pl_marker_added, pl_clear_time_sel, pl_time_sig_from_bar, pl_remove_change_here,
-        pl_meter_removed, pl_time_sel_cleared, pl_looping_span,
+        pl_meter_removed, pl_time_sel_cleared, pl_looping_span, pl_start_marker_set,
+        pl_remove_start_marker, pl_start_marker_removed, pl_start_marker_tip,
         pl_clip_moved, pl_clip_length, pl_clip_trimmed, pl_clip_duplicated,
         // Piano roll
         roll_channel_fallback, roll_loop_cleared, roll_looping_span,

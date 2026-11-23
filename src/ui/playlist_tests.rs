@@ -499,10 +499,10 @@ fn dragging_the_ruler_makes_a_time_selection_the_song_loops() {
     drag(
         &ctx,
         &mut app,
-        pos2(grid.left() + 3.0 * bar_w, ruler_y),
+        pos2(grid.left() + 3.5 * bar_w, ruler_y),
         pos2(grid.left() + 0.5 * bar_w, ruler_y),
     );
-    assert_eq!(app.song.loop_range, Some((BAR / 2, 3 * BAR)));
+    assert_eq!(app.song.loop_range, Some((BAR / 2, 7 * BAR / 2)));
     // Double-click clears it.
     let at = pos2(grid.left() + 1.5 * bar_w, ruler_y);
     click(&ctx, &mut app, at);
@@ -775,4 +775,65 @@ fn rmb_drag_selects_clips_survives_scroll_and_moves_all_together() {
         5,
         "Shift+drag duplicates all selected clips"
     );
+}
+
+#[test]
+fn a_time_selection_edge_drags_to_resize_and_the_draft_waits_for_release() {
+    let (ctx, mut app) = setup();
+    app.song.clips.push(Clip::new(1, 0, 0));
+    app.song.loop_range = Some((BAR, 3 * BAR));
+    app.song_mode = true;
+    run(&ctx, &mut app, vec![]);
+    let (grid, bar_w, _) = grid_of(&app);
+    let ruler_y = grid.top() - super::tempo_lane::LANE_OPEN - 6.0;
+    let edge = pos2(grid.left() + 3.0 * bar_w, ruler_y);
+    let to = pos2(grid.left() + 5.0 * bar_w, ruler_y);
+    run(
+        &ctx,
+        &mut app,
+        vec![Event::PointerMoved(edge), button(edge, true, true)],
+    );
+    run(
+        &ctx,
+        &mut app,
+        vec![Event::PointerMoved(edge + (to - edge) * 0.5)],
+    );
+    run(&ctx, &mut app, vec![Event::PointerMoved(to)]);
+    // While dragging, the song (and so the playhead's loop) is untouched.
+    assert_eq!(app.song.loop_range, Some((BAR, 3 * BAR)), "draft only");
+    run(&ctx, &mut app, vec![button(to, true, false)]);
+    assert_eq!(
+        app.song.loop_range,
+        Some((BAR, 5 * BAR)),
+        "right edge moved"
+    );
+    // The left edge, past the right one: the selection flips, still start < end.
+    drag(
+        &ctx,
+        &mut app,
+        pos2(grid.left() + 1.0 * bar_w, ruler_y),
+        pos2(grid.left() + 6.0 * bar_w, ruler_y),
+    );
+    assert_eq!(app.song.loop_range, Some((5 * BAR, 6 * BAR)));
+}
+
+#[test]
+fn a_ruler_click_sets_the_start_marker_stop_returns_to() {
+    let (ctx, mut app) = setup();
+    app.song.clips.push(Clip::new(1, 0, 0));
+    run(&ctx, &mut app, vec![]);
+    let (grid, bar_w, _) = grid_of(&app);
+    let ruler_y = grid.top() - super::tempo_lane::LANE_OPEN - 6.0;
+    click(&ctx, &mut app, pos2(grid.left() + 0.5 * bar_w, ruler_y));
+    assert_eq!(app.song.play_start, Some(BAR / 2));
+    assert!(app.history.is_empty(), "the marker is not an edit");
+    // Stop comes back to the marker, while it is inside the loop.
+    assert_eq!(app.stop_position(), app.tick_frame_at(BAR / 2));
+    // A time selection that leaves it outside: Stop goes to the selection's start.
+    app.song.loop_range = Some((BAR, 2 * BAR));
+    assert_eq!(app.stop_position(), app.tick_frame_at(BAR));
+    // Removed: back to the loop's start.
+    app.song.loop_range = None;
+    app.song.play_start = None;
+    assert_eq!(app.stop_position(), 0);
 }

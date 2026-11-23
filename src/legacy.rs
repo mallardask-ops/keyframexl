@@ -238,6 +238,7 @@ impl V1Song {
             tempo_map: crate::tempo::TempoMap::default(),
             meters: vec![],
             loop_range: None,
+            play_start: None,
             markers: vec![],
             info: Default::default(),
             game_style: None,
