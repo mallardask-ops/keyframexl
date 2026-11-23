@@ -130,8 +130,8 @@ still in review and not part of this release.
   (`scripts/ux/shots.sh`).
 
 ### Interface
-- New installs get only stable updates; turn on *Settings → General → Nightly
-  builds* for daily builds. Existing settings keep their choice.
+- A new install of a stable release gets only stable updates; a nightly build
+  keeps following nightlies. Existing settings keep their choice.
 - **Browser**: *All*, *Library* and *Files* sources with one search field,
   a Stop button while a sample previews, favourites and root folders in
   your own order (dragged, remembered), folders sorted by name, type, date
