@@ -2509,3 +2509,74 @@ fn toolbar_button_raises_a_covered_floating_window() {
     frame(&mut app);
     assert_eq!(ctx.layer_id_at(overlap.center()), Some(playlist_layer));
 }
+
+/// A docked panel under a floating window that fills the work area (the
+/// owner's case: a maximized Piano roll over a docked Channel rack). The
+/// panel's toolbar button folds the window away instead of doing nothing
+/// (or closing the hidden panel); the window's own button opens it again.
+#[test]
+fn toolbar_button_uncovers_a_docked_panel_under_a_floating_window() {
+    let (ctx, mut app) = setup();
+    let area = Rect::from_min_size(Pos2::ZERO, Vec2::new(1366.0, 768.0));
+    let frame = |app: &mut App| {
+        let input = egui::RawInput {
+            screen_rect: Some(area),
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let a = app.ws.active;
+                let mut dock =
+                    std::mem::replace(&mut app.ws.slots[a], egui_dock::DockState::new(vec![]));
+                egui_dock::DockArea::new(&mut dock)
+                    .id(egui::Id::new(("kfxl-dock", a)))
+                    .show_leaf_collapse_buttons(false)
+                    .show_leaf_close_all_buttons(false)
+                    .window_bounds(area)
+                    .show_inside(ui, &mut workspace::Viewer { app: &mut *app });
+                app.ws.slots[a] = dock;
+            });
+            app.apply_win_cmds(area);
+        });
+    };
+    let roll = Tab::Roll { instrument: 4 };
+    assert!(
+        app.ws.dock().find_tab(&Tab::Rack).unwrap().0.is_main(),
+        "rack docked"
+    );
+    app.win(Cmd::Float(roll.clone()));
+    app.apply_win_cmds(area);
+    let (rs, _, _) = app.ws.dock().find_tab(&roll).unwrap();
+    app.ws
+        .dock()
+        .get_window_state_mut(rs)
+        .unwrap()
+        .set_snap(Some(egui_dock::Snap::Max));
+    for _ in 0..2 {
+        frame(&mut app);
+    }
+    // The rack has the focus but the maximized roll hides it.
+    let (s, n, t) = app.ws.dock().find_tab(&Tab::Rack).unwrap();
+    app.ws.dock().set_active_tab((s, n, t));
+    app.ws.dock().set_focused_node_and_surface((s, n));
+    app.win(Cmd::Toggle(Tab::Rack));
+    frame(&mut app);
+    assert!(
+        app.ws.dock().find_tab(&Tab::Rack).is_some(),
+        "rack not closed"
+    );
+    let folded = |app: &mut App| {
+        let (rs, _, _) = app.ws.dock().find_tab(&roll).unwrap();
+        app.ws
+            .dock()
+            .get_window_state_mut(rs)
+            .unwrap()
+            .is_minimized()
+    };
+    assert!(folded(&mut app), "the roll folds away");
+    // The roll's button opens it again, in front.
+    app.win(Cmd::Toggle(roll.clone()));
+    frame(&mut app);
+    assert!(!folded(&mut app), "roll open again");
+    assert!(app.ws.dock().find_tab(&roll).is_some());
+}

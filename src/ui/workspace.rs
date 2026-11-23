@@ -208,11 +208,39 @@ fn find_kind(d: &DockState<Tab>, kind: Kind) -> Option<(SurfaceIndex, NodeIndex)
 fn focus(d: &mut DockState<Tab>, at: (SurfaceIndex, NodeIndex, TabIndex)) {
     d.set_active_tab(at);
     d.set_focused_node_and_surface((at.0, at.1));
-    // A floating window comes out from under the others.
-    if !at.0.is_main()
-        && let Some(w) = d.get_window_state_mut(at.0)
-    {
+    if at.0.is_main() {
+        // A docked panel sits under every floating window: fold the ones
+        // hiding it to their title bars (their own button opens them again).
+        for s in covering(d, at) {
+            if let Some(w) = d.get_window_state_mut(s) {
+                w.set_minimized(true);
+            }
+        }
+    } else if let Some(w) = d.get_window_state_mut(at.0) {
+        // A floating window comes out from under the others, open.
+        w.set_minimized(false);
         w.raise();
+    }
+}
+
+/// Open floating windows over the docked leaf of `at` (none for a window).
+fn covering(d: &DockState<Tab>, at: (SurfaceIndex, NodeIndex, TabIndex)) -> Vec<SurfaceIndex> {
+    if !at.0.is_main() {
+        return vec![];
+    }
+    match d[at.0][at.1].rect() {
+        Some(r) => d.windows_covering(r),
+        None => vec![],
+    }
+}
+
+/// The tab is focused and nothing hides it: its toolbar button closes it.
+fn in_plain_view(d: &mut DockState<Tab>, at: (SurfaceIndex, NodeIndex, TabIndex)) -> bool {
+    if at.0.is_main() {
+        covering(d, at).is_empty()
+    } else {
+        // `top_window` skips folded windows.
+        d.top_window() == Some(at.0)
     }
 }
 
@@ -307,9 +335,7 @@ impl App {
                     match find(d, &tab) {
                         // Closes only a window in plain view: one hidden under
                         // another floating window comes to the front instead.
-                        Some(at)
-                            if is_focused && (at.0.is_main() || d.top_window() == Some(at.0)) =>
-                        {
+                        Some(at) if is_focused && in_plain_view(d, at) => {
                             d.remove_tab(at);
                         }
                         Some(at) => focus(d, at),

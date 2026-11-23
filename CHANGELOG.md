@@ -173,6 +173,9 @@ still in review and not part of this release.
   a MIDI export and re-import (before, every bend was dropped).
 - A window toolbar button brings its floating window out from under another
   one; before, it only took focus (or closed the hidden window).
+- A toolbar button for a docked panel hidden under a floating window (e.g. a
+  maximized Piano roll over the Channel rack) folds that window to its title
+  bar; the window's own button opens it again in front.
 - The updater no longer offers a release that has no build for your system
   (0.2.1 stable is Linux only; Windows stays on nightly builds).
 - Settings, Export and Project info windows can no longer be shrunk until

@@ -16,3 +16,6 @@ recorded yet.
   floating window to the front, and the dock keeps the windows' stacking order
   (`z`, not saved). The window toolbar uses them so a button raises a window
   hidden under another instead of only focusing (or closing) it.
+- `DockState::windows_covering(rect)`, `WindowState::set_minimized` /
+  `is_minimized` public: the toolbar folds floating windows that hide a docked
+  panel it is asked to show.

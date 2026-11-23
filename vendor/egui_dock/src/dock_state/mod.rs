@@ -122,6 +122,26 @@ impl<Tab> DockState<Tab> {
         }
     }
 
+    /// KeyFrameXL: open floating windows that hide a good part (a quarter or
+    /// more) of `rect`, e.g. a docked panel under a maximized window.
+    pub fn windows_covering(&self, rect: Rect) -> Vec<SurfaceIndex> {
+        let area = rect.area();
+        if !rect.is_finite() || area <= 0.0 {
+            return vec![];
+        }
+        self.surfaces
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| match s {
+                Surface::Window(_, state) if !state.is_minimized() => {
+                    let over = state.rect().intersect(rect);
+                    (over.is_positive() && over.area() >= area * 0.25).then_some(SurfaceIndex(i))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     /// KeyFrameXL: the floating window in front of the others (not minimized).
     pub fn top_window(&self) -> Option<SurfaceIndex> {
         self.surfaces
