@@ -133,6 +133,10 @@ still in review and not part of this release.
 - Playlist time selection: drag either edge on the ruler to resize it.
 - Playlist start marker: a ruler click sets it; Stop returns there and Play
   starts there until it is moved or removed (ruler right-click).
+- Mixer effects can be reordered: drag a slot onto another, or right-click →
+  Move up / Move down; automation and open effect windows follow the slot.
+- Mixer slot right-click → Replace swaps the effect for another built-in or
+  plugin.
 - A new install of a stable release gets only stable updates; a nightly build
   keeps following nightlies. Existing settings keep their choice.
 - **Browser**: *All*, *Library* and *Files* sources with one search field,

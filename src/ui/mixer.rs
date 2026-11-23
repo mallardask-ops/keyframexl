@@ -1417,7 +1417,32 @@ impl App {
         let (row, _) = ui.allocate_exact_size(vec2(w, 24.0), Sense::hover());
         let p = ui.painter().clone();
         let selected = self.mix_slot == k;
-        let resp = ui.interact(row, ui.id().with(("slot", track, k)), Sense::click());
+        let resp = ui.interact(
+            row,
+            ui.id().with(("slot", track, k)),
+            if slot.is_some() {
+                Sense::click_and_drag()
+            } else {
+                Sense::click()
+            },
+        );
+        // Drag a slot onto another to reorder (FL); an empty slot means the end.
+        if slot.is_some() {
+            resp.dnd_set_drag_payload(FxSlotDrag { track, k });
+        }
+        if let Some(from) = resp.dnd_hover_payload::<FxSlotDrag>()
+            && from.track == track
+            && from.k != k
+        {
+            let y = if from.k < k { row.bottom() } else { row.top() };
+            p.hline(row.x_range(), y, egui::Stroke::new(2.0_f32, t::text()));
+        }
+        if let Some(from) = resp.dnd_release_payload::<FxSlotDrag>()
+            && from.track == track
+        {
+            let last = self.song.mixer[track].fx.len().saturating_sub(1);
+            self.move_fx_slot(track, from.k, k.min(last));
+        }
         if selected {
             kit::thumb(&p, row);
         } else if resp.hovered() {
@@ -1527,8 +1552,9 @@ impl App {
                 self.open_fx_window(track, k);
             }
         }
-        // Choose an effect: right-click, or click an empty slot.
-        let open_menu = |ui: &mut Ui, this: &mut App| {
+        // Choose an effect: right-click, or click an empty slot. A filled slot
+        // lists them under Replace, next to moving and removing it.
+        let effect_lists = |ui: &mut Ui, this: &mut App| {
             let tr = this.tr();
             kit::menu_style(ui);
             ui.set_min_width(160.0);
@@ -1571,6 +1597,31 @@ impl App {
                     ui.close_menu();
                 }
             });
+        };
+        let open_menu = |ui: &mut Ui, this: &mut App| {
+            let tr = this.tr();
+            kit::menu_style(ui);
+            ui.set_min_width(160.0);
+            if slot.is_some() {
+                ui.menu_button(tr.mixer_replace, |ui| effect_lists(ui, this));
+                let last = this.song.mixer[track].fx.len().saturating_sub(1);
+                if ui
+                    .add_enabled(k > 0, egui::Button::new(tr.mixer_move_up))
+                    .clicked()
+                {
+                    this.move_fx_slot(track, k, k - 1);
+                    ui.close_menu();
+                }
+                if ui
+                    .add_enabled(k < last, egui::Button::new(tr.mixer_move_down))
+                    .clicked()
+                {
+                    this.move_fx_slot(track, k, k + 1);
+                    ui.close_menu();
+                }
+            } else {
+                effect_lists(ui, this);
+            }
             ui.separator();
             if slot.is_some() && ui.button(tr.mixer_save_fx_preset).clicked() {
                 ui.close_menu();
@@ -1611,6 +1662,38 @@ impl App {
             menu.bar_menu(&resp, |ui| open_menu(ui, self));
             menu.store(ui.ctx(), id);
         }
+    }
+
+    /// Move effect slot `from` to `to` on `track`: its automation, its open
+    /// window and the slot selection follow it.
+    pub(crate) fn move_fx_slot(&mut self, track: usize, from: usize, to: usize) {
+        if from == to {
+            return;
+        }
+        self.collect_plugin_states();
+        self.checkpoint();
+        if !self.song.move_fx_slot(track, from, to) {
+            return;
+        }
+        let at = |k: usize| keyframexl::sequence::moved_slot_index(k, from, to);
+        for w in self.fx_windows.iter_mut().filter(|w| w.0 == track) {
+            w.1 = at(w.1);
+        }
+        if self.mix_sel == track {
+            self.mix_slot = at(self.mix_slot);
+        }
+        self.publish();
+        let tr = self.tr();
+        let what = self.song.mixer[track].fx[to].label().to_string();
+        let msg = crate::i18n::fill(
+            tr.mixer_slot_moved,
+            &[
+                ("what", &what),
+                ("n", &(to + 1).to_string()),
+                ("track", &self.mixer_name(track)),
+            ],
+        );
+        self.say(Tone::Quiet, msg);
     }
 
     /// Put `kind` into a slot (None empties it). Slots stay contiguous like FL's list.
@@ -2884,4 +2967,11 @@ mod route_gesture_tests {
         assert_eq!(app.mix_sel, 4, "selection stays on the source");
         assert_eq!(app.song.mixer[4].sends, vec![Send { to: 5, level: 1.0 }]);
     }
+}
+
+/// Drag payload of an effect slot being reordered.
+#[derive(Clone, Copy)]
+struct FxSlotDrag {
+    track: usize,
+    k: usize,
 }

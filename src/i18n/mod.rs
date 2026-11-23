@@ -360,6 +360,7 @@ define_strings! {
         mixer_to_prefix, mixer_to_nowhere, mixer_ducks_under, mixer_sidechains,
         mixer_effects_caps, mixer_slot_on_tip, mixer_slot_bypass_tip,
         mixer_slot_mix, mixer_slot_mix_hint, mixer_slot_empty, mixer_slot_hover,
+        mixer_replace, mixer_move_up, mixer_move_down, mixer_slot_moved,
         mixer_ext_plugins, mixer_checking_plugins, mixer_no_fx_plugins, mixer_plugin_settings,
         mixer_save_fx_preset, mixer_load_fx_preset,
         mixer_sidechain_input, mixer_sidechain_plugin_hint, mixer_remove,
