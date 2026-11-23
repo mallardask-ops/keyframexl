@@ -15,27 +15,47 @@ env:
   KFXL_NO_UPDATE_CHECK: "1"
 
 jobs:
-  # A stable release needs a tag that is exactly v<Cargo.toml version>, and that
-  # version must be plain X.Y.Z. `v*.*.*` alone also matches v0.2.1-rc.1 or a
-  # tag that disagrees with the manifest. Manual runs only build (no publish).
+  # Which tags publish (docs/development.md §4), checked against Cargo.toml:
+  #   vX.Y.Z       stable; Cargo.toml must be exactly X.Y.Z (release PR merged)
+  #   vX.Y.Z-rc.N  prerelease; Cargo.toml must be X.Y.Z-dev or X.Y.Z
+  # Anything else fails, so a stray tag can never become a stable release.
+  # Manual runs only build (no publish) with the Cargo.toml version.
   verify-tag:
     name: verify-tag
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Tag matches Cargo.toml version
-        if: startsWith(github.ref, 'refs/tags/')
+        id: tag
         run: |
-          version=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
-          tag="${GITHUB_REF_NAME}"
-          echo "tag=${tag} Cargo.toml=${version}"
-          if ! [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Cargo.toml version ${version} is not a stable X.Y.Z"
-            exit 1
+          set -euo pipefail
+          manifest=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
+          core="${manifest%%-*}"
+          if [[ "${GITHUB_REF}" != refs/tags/* ]]; then
+            echo "Manual run: build ${manifest}, no publish."
+            { echo "version=${manifest}"; echo "prerelease=true"; } >> "$GITHUB_OUTPUT"
+            exit 0
           fi
-          if [ "${tag}" != "v${version}" ]; then
-            echo "::error::Tag ${tag} does not match Cargo.toml version v${version}"
+          tag="${GITHUB_REF_NAME}"
+          echo "tag=${tag} Cargo.toml=${manifest}"
+          if [[ "${tag}" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            if [[ "${manifest}" != "${BASH_REMATCH[1]}" ]]; then
+              echo "::error::Stable tag ${tag} needs Cargo.toml version ${BASH_REMATCH[1]}, found ${manifest}"
+              exit 1
+            fi
+            { echo "version=${manifest}"; echo "prerelease=false"; } >> "$GITHUB_OUTPUT"
+          elif [[ "${tag}" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-rc\.[0-9]+$ ]]; then
+            if [[ "${core}" != "${BASH_REMATCH[1]}" || ( "${manifest}" != "${core}" && "${manifest}" != "${core}-dev" ) ]]; then
+              echo "::error::RC tag ${tag} needs Cargo.toml ${BASH_REMATCH[1]}-dev or ${BASH_REMATCH[1]}, found ${manifest}"
+              exit 1
+            fi
+            { echo "version=${tag#v}"; echo "prerelease=true"; } >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Tag ${tag} is neither vX.Y.Z nor vX.Y.Z-rc.N"
             exit 1
           fi
 
@@ -70,6 +90,7 @@ jobs:
 
       - name: Build release binary
         env:
+          KFXL_BUILD_VERSION: ${{ needs.verify-tag.outputs.version }}
           KFXL_CHANNEL: stable
         run: cargo build --release --locked
 
@@ -138,6 +159,7 @@ jobs:
 
       - name: Build release binary
         env:
+          KFXL_BUILD_VERSION: ${{ needs.verify-tag.outputs.version }}
           KFXL_CHANNEL: stable
         run: cargo build --release --locked
 
@@ -146,7 +168,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $name = "keyframexl-windows-x86_64"
-          $ver = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches.Groups[1].Value
+          $ver = "${{ needs.verify-tag.outputs.version }}"
           $numVer = (($ver -split '-')[0]) + ".0"
 
           if (Test-Path dist) { Remove-Item -Recurse -Force dist }
@@ -183,7 +205,7 @@ jobs:
 
   publish:
     name: publish-release
-    needs: [release-linux, release-windows]
+    needs: [verify-tag, release-linux, release-windows]
     if: >-
       always() && startsWith(github.ref, 'refs/tags/v')
       && needs.release-linux.result == 'success'
@@ -198,6 +220,9 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          name: KeyFrameXL ${{ needs.verify-tag.outputs.version }}
+          prerelease: ${{ needs.verify-tag.outputs.prerelease == 'true' }}
+          make_latest: ${{ needs.verify-tag.outputs.prerelease == 'true' && 'false' || 'true' }}
           generate_release_notes: true
           files: |
             release-assets/keyframexl-linux-x86_64.tar.gz

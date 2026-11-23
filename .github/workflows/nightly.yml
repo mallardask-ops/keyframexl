@@ -1,7 +1,7 @@
 name: Nightly
 
 # Once a day (03:00 UTC) main publishes a nightly prerelease
-# (v<version>-nightly[.rc.N].<UTC yyyymmddHHMM>), but only when code changed
+# (v<Cargo.toml X.Y.Z>-nightly.<UTC yyyymmddHHMM>), but only when code changed
 # since the last nightly. Run it by hand from the Actions tab for a build now.
 # Stable releases still come from pushing a vX.Y.Z tag (release.yml). The
 # in-app updater follows nightlies when Settings → General → Nightly builds
@@ -63,17 +63,12 @@ jobs:
               exit 0
             fi
           fi
+          # Cargo.toml holds the version being prepared (X.Y.Z-dev between
+          # releases); the nightly is X.Y.Z-nightly.<UTC yyyymmddHHMM>.
           base=$(grep -m1 '^version' Cargo.toml | sed -E 's/version *= *"([^"]+)"/\1/')
-          if [[ "$base" == *-nightly* ]]; then
-            version="${base}.$(date -u +%Y%m%d%H%M)"
-            core="${base%%-*}"
-            numeric_version="${core}.0"
-          else
-            IFS=. read -r major minor patch <<< "$base"
-            next_patch=$((patch + 1))
-            version="${major}.${minor}.${next_patch}-nightly.$(date -u +%Y%m%d%H%M)"
-            numeric_version="${major}.${minor}.${next_patch}.0"
-          fi
+          core="${base%%-*}"
+          version="${core}-nightly.$(date -u +%Y%m%d%H%M)"
+          numeric_version="${core}.0"
           prev=$(git tag --sort=-creatordate --merged HEAD | grep -E '^v[0-9]' | head -n1 || true)
           {
             echo "skip=false"
