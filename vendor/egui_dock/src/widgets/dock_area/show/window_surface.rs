@@ -194,7 +194,21 @@ impl<Tab> DockArea<'_, Tab> {
             .collect();
         let others: Vec<Rect> = neighbors.iter().map(|(_, r)| *r).collect();
 
+        // Stacking: a window shown for the first time or asked to come forward
+        // goes on top of every other floating window.
+        let next_z = self
+            .dock_state
+            .valid_surface_indices()
+            .iter()
+            .filter_map(|&s| self.dock_state.get_window_state(s).map(|w| w.z()))
+            .max()
+            .unwrap_or(0)
+            + 1;
         let ws = self.dock_state.get_window_state_mut(surf_index).unwrap();
+        let mut raise_now = ws.take_raise();
+        if ws.z() == 0 {
+            ws.set_z(next_z);
+        }
         let mut rect = ws.resolve(bounds, min);
         let minimized = ws.is_minimized();
         if minimized {
@@ -249,6 +263,9 @@ impl<Tab> DockArea<'_, Tab> {
                 ui.set_clip_rect(outer.expand(frame.shadow.blur as f32 + frame.shadow.spread as f32));
                 ui.expand_to_include_rect(outer);
                 let layer = ui.layer_id();
+                if raise_now {
+                    ctx.move_to_top(layer);
+                }
                 let painter = ui.painter().clone();
                 let corner = CornerRadius::same(radius);
                 painter.add(frame.shadow.as_shape(rect, corner));
@@ -421,6 +438,7 @@ impl<Tab> DockArea<'_, Tab> {
                 let pressed = ui.input(|i| i.pointer.any_pressed());
                 if pointer.is_some_and(|p| pressed && outer.contains(p) && ctx.layer_id_at(p) == Some(layer)) {
                     ctx.move_to_top(layer);
+                    raise_now = true;
                 }
             });
 
@@ -433,6 +451,9 @@ impl<Tab> DockArea<'_, Tab> {
             }
         }
         let ws = self.dock_state.get_window_state_mut(surf_index).unwrap();
+        if raise_now {
+            ws.set_z(next_z);
+        }
         if let Some(r) = moved.filter(|r| *r != rect) {
             ws.set_rect_in(r, bounds);
             ctx.request_repaint();

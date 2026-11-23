@@ -122,6 +122,19 @@ impl<Tab> DockState<Tab> {
         }
     }
 
+    /// KeyFrameXL: the floating window in front of the others (not minimized).
+    pub fn top_window(&self) -> Option<SurfaceIndex> {
+        self.surfaces
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| match s {
+                Surface::Window(_, state) if !state.is_minimized() => Some((SurfaceIndex(i), state.z())),
+                _ => None,
+            })
+            .max_by_key(|(_, z)| *z)
+            .map(|(i, _)| i)
+    }
+
     /// Returns the viewport [`Rect`] and the `Tab` inside the focused leaf node or `None` if no node is in focus.
     #[inline]
     pub fn find_active_focused(&mut self) -> Option<(Rect, &mut Tab)> {
