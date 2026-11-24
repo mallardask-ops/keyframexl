@@ -2,7 +2,7 @@
 //! values; clips play the window `offset .. offset + length` of their pattern.
 
 use super::roll::{bar_pos, snap_floor, snap_round};
-use super::{App, Cmd, Kind, Slot, Tab, Tone, Tool, kit};
+use super::{App, Cmd, Kind, Slot, Snap, Tab, Tone, Tool, kit};
 use crate::theme as t;
 use eframe::egui::{self, Align2, CursorIcon, Pos2, Rect, Sense, Stroke, Ui, pos2, vec2};
 use keyframexl::sequence::{BAR, Clip, Tick};
@@ -551,6 +551,18 @@ impl App {
                     ui.close_menu();
                 }
                 ui.separator();
+                ui.menu_button(tr.roll_menu_snap, |ui| {
+                    kit::menu_style(ui);
+                    for s in Snap::ALL {
+                        if ui
+                            .selectable_label(self.snap == s, tr.snap_label(s))
+                            .clicked()
+                        {
+                            self.snap = s;
+                            ui.close_menu();
+                        }
+                    }
+                });
                 if kit::menu_check(ui, self.song_mode, tr.pl_play_song_mode, "").clicked() {
                     self.set_song_mode(!self.song_mode);
                     ui.close_menu();
@@ -607,6 +619,60 @@ impl App {
                 if kit::tip(r, format!("{}  {:?}", tr.tool_label(tl), tl.key())).clicked() {
                     tool = tl;
                 }
+            }
+            ui.spacing_mut().item_spacing.x = 6.0;
+            // Follow playhead toggle right in the Playlist toolbar.
+            let follow_on = self.follow;
+            let follow_btn = kit::button_sized(
+                ui,
+                vec2(28.0, kit::TOOL_H),
+                if follow_on {
+                    kit::Kind::Normal
+                } else {
+                    kit::Kind::Ghost
+                },
+                true,
+                tr.view_follow_playhead,
+                |p, face, ink| {
+                    let c = face.center();
+                    let col = if follow_on { t::brand() } else { ink };
+                    p.line_segment(
+                        [pos2(c.x - 5.0, c.y - 5.0), pos2(c.x - 5.0, c.y + 5.0)],
+                        Stroke::new(1.5_f32, col),
+                    );
+                    p.line_segment(
+                        [pos2(c.x - 1.0, c.y), pos2(c.x + 6.0, c.y)],
+                        Stroke::new(1.5_f32, col),
+                    );
+                    p.line_segment(
+                        [pos2(c.x + 3.0, c.y - 3.0), pos2(c.x + 6.0, c.y)],
+                        Stroke::new(1.5_f32, col),
+                    );
+                    p.line_segment(
+                        [pos2(c.x + 3.0, c.y + 3.0), pos2(c.x + 6.0, c.y)],
+                        Stroke::new(1.5_f32, col),
+                    );
+                },
+            );
+            if follow_btn.on_hover_text(tr.pl_follow_tip).clicked() {
+                self.follow = !self.follow;
+            }
+            // Snap selector right in the Playlist toolbar.
+            let mut next_snap = None;
+            kit::dropdown(ui, "playlist-snap", tr.snap_label(self.snap), 84.0, |ui| {
+                for s in Snap::ALL {
+                    if ui
+                        .selectable_label(self.snap == s, tr.snap_label(s))
+                        .clicked()
+                    {
+                        next_snap = Some(s);
+                        ui.close_menu();
+                    }
+                }
+            })
+            .on_hover_text(tr.roll_menu_snap);
+            if let Some(s) = next_snap {
+                self.snap = s;
             }
             ui.spacing_mut().item_spacing.x = 8.0;
             let r = kit::button(ui, tr.pl_add_clip, kit::Kind::Normal, true)

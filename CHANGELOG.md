@@ -7,6 +7,8 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 ## Unreleased
 
 ### Changed
+- **Playlist toolbar**: added a Snap grid selector and a *Follow playhead*
+  toggle directly to the Playlist header (and Snap to the Playlist menu).
 - **Piano roll performance**: large patterns with thousands of notes now scroll, zoom, and edit smoothly by rendering and hit-testing only the visible viewport.
 
 ### Fixed
