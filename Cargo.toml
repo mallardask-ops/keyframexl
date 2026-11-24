@@ -1,6 +1,6 @@
 [package]
 name = "keyframexl"
-version = "0.2.1"
+version = "0.2.2-dev"
 edition = "2024"
 description = "Native pattern-based music sequencer and DAW for Linux and Windows"
 license = "MIT"
