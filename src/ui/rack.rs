@@ -799,17 +799,17 @@ impl App {
         let mut step_map: std::collections::HashMap<(u64, usize), usize> =
             std::collections::HashMap::new();
         for (k, n) in pat.notes.iter().enumerate() {
-            let fits =
-                n.start % keyframexl::sequence::STEP == 0 && n.length == keyframexl::sequence::STEP;
-            *step_ok.entry(n.instrument).or_insert(true) &= fits;
-            if n.start % keyframexl::sequence::STEP == 0 {
-                step_map
-                    .entry((
-                        n.instrument,
-                        (n.start / keyframexl::sequence::STEP) as usize,
-                    ))
-                    .or_insert(k);
+            let mut fits = n.is_step_like();
+            if n.start % STEP == 0 {
+                let key = (n.instrument, (n.start / STEP) as usize);
+                if let std::collections::hash_map::Entry::Vacant(e) = step_map.entry(key) {
+                    e.insert(k);
+                } else {
+                    // Two notes on the same step (a chord) belong in the piano roll.
+                    fits = false;
+                }
             }
+            *step_ok.entry(n.instrument).or_insert(true) &= fits;
         }
         let is_step = |id: u64| {
             step_ok.get(&id).copied().unwrap_or(true)

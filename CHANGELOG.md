@@ -12,6 +12,9 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 - **Piano roll performance**: large patterns with thousands of notes now scroll, zoom, and edit smoothly by rendering and hit-testing only the visible viewport.
 
 ### Fixed
+- Channel Rack preview: melodic or chord patterns written with 1-step notes in
+  the Piano Roll now display the mini piano roll preview in the Channel Rack
+  instead of step pads.
 - Browser drag-and-drop: dragging samples, `.dwp` presets, or plugins out of
   the Browser no longer highlights text across neighboring rows, shows a
   floating drag label at the cursor, and clearly highlights insert vs. replace
