@@ -10,6 +10,9 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 - **Piano roll performance**: large patterns with thousands of notes now scroll, zoom, and edit smoothly by rendering and hit-testing only the visible viewport.
 
 ### Fixed
+- Playlist live editing: adding, moving, resizing, or deleting clips during Song
+  playback no longer cuts ringing voices or causes the playhead to jump when
+  the song length changes.
 - Export audio: the file name field can now be cleared completely while typing;
   an error is shown only if you try to start exporting with an empty name.
 - Cloning a plugin channel in the Channel Rack now gives the copy its own
