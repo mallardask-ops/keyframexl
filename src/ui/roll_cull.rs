@@ -336,12 +336,12 @@ impl RollIndex {
     ) -> Vec<u64> {
         let mut hits = Vec::new();
         self.for_each_overlapping(notes, t0, t1, |_, n| {
-            if n.instrument == inst
-                && n.end() > t0
-                && n.start <= t1
-                && (n.pitch as f32 + 1.0) > p0
-                && (n.pitch as f32) < p1
-            {
+            let pitch_hit = if p1 > p0 {
+                (n.pitch as f32 + 1.0) > p0 && (n.pitch as f32) < p1
+            } else {
+                (n.pitch as f32 + 1.0) >= p0 && (n.pitch as f32) <= p1
+            };
+            if n.instrument == inst && n.end() > t0 && n.start <= t1 && pitch_hit {
                 hits.push(n.id);
             }
         });

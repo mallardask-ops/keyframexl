@@ -10,6 +10,10 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 - **Piano roll performance**: large patterns with thousands of notes now scroll, zoom, and edit smoothly by rendering and hit-testing only the visible viewport.
 
 ### Fixed
+- Piano roll selection: `Ctrl+drag` box selection now works in Paint and Select
+  tools as well as Draw, `Ctrl+Shift+click` toggles individual notes in the
+  selection, and releasing a marquee outside the window no longer clears or
+  corrupts the selected notes.
 - Playlist live editing: adding, moving, resizing, or deleting clips during Song
   playback no longer cuts ringing voices or causes the playhead to jump when
   the song length changes.
