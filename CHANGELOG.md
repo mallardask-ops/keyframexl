@@ -10,6 +10,10 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 - **Piano roll performance**: large patterns with thousands of notes now scroll, zoom, and edit smoothly by rendering and hit-testing only the visible viewport.
 
 ### Fixed
+- Cloning a plugin channel in the Channel Rack now gives the copy its own
+  independent plugin instance instead of routing both channels' notes into the
+  first plugin; existing projects saved with duplicate plugin IDs are repaired
+  automatically on open.
 - Native Linux plugin windows built on VSTGUI (MT-PowerDrumKit and others) no
   longer go black after you switch to another tab and back, and react to the
   mouse without delay.

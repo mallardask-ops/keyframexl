@@ -1338,6 +1338,40 @@ fn create_automation_clip_from_a_control() {
 }
 
 #[test]
+fn cloning_plugin_channel_assigns_fresh_plugin_id() {
+    use keyframexl::sequence::{InstrumentKind, PluginRef};
+    let mut app = app();
+    let plugin = PluginRef {
+        id: 11,
+        format: "vst3".into(),
+        path: "/x/GrandPiano.vst3".into(),
+        name: "Grand Piano".into(),
+        vendor: String::new(),
+        state: String::new(),
+        outs: vec![],
+    };
+    let orig_id = app
+        .song
+        .add_channel("Grand Piano", InstrumentKind::Plugin { plugin });
+    app.song.plugin_ref_mut(11).unwrap().set_state(b"preset-1");
+    app.rack_sel = vec![orig_id];
+
+    app.clone_channels();
+
+    assert_eq!(app.rack_sel.len(), 1);
+    let clone_id = app.rack_sel[0];
+    assert_ne!(clone_id, orig_id);
+    let orig_plug = app.song.instrument(orig_id).unwrap().plugin().unwrap();
+    let clone_plug = app.song.instrument(clone_id).unwrap().plugin().unwrap();
+    assert_eq!(orig_plug.id, 11);
+    assert_ne!(
+        clone_plug.id, orig_plug.id,
+        "cloned plugin channel must get its own plugin instance id"
+    );
+    assert_eq!(clone_plug.state_bytes(), b"preset-1");
+}
+
+#[test]
 fn plugin_parameter_edits_undo_and_window_edits_are_kept() {
     use keyframexl::sequence::{InstrumentKind, PluginRef};
     let mut app = app();

@@ -1485,6 +1485,37 @@ impl Song {
         self.plugin_refs().iter().map(|p| p.id).max().unwrap_or(0) + 1
     }
 
+    /// Reassign duplicate (or zero) hosted plugin instance IDs across channels
+    /// and mixer effect slots so each channel/slot owns an independent instance.
+    pub fn ensure_unique_plugin_ids(&mut self) -> usize {
+        let mut seen = std::collections::HashSet::new();
+        let mut next = self.next_plugin_id();
+        let mut fixed = 0;
+        for inst in &mut self.instruments {
+            if let InstrumentKind::Plugin { plugin } = &mut inst.kind
+                && (plugin.id == 0 || !seen.insert(plugin.id))
+            {
+                plugin.id = next;
+                seen.insert(next);
+                next += 1;
+                fixed += 1;
+            }
+        }
+        for track in &mut self.mixer {
+            for slot in &mut track.fx {
+                if let Some(plugin) = &mut slot.plugin
+                    && (plugin.id == 0 || !seen.insert(plugin.id))
+                {
+                    plugin.id = next;
+                    seen.insert(next);
+                    next += 1;
+                    fixed += 1;
+                }
+            }
+        }
+        fixed
+    }
+
     pub fn add_sampler(&mut self, name: &str) -> u64 {
         self.add_channel(name, InstrumentKind::Sampler { preset: None })
     }
@@ -2643,6 +2674,45 @@ mod sharing_tests {
         assert!(Arc::ptr_eq(&snapshot.patterns[0], &song.patterns[0]));
         assert!(!Arc::ptr_eq(&snapshot.patterns[1], &song.patterns[1]));
         assert!(song.patterns[1].notes.iter().all(|n| n.instrument != other));
+    }
+
+    #[test]
+    fn ensure_unique_plugin_ids_repairs_duplicates_across_channels_and_fx() {
+        let mut song = Song::default();
+        let make = |id: u64, name: &str| PluginRef {
+            id,
+            format: "vst3".into(),
+            path: "/plugins/GrandPiano.vst3".into(),
+            name: name.into(),
+            vendor: String::new(),
+            state: "abc".into(),
+            outs: vec![],
+        };
+        let a = song.add_channel(
+            "Grand Piano",
+            InstrumentKind::Plugin {
+                plugin: make(7, "Grand Piano"),
+            },
+        );
+        let b = song.add_channel(
+            "Grand Piano 2",
+            InstrumentKind::Plugin {
+                plugin: make(7, "Grand Piano"),
+            },
+        );
+        song.mixer[1]
+            .fx
+            .push(crate::fx::FxSlot::plugin(make(7, "Grand Piano FX")));
+
+        assert_eq!(song.ensure_unique_plugin_ids(), 2);
+        let id_a = song.instrument(a).unwrap().plugin().unwrap().id;
+        let id_b = song.instrument(b).unwrap().plugin().unwrap().id;
+        let id_fx = song.mixer[1].fx[0].plugin.as_ref().unwrap().id;
+        assert_eq!(id_a, 7);
+        assert_ne!(id_a, id_b);
+        assert_ne!(id_a, id_fx);
+        assert_ne!(id_b, id_fx);
+        assert_eq!(song.ensure_unique_plugin_ids(), 0);
     }
 
     /// `cargo test --release --lib -- --ignored --nocapture edit_cost`
