@@ -6,6 +6,9 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 
 ## Unreleased
 
+### Changed
+- **Piano roll performance**: large patterns with thousands of notes now scroll, zoom, and edit smoothly by rendering and hit-testing only the visible viewport.
+
 ## 0.2.1 — 2026-11-24
 
 Everything since 0.2.0, gathered from the nightlies and release candidates up

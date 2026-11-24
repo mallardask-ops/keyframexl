@@ -27,6 +27,7 @@ mod rack;
 pub(crate) mod record;
 mod riff_machine;
 pub(crate) mod roll;
+mod roll_cull;
 mod sampler;
 mod script;
 mod settings_ui;
@@ -172,6 +173,8 @@ pub struct App {
     pub(crate) roll_view: std::collections::HashMap<u64, roll::RollView>,
     /// Selected notes (ids) of the roll being edited.
     pub(crate) roll_sel: Vec<u64>,
+    /// Cached sorted range index for piano roll culling and hit-testing.
+    pub(crate) roll_index: roll_cull::RollIndex,
     riff: Option<riff_machine::Session>,
     /// Where a dropped MIDI clip lands, as drawn last frame: channel rack
     /// rows and piano rolls (screen rect, channel).
@@ -1241,6 +1244,7 @@ impl App {
             roll_inst: BASS,
             roll_view: Default::default(),
             roll_sel: Vec::new(),
+            roll_index: Default::default(),
             riff: None,
             midi_zones: Vec::new(),
             playlist_drop: None,

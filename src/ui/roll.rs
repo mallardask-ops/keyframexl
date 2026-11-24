@@ -459,7 +459,16 @@ impl App {
         }
     }
 
+    fn sync_roll_index(&mut self) {
+        let pid = self.selected;
+        if let Some(pat) = self.song.patterns.iter().find(|p| p.id == pid) {
+            self.roll_index.sync(pid, &pat.notes);
+        }
+    }
+
     fn roll_body(&mut self, ui: &mut Ui, inst: &mut u64) {
+        let prof = super::roll_cull::RollProfileScope::begin();
+        self.sync_roll_index();
         self.midi_zones
             .push((ui.clip_rect().intersect(ui.max_rect()), *inst));
         let channels = self.channels();
@@ -717,19 +726,9 @@ impl App {
         let ghost_key = ui.id().with("roll-ghost-click");
         let pointer = resp.interact_pointer_pos();
         let ghost = pointer.and_then(|q| {
-            if !self.ghosts {
-                return None;
-            }
-            self.pattern()
-                .notes
-                .iter()
-                .rev()
-                .find(|n| {
-                    n.instrument != me
-                        && g.visible(n.pitch)
-                        && g.note_rect(n.start, n.length, n.pitch).contains(q)
-                })
-                .map(|n| n.instrument)
+            self.ghosts
+                .then(|| self.roll_index.ghost_at(&self.pattern().notes, me, &g, q))
+                .flatten()
         });
         let now = ui.input(|i| i.time);
         let prior: Option<(u64, u64, u64, u64, f64)> = ui.data(|d| d.get_temp(ghost_key));
@@ -780,6 +779,7 @@ impl App {
             && pointer.is_some_and(|q| self.note_at(&g, q).is_none());
         let count = self.pattern().notes.len();
         self.roll_input(ui, &p, &g, &resp, scrollbar_busy);
+        self.sync_roll_index();
         if new_on_ghost
             && self.pattern().notes.len() > count
             && let (Some(target), Some(&id)) = (ghost, self.roll_sel.first())
@@ -853,6 +853,7 @@ impl App {
         if g.lane.height() > 0.0 {
             self.event_lane(ui, &p, &g);
         }
+        prof.finish(self.pattern().notes.len());
     }
 
     /// The bar between the grid and the event lane: drag to size the lane,
@@ -2090,10 +2091,16 @@ impl App {
             });
         let range = g.bottom..=g.top;
         let on_screen = |s: Tick, l: Tick| s + l >= g.x0 && s <= g.end();
+        let mut vis = Vec::new();
+        self.roll_index
+            .visible_indices_ordered(&pat.notes, g.x0, g.end(), &mut vis);
+        let sel = super::roll_cull::SelLookup::new(&self.roll_sel);
         if self.ghosts {
-            for n in pat.notes.iter().filter(|n| {
-                n.instrument != me && range.contains(&n.pitch) && on_screen(n.start, n.length)
-            }) {
+            for &i in &vis {
+                let n = &pat.notes[i];
+                if n.instrument == me || !range.contains(&n.pitch) {
+                    continue;
+                }
                 let r = g.note_rect(n.start, n.length, n.pitch);
                 let (top, fill, _) = note_colors(n.color);
                 p.rect_filled(r, 3.0, fill.gamma_multiply(0.25));
@@ -2120,16 +2127,9 @@ impl App {
                 p.rect_filled(r, 3.0, t::wait_soft());
             }
             p.rect_stroke(r, 3.0, Stroke::new(1.5_f32, col), egui::StrokeKind::Inside);
-            if let Some(src) = pat
-                .notes
-                .iter()
-                .filter(|n| {
-                    n.group == s.group
-                        && n.instrument == s.instrument
-                        && n.start <= s.start
-                        && n.end() > s.start
-                })
-                .max_by_key(|n| n.pitch)
+            if let Some(src) =
+                self.roll_index
+                    .slide_source(&pat.notes, s.instrument, s.group, s.start)
                 && range.contains(&src.pitch)
             {
                 p.line_segment(
@@ -2150,12 +2150,14 @@ impl App {
                 );
             }
         }
-        for n in pat.notes.iter().filter(|n| {
-            n.instrument == me && range.contains(&n.pitch) && on_screen(n.start, n.length)
-        }) {
+        for &i in &vis {
+            let n = &pat.notes[i];
+            if n.instrument != me || !range.contains(&n.pitch) {
+                continue;
+            }
             let r = g.note_rect(n.start, n.length, n.pitch);
             let soft = (1.0 - n.velocity as f32 / 127.0) * 0.7;
-            let selected = self.roll_sel.contains(&n.id);
+            let selected = sel.contains(n.id);
             let face = if n.muted {
                 p.rect_stroke(
                     r,
@@ -2166,16 +2168,21 @@ impl App {
                 r
             } else {
                 let (top, fill, edge) = note_colors(n.color);
-                kit::raised(
-                    p,
-                    r,
-                    4.0,
-                    kit::mix(top, t::brand_soft(), soft),
-                    kit::mix(fill, t::brand_soft(), soft),
-                    edge,
-                    false,
-                    1.0,
-                )
+                if r.width() <= 6.0 || r.height() <= 6.0 {
+                    p.rect_filled(r, 1.0, kit::mix(fill, t::brand_soft(), soft));
+                    r
+                } else {
+                    kit::raised(
+                        p,
+                        r,
+                        4.0,
+                        kit::mix(top, t::brand_soft(), soft),
+                        kit::mix(fill, t::brand_soft(), soft),
+                        edge,
+                        false,
+                        1.0,
+                    )
+                }
             };
             if selected {
                 p.rect_stroke(
@@ -2253,12 +2260,16 @@ impl App {
     fn note_at(&self, g: &Geom, p: Pos2) -> Option<Note> {
         let (at, pitch) = g.locate(p)?;
         let me = self.roll_inst;
-        self.pattern()
-            .notes
-            .iter()
-            .rev()
-            .find(|n| n.instrument == me && n.pitch == pitch && at >= n.start && at < n.end())
-            .copied()
+        let notes = &self.pattern().notes;
+        if self.roll_index.matches(self.selected, notes) {
+            self.roll_index.note_at(notes, me, at, pitch)
+        } else {
+            notes
+                .iter()
+                .rev()
+                .find(|n| n.instrument == me && n.pitch == pitch && at >= n.start && at < n.end())
+                .copied()
+        }
     }
 
     /// The lyric being typed, over its note. Enter or Tab keeps it and moves
@@ -2784,19 +2795,9 @@ impl App {
                 let cur_pitch = g.pitch_f32(q.y);
                 let (t0, t1) = ((*from_tick).min(cur_tick), (*from_tick).max(cur_tick));
                 let (p0, p1) = (from_pitch.min(cur_pitch), from_pitch.max(cur_pitch));
-                let hits: Vec<u64> = self
-                    .pattern()
-                    .notes
-                    .iter()
-                    .filter(|n| {
-                        n.instrument == me
-                            && n.end() > t0
-                            && n.start <= t1
-                            && (n.pitch as f32 + 1.0) > p0
-                            && (n.pitch as f32) < p1
-                    })
-                    .map(|n| n.id)
-                    .collect();
+                let hits = self
+                    .roll_index
+                    .marquee_hits(&self.pattern().notes, me, t0, t1, p0, p1);
                 self.roll_sel = if *add { base.clone() } else { Vec::new() };
                 for id in hits {
                     if !self.roll_sel.contains(&id) {
@@ -2919,19 +2920,9 @@ impl App {
                 let cur_pitch = g.pitch_f32(q.y);
                 let (t0, t1) = (from_tick.min(cur_tick), from_tick.max(cur_tick));
                 let (p0, p1) = (from_pitch.min(cur_pitch), from_pitch.max(cur_pitch));
-                let hits: Vec<u64> = self
-                    .pattern()
-                    .notes
-                    .iter()
-                    .filter(|n| {
-                        n.instrument == me
-                            && n.end() > t0
-                            && n.start <= t1
-                            && (n.pitch as f32 + 1.0) > p0
-                            && (n.pitch as f32) < p1
-                    })
-                    .map(|n| n.id)
-                    .collect();
+                let hits = self
+                    .roll_index
+                    .marquee_hits(&self.pattern().notes, me, t0, t1, p0, p1);
                 self.roll_sel = if add { base } else { Vec::new() };
                 for id in hits {
                     if !self.roll_sel.contains(&id) {
@@ -3530,26 +3521,27 @@ impl App {
             );
         }
         let me = self.roll_inst;
-        let sel = self.roll_sel.clone();
+        let sel = super::roll_cull::SelLookup::new(&self.roll_sel);
         let base = if target.centred() {
             area.center().y
         } else {
             area.bottom()
         };
-        for n in self
-            .pattern()
-            .notes
-            .iter()
-            .filter(|n| n.instrument == me && n.start + n.length >= g.x0 && n.start <= g.end())
-        {
-            let x = g.x(n.start) + 3.0;
-            let y = area.bottom() - target.get(n) * area.height();
-            let on = sel.len() <= 1 || sel.contains(&n.id);
-            let col = if on { t::brand() } else { t::strong() };
-            lp.line_segment([pos2(x, base), pos2(x, y)], Stroke::new(2.0_f32, col));
-            lp.circle_filled(pos2(x, y), 4.0, col);
-            lp.circle_filled(pos2(x, y), 1.5, t::brand_edge());
-        }
+        let pad = ((8.0 / g.cell.max(0.5)) * STEP as f32).ceil() as Tick + 1;
+        let (t_lo, t_hi) = ((g.x0 - pad).max(0), g.end() + pad);
+        self.roll_index
+            .for_each_starting_in(&self.pattern().notes, t_lo, t_hi, |_, n| {
+                if n.instrument != me {
+                    return;
+                }
+                let x = g.x(n.start) + 3.0;
+                let y = area.bottom() - target.get(n) * area.height();
+                let on = sel.len() <= 1 || sel.contains(n.id);
+                let col = if on { t::brand() } else { t::strong() };
+                lp.line_segment([pos2(x, base), pos2(x, y)], Stroke::new(2.0_f32, col));
+                lp.circle_filled(pos2(x, y), 4.0, col);
+                lp.circle_filled(pos2(x, y), 1.5, t::brand_edge());
+            });
         let resp = ui.interact(area, ui.id().with("event-lane"), Sense::click_and_drag());
         let Some(pos) = resp.interact_pointer_pos() else {
             if let Some(h) = resp.hover_pos()
@@ -3581,16 +3573,18 @@ impl App {
             // If multiple notes are selected and the hovered stem belongs to the
             // selection, restrict to selected notes at this start; otherwise edit
             // any note stem under the pointer (even when another single note is selected).
-            let filter_sel = sel.len() > 1 && sel.contains(&n.id);
-            let ids: Vec<u64> = self
-                .pattern()
-                .notes
-                .iter()
-                .filter(|x| {
-                    x.instrument == me && x.start == n.start && (!filter_sel || sel.contains(&x.id))
-                })
-                .map(|x| x.id)
-                .collect();
+            let filter_sel = self.roll_sel.len() > 1 && self.roll_sel.contains(&n.id);
+            let mut ids = Vec::new();
+            self.roll_index.for_each_starting_in(
+                &self.pattern().notes,
+                n.start,
+                n.start,
+                |_, x| {
+                    if x.instrument == me && (!filter_sel || self.roll_sel.contains(&x.id)) {
+                        ids.push(x.id);
+                    }
+                },
+            );
             for id in ids {
                 if let Some(x) = self.note_mut(id) {
                     target.set(x, v);
@@ -3626,16 +3620,14 @@ impl App {
         let tr = self.tr();
         let me = self.roll_inst;
         // ±6 semitones, ±1 octave once a visible point goes further.
-        let wide = self
-            .pattern()
-            .notes
-            .iter()
-            .filter(|n| n.instrument == me)
-            .any(|n| {
-                self.pattern()
-                    .pitch
-                    .get(&n.id)
-                    .is_some_and(|c| c.points.iter().any(|p| p.cents.abs() > 600.0))
+        let wide = !self.pattern().pitch.is_empty()
+            && self.pattern().notes.iter().any(|n| {
+                n.instrument == me
+                    && self
+                        .pattern()
+                        .pitch
+                        .get(&n.id)
+                        .is_some_and(|c| c.points.iter().any(|p| p.cents.abs() > 600.0))
             });
         let range: f32 = if wide { 1200.0 } else { 600.0 };
         let half = area.height() / 2.0;
@@ -3672,19 +3664,19 @@ impl App {
             );
             return;
         }
-        let notes: Vec<Note> = self
-            .pattern()
-            .notes
-            .iter()
-            .filter(|n| n.instrument == me && n.start + n.length >= g.x0 && n.start <= g.end())
-            .copied()
-            .collect();
-        let sel = self.roll_sel.clone();
+        let mut notes = Vec::new();
+        self.roll_index
+            .for_each_overlapping(&self.pattern().notes, g.x0, g.end(), |_, n| {
+                if n.instrument == me {
+                    notes.push(*n);
+                }
+            });
+        let sel = super::roll_cull::SelLookup::new(&self.roll_sel);
         // Where each point is on screen: (note id, point index, position).
         let mut handles: Vec<(u64, usize, Pos2)> = Vec::new();
         for n in &notes {
             let (x0, x1) = (g.x(n.start), g.x(n.start + n.length));
-            let on = sel.is_empty() || sel.contains(&n.id);
+            let on = sel.len() == 0 || sel.contains(n.id);
             let col = if on { t::brand() } else { t::strong() };
             let curve = self.pattern().pitch.get(&n.id).cloned().unwrap_or_default();
             let mut pts = Vec::new();
@@ -3953,17 +3945,21 @@ impl App {
     /// directly editable even when another single note stays selected.
     fn lane_note_near(&self, g: &Geom, x: f32) -> Option<Note> {
         let me = self.roll_inst;
+        let notes = &self.pattern().notes;
+        let sel = super::roll_cull::SelLookup::new(&self.roll_sel);
+        if self.roll_index.matches(self.selected, notes) {
+            return self.roll_index.lane_note_near(notes, me, &sel, g, x);
+        }
         let find = |only_selected: bool| {
-            self.pattern()
-                .notes
+            notes
                 .iter()
-                .filter(|n| n.instrument == me && (!only_selected || self.roll_sel.contains(&n.id)))
+                .filter(|n| n.instrument == me && (!only_selected || sel.contains(n.id)))
                 .map(|n| ((g.x(n.start) + 3.0 - x).abs(), *n))
                 .filter(|(d, _)| *d < 10.0)
                 .min_by(|a, b| a.0.total_cmp(&b.0))
                 .map(|(_, n)| n)
         };
-        if self.roll_sel.len() > 1 {
+        if sel.len() > 1 {
             find(true).or_else(|| find(false))
         } else {
             find(false)
