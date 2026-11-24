@@ -4,76 +4,108 @@ Every push to `main` ships a nightly prerelease (`v<version>-nightly.<date>` or 
 versions below are the stable tags. The 0.2.0 plan with its tasks is in
 [docs/v0.2.0.md](docs/v0.2.0.md).
 
-## Unreleased (0.2.1)
+## Unreleased
 
-See [docs/v0.2.1.md](docs/v0.2.1.md) for the Windows port and 0.2.1 plan.
+## 0.2.1 — 2026-11-24
 
-### Added
-- **Universal automation & MIDI controller linking**: right-click almost any
-  knob or control — including Song BPM (tempo automation clips in the Playlist),
-  Channel Rack Swing, Mixer stereo separation / 3-band strip EQ / FX mix / sends,
-  all Sampler program & zone knobs, all Tide Synth & built-in FX knobs, Vocal
-  parameters, and Forge character knobs — to create an automation clip or link
-  it to a MIDI controller.
+Everything since 0.2.0, gathered from the nightlies and release candidates up
+to `v0.2.1-rc.3`. Stable 0.2.1 ships Linux (`keyframexl-linux-x86_64.tar.gz`)
+only; the Windows port continues on the nightly channel until verified on real
+Windows hardware ([docs/v0.2.1.md](docs/v0.2.1.md)).
 
-### Changed
-- **Keyframe Forge Studio UI & presets rework**: replaced the vertical form and fixed game-style buttons with a tabbed studio workspace (`Design`, `Presets & Blocks`, `Variations`, `Export`) featuring an interactive multi-layer timeline (drag to move/trim, drop audio files, lock layers), live playhead, `Loop` / `Round-Robin` / `Auto-Audition` / `A-B` controls, one-click curve shapes with `Pan` and `Morph` lines, searchable presets & Layer Building Blocks, WYSIWYG / Sound Pack export, and one-click `→ Playlist` rendering; rebuilt built-in UI, footsteps, weapons, doors, magic, and seamless-loop ambience presets on the new Modal, Granular, FM/Unison, and stereo noise engine.
-
-### Engine and internals
-- **Forge DSP & data model rework (PR 1)**: expanded Forge to 8 layers with
-  2-op FM / unison / shape on oscillators, a physical `Modal` material
-  resonator (metal, wood, glass, stone, membrane), a `Grain` procedural &
+### New features
+- **Native PipeWire output.** KeyFrameXL runs as its own PipeWire node
+  (cpal 0.18), with ALSA as the fallback. The buffer setting controls the
+  node's quantum, xruns are counted, and the device list shows hardware
+  outputs and *System default* instead of ALSA plug names. `realtime-dbus` is
+  kept off so Wine/yabridge plugins remain stable.
+- **Universal automation & MIDI controller linking.** Right-click almost any
+  knob or control to create a Playlist automation clip or link it to a MIDI
+  controller: Song BPM (tempo automation clips), Channel Rack Swing, Mixer
+  stereo separation / 3-band strip EQ / FX mix / sends, all Sampler program
+  and zone knobs, all KeyFrame Tide and built-in FX knobs, Vocal parameters,
+  and Forge character knobs.
+- **Keyframe Forge Studio rework.** Expanded to an 8-layer DSP engine with
+  2-op FM, unison and shape on oscillators, a physical *Modal* material
+  resonator (metal, wood, glass, stone, membrane), a *Grain* procedural and
   sample-cloud texture engine, stereo/burst noise, non-destructive sample
-  trimming, `Pan` and `Morph` curves with one-click curve presets, equal-power
-  `Seamless Loop` rendering with integrated LUFS metering, per-layer
-  variation locking, and WYSIWYG / Sound Pack export with 24-bit WAV and
-  peak/LUFS loudness targets (preserving 100% `.kfxl` / `.kfxforge`
-  compatibility).
-- **Cross-OS `.kfxl` compatibility, native Windows FL Studio lookup & docs (W5)**:
-  `resolve_plugin_path` now resolves hosted plugins across Linux and Windows by
-  CLAP `#id`, cross-OS bundle/library stem (`.dll` ↔ `.so`, `.vst3`, `.clap`),
-  or display name/vendor when opening a project saved on another OS; bundle and
-  convolution IR paths normalize `/` ↔ `\`; `flp::resolve_path` and FLP sample /
-  DirectWave lookup work natively on Windows without a Wine prefix; Steinberg
-  ASIO trademark attribution added to *About* and `README.md`; English and
-  Ukrainian manuals updated for Linux and Windows.
-- **Out-of-process plugin bridge on Windows (W4)**: abstracted `src/bridge/ipc/`
-  with a native Windows backend using pagefile-backed `CreateFileMappingW` /
-  `MapViewOfFile`, auto-reset named `CreateEventW`, full-duplex overlapped Named
-  Pipes (`\\.\pipe\kfxl-bridge-...`), `CREATE_NO_WINDOW`, and a Job Object
-  (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`), with the full `bridge::tests` suite
-  running on `windows-latest`.
-- **Native Windows plugin hosting (W3)**: modularized `src/plugins/` into
-  `mod`, `scan`, `host`, `wine`, `editor_x11`, and `editor_win32`; migrated
-  `src/vst2.rs` and `src/clap.rs` to `libloading`; enabled VST3, CLAP (`win32`
-  GUI + DPI scale), and VST2 (`.dll`) scanning and hosting on Windows with
-  embedded child `HWND` editors (`SetWindowRgn` clipping under egui popups,
-  Per-Monitor v2 DPI tracking, and DAW hotkey forwarding).
-- **Windows self-updater & packaging (W2)**: `src/updater.rs` now picks the
-  target-OS archive (`keyframexl-windows-x86_64.zip` + `.sha256` on Windows,
-  ignoring `-setup.exe`), extracts `.zip` archives with the `zip` crate, checks
-  PE (`MZ`) magic, replaces the running executable via `keyframexl.old.exe`
-  (cleaned up on next launch), and ships portable `.zip` plus a user-scope Inno
-  Setup installer (`assets/keyframexl.iss`, `.kfxl` association, Start Menu
-  shortcut) in both nightly and stable releases.
-- **Static MP3 export (LAME)**: `mp3lame-sys` is now statically compiled into
-  KeyFrameXL on Linux and Windows, so MP3 export works out of the box without
-  installing an external `lame` package or DLL.
-- **Windows desktop & audio layer (W1)**: `src/platform/{linux,windows}.rs`
-  (ShellExecuteW, Windows Registry dark/light theme, `GetUserDefaultLocaleName`,
-  Windows CJK fonts, `%LOCALAPPDATA%` log file, `ExitProcess`, hidden console
-  for `ffmpeg`, embedded `.ico` icon and `windows_subsystem = "windows"`), plus
-  WASAPI & ASIO driver selection with multi-channel / `I32` / `I16` output
-  support.
-- **MIDI export with mix, automation, slides and markers**: `File → Export → MIDI` now writes channel + mixer volume (CC 7) and pan (CC 10), song-mode volume/pan automation clips, piano-roll slides and fine pitch as `PitchBend` (with RPN 0,0 bend sensitivity when over ±2 semitones), per-note pan and Mod X / Mod Y (CC 74 / CC 71), and playlist section markers; melodic tracks skip GM drum channel 10, and MIDI import now also restores volume/pan on split drum channels and recognises RPN 0,0.
-- **Native PipeWire output**: the program is a PipeWire node of its own
-  (cpal 0.18), with ALSA as the fallback; the buffer setting is the node's
-  quantum, xruns are counted, and the device list shows hardware outputs
-  and *System default* instead of ALSA plug names. `realtime-dbus` is kept
-  off so `RLIMIT_RTTIME` is never lowered to one quantum (which killed
-  yabridge/Wine plugins during initialization).
-- **Windows foundation (W0)**: platform-gated dependencies and stubs so the
-  library and application build and pass tests on `windows-latest` in CI.
+  trimming, *Pan* and *Morph* curves, and equal-power *Seamless Loops* with
+  integrated LUFS metering. The editor is now a tabbed Studio workspace
+  (*Design*, *Presets & Blocks*, *Variations*, *Export*) with an interactive
+  multi-layer timeline (drag to move/trim, drop audio files, lock layers),
+  live playhead, *Loop* / *Round-Robin* / *Auto-Audition* / *A–B* controls,
+  searchable presets and Layer Building Blocks, WYSIWYG / Sound Pack 24-bit
+  WAV export with peak/LUFS loudness targets, one-click *→ Playlist* rendering,
+  and factory presets rebuilt on the new engine.
+- **MP3 / M4A / AAC / AIFF decoding & Audio Clip patterns.** Load MP3, M4A,
+  AAC and AIFF files directly alongside WAV/FLAC/OGG, and place FL-style
+  Audio Clip patterns directly on the Playlist.
+- **Built-in static MP3 export.** LAME (`mp3lame-sys`) is statically compiled
+  into KeyFrameXL, so MP3 export works out of the box without installing an
+  external `lame` package or DLL.
+- **Full MIDI export** (*File → Export → MIDI*): writes channel and mixer
+  volume (CC 7) and pan (CC 10), song-mode automation clips, piano-roll slides
+  and fine pitch as `PitchBend` (with RPN 0,0 bend sensitivity when over ±2
+  semitones), per-note pan and Mod X / Mod Y (CC 74 / CC 71), and playlist
+  section markers; melodic tracks skip GM drum channel 10.
+
+### Interface
+- **Playlist time selection**: drag either edge on the ruler to resize it.
+- **Playlist start marker**: a ruler click sets it; *Stop* returns there and
+  *Play* starts there until it is moved or removed (ruler right-click).
+- **Mixer effect reordering & replacement**: drag an effect slot onto another
+  or right-click → *Move up* / *Move down* (automation and open effect windows
+  follow the slot), and right-click → *Replace* to swap an effect in place for
+  another built-in or plugin.
+- **Mixer route button**: shows where each insert is routed (`→ M`, `→ 2`,
+  `→ M+1`), adds an outline when routed outside Master, and lists every
+  destination with its send level in the tooltip.
+- **Live MIDI key highlight**: held MIDI keys light up live on the Piano Roll
+  and Sampler keyboards.
+- **Update channel defaults**: new installs of a stable release follow stable
+  updates only; nightly builds keep following nightlies. Existing settings
+  keep their choice.
+
+### Fixes
+- **Playlist loop drag**: the playhead no longer slides along while a time
+  selection is dragged during playback; the new loop takes effect on release.
+- **Interaction & playback fixes**: prevented click-through behind floating
+  controls, refined Piano Roll UX, fixed lead-channel behaviour, and fixed
+  playlist clip memory retention (`ed42070`).
+- **Offline plugin export**: improved reliability when rendering hosted and
+  bridged plugins offline, including SSD5.
+- **MIDI import**: reads pitch bends back as piano-roll slides and fine pitch
+  (so slides survive a MIDI export and re-import), restores volume and pan on
+  split drum channels, and recognises RPN 0,0 bend sensitivity.
+- **Window focus & toolbar buttons**: clicking a toolbar button brings its
+  covered floating window to the front, and clicking a docked panel's button
+  when hidden under a floating window folds that window to its title bar.
+- **Minimum window sizes & layout**: Settings, Export and Project info windows
+  can no longer be shrunk until controls are clipped, long hints on the
+  Plugins page wrap, and the Ukrainian "ready" count shows its number.
+- **OS-aware updater**: the updater skips releases that have no build for the
+  current OS (keeping Windows installs on nightlies while 0.2.1 stable is
+  Linux-only).
+- **Wine/yabridge plugin stability on Linux**: fixed plugin initialization
+  crashes by dropping `cpal/realtime-dbus` and restoring inherited
+  `RLIMIT_RTTIME`.
+
+### Windows port (nightly preview) & cross-OS compatibility
+- **Cross-OS `.kfxl` compatibility**: opening a project saved on another OS
+  resolves plugins by CLAP `#id`, cross-OS bundle/library stem (`.dll` ↔
+  `.so`/`.vst3`/`.clap`), or display name/vendor; bundle and convolution IR
+  paths normalize `/` ↔ `\`; FL Studio sample and DirectWave lookup works
+  natively on Windows without a Wine prefix.
+- **Native Windows support (nightly channel)**: WASAPI and ASIO audio output
+  (with Steinberg ASIO trademark attribution in *About* and `README.md`),
+  native VST3, CLAP (`win32` GUI + DPI scale) and VST2 (`.dll`) hosting with
+  embedded Win32 `HWND` editors and Per-Monitor v2 DPI, out-of-process plugin
+  bridge via Named Pipes / `CreateFileMappingW` / Job Objects, `.zip` +
+  `.old.exe` self-updater, portable `.zip` and user-scope Inno Setup installer,
+  and updated English and Ukrainian manuals.
+- **Release & CI**: daily scheduled nightlies instead of per-push releases,
+  `vX.Y.Z-rc.N` release candidates, `Cargo.toml` as the single version source,
+  and full Linux + Windows integration test suites in CI.
 
 ## 0.2.0 — 2026-11-21
 
@@ -150,18 +182,6 @@ still in review and not part of this release.
   (`scripts/ux/shots.sh`).
 
 ### Interface
-- Playlist time selection: drag either edge on the ruler to resize it.
-- Playlist start marker: a ruler click sets it; Stop returns there and Play
-  starts there until it is moved or removed (ruler right-click).
-- Mixer effects can be reordered: drag a slot onto another, or right-click →
-  Move up / Move down; automation and open effect windows follow the slot.
-- Mixer slot right-click → Replace swaps the effect for another built-in or
-  plugin.
-- Mixer: an insert's route button names where it goes ("→ M", "→ 2",
-  "→ M+1"), is outlined when it does not go only to Master, and its tooltip
-  lists every destination with the send level.
-- A new install of a stable release gets only stable updates; a nightly build
-  keeps following nightlies. Existing settings keep their choice.
 - **Browser**: *All*, *Library* and *Files* sources with one search field,
   a Stop button while a sample previews, favourites and root folders in
   your own order (dragged, remembered), folders sorted by name, type, date
@@ -198,21 +218,6 @@ still in review and not part of this release.
 - The dark theme's Play button text is a little more readable.
 
 ### Fixes
-- The playlist playhead no longer slides along while a time selection is
-  dragged during playback; the new loop takes effect on release.
-- MIDI import reads pitch bends back: a bend ramp becomes a piano-roll slide
-  and a bend held from a note's start becomes its fine pitch, so slides survive
-  a MIDI export and re-import (before, every bend was dropped).
-- A window toolbar button brings its floating window out from under another
-  one; before, it only took focus (or closed the hidden window).
-- A toolbar button for a docked panel hidden under a floating window (e.g. a
-  maximized Piano roll over the Channel rack) folds that window to its title
-  bar; the window's own button opens it again in front.
-- The updater no longer offers a release that has no build for your system
-  (0.2.1 stable is Linux only; Windows stays on nightly builds).
-- Settings, Export and Project info windows can no longer be shrunk until
-  their content is cut off; long hints on the Plugins page wrap.
-- Plugins page: the Ukrainian "ready" count shows its number.
 - **Crash** when a tab group or a floating window was dragged by its grip
   over another panel (since 0.1.1).
 - **Export and FL Studio channels' pitch.** An export started with the pitch
