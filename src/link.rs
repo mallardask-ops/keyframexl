@@ -2,7 +2,8 @@
 //!
 //! The UI sends each edited song as an `Arc<Song>`; the audio thread takes
 //! the newest one at the start of every block. Replaced songs travel back on a
-//! second ring so the UI frees them: the audio thread never deallocates.
+//! wait-free intrusive trash stack of pre-allocated nodes so the UI frees them:
+//! the audio thread never allocates or deallocates, even if the UI stalls.
 //!
 //! Each song carries a generation number. Live parameter commands (a fader or
 //! knob moved between two song snapshots) ride a third ring stamped with the
@@ -14,52 +15,143 @@ use crate::engine::Engine;
 use crate::fx::{FxKind, FxState};
 use crate::sequence::Song;
 use rtrb::{Consumer, Producer, PushError, RingBuffer};
+use std::ptr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicPtr, Ordering};
 
 /// Songs in flight before the audio thread drains them.
 const SEND_CAP: usize = 64;
-/// Replaced songs waiting for the UI to free them.
-const TRASH_CAP: usize = 256;
 /// Live parameter commands in flight before the audio thread drains them.
 const PARAM_CAP: usize = 512;
 
+/// Pre-allocated intrusive node owned by the audio thread until pushed onto a
+/// [`TrashStack`] for the UI thread to free.
+struct TrashNode<T> {
+    value: T,
+    next: *mut TrashNode<T>,
+}
+
+// SAFETY: `TrashNode<T>` owns `T` and an intrusive link pointer used only to
+// transfer ownership through `TrashStack<T>`. Moving a node across threads is
+// sound whenever `T: Send`.
+unsafe impl<T: Send> Send for TrashNode<T> {}
+
+impl<T> TrashNode<T> {
+    fn new(value: T) -> Self {
+        Self {
+            value,
+            next: ptr::null_mut(),
+        }
+    }
+}
+
+/// Unbounded lock-free deferred-drop stack (wait-free for a single producer).
+///
+/// The non-RT thread pre-allocates each [`TrashNode`] before sending it to the
+/// audio thread. When the audio thread is done with a node, [`TrashStack::push`]
+/// links it onto `head` via atomic CAS (at most two attempts against a
+/// concurrent [`TrashStack::drain`]): zero allocations, zero frees, no locks,
+/// and no fixed capacity that can overflow.
+struct TrashStack<T> {
+    head: AtomicPtr<TrashNode<T>>,
+}
+
+// SAFETY: `TrashStack<T>` transfers exclusive ownership of `Box<TrashNode<T>>`
+// between threads via Acquire/Release operations on `head`.
+unsafe impl<T: Send> Send for TrashStack<T> {}
+unsafe impl<T: Send> Sync for TrashStack<T> {}
+
+impl<T> TrashStack<T> {
+    fn new() -> Self {
+        Self {
+            head: AtomicPtr::new(ptr::null_mut()),
+        }
+    }
+
+    /// Push a pre-allocated node onto the trash stack.
+    /// Never allocates, never frees, and never blocks.
+    fn push(&self, node: Box<TrashNode<T>>) {
+        let ptr = Box::into_raw(node);
+        let mut head = self.head.load(Ordering::Acquire);
+        loop {
+            // SAFETY: `ptr` is uniquely owned by this call until the
+            // compare_exchange below publishes it to `self.head`.
+            unsafe {
+                (*ptr).next = head;
+            }
+            match self
+                .head
+                .compare_exchange(head, ptr, Ordering::Release, Ordering::Acquire)
+            {
+                Ok(_) => return,
+                Err(actual) => head = actual,
+            }
+        }
+    }
+
+    /// Reclaim and drop every node currently in the stack, invoking `f` with
+    /// each value before its node is freed. Call on a non-RT thread.
+    fn drain_with(&self, mut f: impl FnMut(T)) -> usize {
+        let mut head = self.head.swap(ptr::null_mut(), Ordering::Acquire);
+        let mut count = 0;
+        while !head.is_null() {
+            // SAFETY: `swap` transferred exclusive ownership of the entire
+            // chain starting at `head` to this call, and every node was
+            // allocated with `Box::into_raw(Box::new(...))`.
+            let node = unsafe { Box::from_raw(head) };
+            head = node.next;
+            f(node.value);
+            count += 1;
+        }
+        count
+    }
+
+    /// Reclaim and drop every node currently in the stack.
+    fn drain(&self) -> usize {
+        self.drain_with(|_| {})
+    }
+}
+
+impl<T> Drop for TrashStack<T> {
+    fn drop(&mut self) {
+        self.drain();
+    }
+}
+
 /// UI side: send songs, free the ones the audio thread has replaced.
 pub struct SongSender {
-    tx: Producer<(u64, Arc<Song>)>,
-    trash: Consumer<Arc<Song>>,
+    tx: Producer<(u64, Box<TrashNode<Arc<Song>>>)>,
+    trash: Arc<TrashStack<Arc<Song>>>,
     /// The newest song when the ring was full; retried by [`SongSender::tick`].
-    pending: Option<(u64, Arc<Song>)>,
+    pending: Option<(u64, Box<TrashNode<Arc<Song>>>)>,
     /// Generation of the newest song handed to `send` (0 = the initial song).
     generation: u64,
 }
 
 /// Audio side: the song to play now.
 pub struct SongReceiver {
-    rx: Consumer<(u64, Arc<Song>)>,
-    trash: Producer<Arc<Song>>,
-    current: Arc<Song>,
+    rx: Consumer<(u64, Box<TrashNode<Arc<Song>>>)>,
+    trash: Arc<TrashStack<Arc<Song>>>,
+    current: Box<TrashNode<Arc<Song>>>,
     /// Generation of `current`.
     generation: u64,
-    /// Old songs kept because the trash ring was full; handed back later.
-    held: Option<Arc<Song>>,
 }
 
 pub fn song_link(song: Song) -> (SongSender, SongReceiver) {
     let (tx, rx) = RingBuffer::new(SEND_CAP);
-    let (trash_tx, trash_rx) = RingBuffer::new(TRASH_CAP);
+    let trash = Arc::new(TrashStack::new());
     (
         SongSender {
             tx,
-            trash: trash_rx,
+            trash: Arc::clone(&trash),
             pending: None,
             generation: 0,
         },
         SongReceiver {
             rx,
-            trash: trash_tx,
-            current: Arc::new(song),
+            trash,
+            current: Box::new(TrashNode::new(Arc::new(song))),
             generation: 0,
-            held: None,
         },
     )
 }
@@ -68,7 +160,7 @@ impl SongSender {
     /// Queue `song` for the audio thread. Never blocks; latest wins when full.
     pub fn send(&mut self, song: Arc<Song>) {
         self.generation += 1;
-        self.pending = Some((self.generation, song));
+        self.pending = Some((self.generation, Box::new(TrashNode::new(song))));
         self.tick();
     }
 
@@ -86,11 +178,7 @@ impl SongSender {
         {
             self.pending = Some(msg);
         }
-        let mut freed = 0;
-        while self.trash.pop().is_ok() {
-            freed += 1;
-        }
-        freed
+        self.trash.drain()
     }
 
     pub fn has_pending(&self) -> bool {
@@ -100,7 +188,7 @@ impl SongSender {
 
 impl SongReceiver {
     /// Audio thread, once per block: switch to the newest song. No allocation
-    /// and no deallocation happen here.
+    /// and no deallocation happen here, even if the UI has stopped draining.
     pub fn update(&mut self) -> &Song {
         self.update_with_changed().0
     }
@@ -108,17 +196,14 @@ impl SongReceiver {
     /// [`SongReceiver::update`], also saying whether a newer song arrived in
     /// this call (the caller then drops live overrides the song now carries).
     pub fn update_with_changed(&mut self) -> (&Song, bool) {
-        if let Some(old) = self.held.take() {
-            self.give_back(old);
-        }
         let mut changed = false;
-        while let Ok((generation, song)) = self.rx.pop() {
-            let old = std::mem::replace(&mut self.current, song);
+        while let Ok((generation, node)) = self.rx.pop() {
+            let old = std::mem::replace(&mut self.current, node);
             self.generation = generation;
             changed = true;
-            self.give_back(old);
+            self.trash.push(old);
         }
-        (&self.current, changed)
+        (&self.current.value, changed)
     }
 
     /// Generation of the song playing now (0 = the initial song).
@@ -127,20 +212,7 @@ impl SongReceiver {
     }
 
     pub fn current(&self) -> &Song {
-        &self.current
-    }
-
-    fn give_back(&mut self, old: Arc<Song>) {
-        if self.held.is_some() {
-            // The UI is not collecting and one song is already held: keep the
-            // newest held, let the older drop. Only reachable if the UI froze
-            // for hundreds of edits.
-            self.held = Some(old);
-            return;
-        }
-        if let Err(PushError::Full(old)) = self.trash.push(old) {
-            self.held = Some(old);
-        }
+        &self.current.value
     }
 }
 
@@ -209,13 +281,20 @@ pub struct FxMsg {
     pub state: FxState,
 }
 
+/// Internal ring payload carrying a pre-allocated [`TrashNode`] so the audio
+/// thread can defer-drop the replaced [`FxState`] without allocating or freeing.
+struct FxEnvelope {
+    msg: FxMsg,
+    trash_slot: Box<TrashNode<Option<FxState>>>,
+}
+
 const FX_CAP: usize = 256;
 
 /// UI side of effect states: builds a state when a slot's effect changes
 /// (delay lines and reverb buffers allocate) and frees replaced ones.
 pub struct FxSender {
-    tx: Producer<FxMsg>,
-    trash: Consumer<FxState>,
+    tx: Producer<FxEnvelope>,
+    trash: Arc<TrashStack<Option<FxState>>>,
     /// Kind and impulse response last sent per mixer track and slot.
     sent: Vec<Vec<Option<(FxKind, Option<std::path::PathBuf>)>>>,
     /// The same for synth channels' own effects: (channel, slot) → kind.
@@ -225,29 +304,38 @@ pub struct FxSender {
 
 /// Audio side: installs states before the block runs.
 pub struct FxReceiver {
-    rx: Consumer<FxMsg>,
-    trash: Producer<FxState>,
+    rx: Consumer<FxEnvelope>,
+    trash: Arc<TrashStack<Option<FxState>>>,
 }
 
 pub fn fx_link(rate: u32) -> (FxSender, FxReceiver) {
     let (tx, rx) = RingBuffer::new(FX_CAP);
-    let (trash_tx, trash_rx) = RingBuffer::new(FX_CAP);
+    let trash = Arc::new(TrashStack::new());
     (
         FxSender {
             tx,
-            trash: trash_rx,
+            trash: Arc::clone(&trash),
             sent: Vec::new(),
             sent_synth: Vec::new(),
             rate: rate as f32,
         },
-        FxReceiver {
-            rx,
-            trash: trash_tx,
-        },
+        FxReceiver { rx, trash },
     )
 }
 
 impl FxSender {
+    /// Free replaced effect states returned by the audio thread.
+    /// Returns how many replaced states were freed.
+    pub fn tick(&mut self) -> usize {
+        let mut freed = 0;
+        self.trash.drain_with(|old| {
+            if old.is_some() {
+                freed += 1;
+            }
+        });
+        freed
+    }
+
     /// Call before sending `song`: every slot whose effect changed gets a
     /// fresh state. Returns how many were sent.
     /// Forget the state sent for a slot, so the next sync rebuilds it (a new
@@ -261,7 +349,7 @@ impl FxSender {
     }
 
     pub fn sync(&mut self, song: &Song) -> usize {
-        while self.trash.pop().is_ok() {}
+        self.tick();
         let mut count = 0;
         if self.sent.len() < song.mixer.len() {
             self.sent.resize_with(song.mixer.len(), Vec::new);
@@ -276,15 +364,18 @@ impl FxSender {
                 if sent[k].as_ref() == Some(&want) {
                     continue;
                 }
-                let msg = FxMsg {
-                    track: t,
-                    slot: k,
-                    synth: None,
-                    state: FxState::for_slot(slot, self.rate),
+                let envelope = FxEnvelope {
+                    msg: FxMsg {
+                        track: t,
+                        slot: k,
+                        synth: None,
+                        state: FxState::for_slot(slot, self.rate),
+                    },
+                    trash_slot: Box::new(TrashNode::new(None)),
                 };
                 // Ring full: leave it unsent; the next sync retries (the engine
                 // builds its own meanwhile).
-                if self.tx.push(msg).is_ok() {
+                if self.tx.push(envelope).is_ok() {
                     sent[k] = Some(want);
                     count += 1;
                 }
@@ -302,13 +393,16 @@ impl FxSender {
                 if known.is_some_and(|n| self.sent_synth[n].2 == slot.kind) {
                     continue;
                 }
-                let msg = FxMsg {
-                    track: 0,
-                    slot: k,
-                    synth: Some(inst.id),
-                    state: FxState::for_slot(slot, self.rate),
+                let envelope = FxEnvelope {
+                    msg: FxMsg {
+                        track: 0,
+                        slot: k,
+                        synth: Some(inst.id),
+                        state: FxState::for_slot(slot, self.rate),
+                    },
+                    trash_slot: Box::new(TrashNode::new(None)),
                 };
-                if self.tx.push(msg).is_ok() {
+                if self.tx.push(envelope).is_ok() {
                     match known {
                         Some(n) => self.sent_synth[n].2 = slot.kind,
                         None => self.sent_synth.push((inst.id, k, slot.kind)),
@@ -322,17 +416,20 @@ impl FxSender {
 }
 
 impl FxReceiver {
-    /// Audio thread: install every waiting state; replaced ones go back.
+    /// Audio thread: install every waiting state; replaced ones go back
+    /// without allocating or freeing, even if the UI has stopped draining.
     pub fn drain(&mut self, engine: &mut Engine) {
-        while let Ok(msg) = self.rx.pop() {
+        while let Ok(FxEnvelope {
+            msg,
+            mut trash_slot,
+        }) = self.rx.pop()
+        {
             let old = match msg.synth {
                 Some(inst) => engine.adopt_synth_fx(inst, msg.slot, msg.state),
                 None => engine.adopt_fx(msg.track, msg.slot, msg.state),
             };
-            if let Some(old) = old {
-                // Trash full means the UI froze; dropping here is the last resort.
-                let _ = self.trash.push(old);
-            }
+            trash_slot.value = old;
+            self.trash.push(trash_slot);
         }
     }
 }
@@ -505,7 +602,7 @@ mod tests {
     }
 }
 
-/// Counts heap allocations made on the current thread while armed.
+/// Counts heap allocations and frees made on the current thread while armed.
 #[cfg(test)]
 mod alloc_probe {
     use std::alloc::{GlobalAlloc, Layout, System};
@@ -513,28 +610,29 @@ mod alloc_probe {
 
     thread_local! {
         static ARMED: Cell<bool> = const { Cell::new(false) };
-        static COUNT: Cell<usize> = const { Cell::new(0) };
+        static ALLOCS: Cell<usize> = const { Cell::new(0) };
+        static DEALLOCS: Cell<usize> = const { Cell::new(0) };
     }
 
     struct Counting;
     unsafe impl GlobalAlloc for Counting {
         unsafe fn alloc(&self, l: Layout) -> *mut u8 {
-            note();
+            note(&ALLOCS);
             unsafe { System.alloc(l) }
         }
         unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
-            note();
+            note(&DEALLOCS);
             unsafe { System.dealloc(p, l) }
         }
         unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
-            note();
+            note(&ALLOCS);
             unsafe { System.realloc(p, l, n) }
         }
     }
-    fn note() {
+    fn note(counter: &'static std::thread::LocalKey<Cell<usize>>) {
         let _ = ARMED.try_with(|a| {
             if a.get() {
-                let _ = COUNT.try_with(|c| c.set(c.get() + 1));
+                let _ = counter.try_with(|c| c.set(c.get() + 1));
             }
         });
     }
@@ -542,13 +640,20 @@ mod alloc_probe {
     #[global_allocator]
     static A: Counting = Counting;
 
-    /// Heap allocations and frees made by `f` on this thread.
-    pub fn count(f: impl FnOnce()) -> usize {
-        COUNT.with(|c| c.set(0));
+    /// `(allocs, deallocs)` made by `f` on this thread.
+    pub fn counts(f: impl FnOnce()) -> (usize, usize) {
+        ALLOCS.with(|c| c.set(0));
+        DEALLOCS.with(|c| c.set(0));
         ARMED.with(|a| a.set(true));
         f();
         ARMED.with(|a| a.set(false));
-        COUNT.with(|c| c.get())
+        (ALLOCS.with(|c| c.get()), DEALLOCS.with(|c| c.get()))
+    }
+
+    /// Heap allocations and frees made by `f` on this thread.
+    pub fn count(f: impl FnOnce()) -> usize {
+        let (a, d) = counts(f);
+        a + d
     }
 }
 
@@ -686,5 +791,130 @@ mod realtime_tests {
         assert!(changed);
         engine.clear_live_params();
         assert_eq!(engine.live_param(Target::MixerVolume { track: 1 }), None);
+    }
+
+    #[test]
+    fn trash_overflow_never_allocates_or_frees_on_audio_thread() {
+        // Exceed the former TRASH_CAP (256) and FX_CAP (256) without ever
+        // draining trash on the UI side. Every Song has its own COW-edited
+        // pattern with heap-allocated notes, and every FxState is a Reverb or
+        // Delay with heap-allocated delay lines, so dropping any of them on
+        // the audio thread would trigger `dealloc`.
+        const UPDATES: usize = 512;
+
+        let mut base = Song::default();
+        for s in 0..16 {
+            base.add_note(1, Note::new(1, s * STEP, STEP, 60, 100));
+        }
+        base.instruments[0].mixer = 1;
+        base.mixer[1].fx.push(FxSlot::new(FxKind::Reverb));
+        base.validate().unwrap();
+
+        let (mut fx_tx, mut fx_rx) = fx_link(48_000);
+        let (mut tx, mut rx) = song_link(base.clone());
+        let mut engine = Engine::new(48_000);
+        engine.reserve(128, 1024);
+        let mut out = vec![0.0f32; 1024];
+        let mut at = 0u64;
+
+        // Warm up any process-wide lazy caches (e.g. synth/forge tables) on an
+        // initial block before arming `alloc_probe` for the overflow loop.
+        fx_tx.sync(&base);
+        fx_rx.drain(&mut engine);
+        assert_eq!(fx_tx.tick(), 0);
+        at = engine.process(rx.current(), 1, false, at, &mut out, true);
+
+        let mut weaks = Vec::with_capacity(UPDATES);
+        let mut total_allocs = 0usize;
+        let mut total_deallocs = 0usize;
+
+        for i in 0..UPDATES {
+            // UI side (outside alloc_probe): build a new COW-edited Song and a
+            // new heap-allocating FxState, pushing directly without draining
+            // trash (simulating a stalled UI reaper).
+            let kind = if i % 2 == 0 {
+                FxKind::Reverb
+            } else {
+                FxKind::Delay
+            };
+            let slot = FxSlot::new(kind);
+
+            let mut next = base.clone();
+            next.tempo = 100.0 + (i as f64) * 0.25;
+            next.add_note(1, Note::new(1, (i as i64 % 16) * STEP, STEP, 64, 90));
+            next.mixer[1].fx[0] = slot.clone();
+            let arc = Arc::new(next);
+            weaks.push(Arc::downgrade(&arc));
+            tx.generation += 1;
+            tx.tx
+                .push((tx.generation, Box::new(TrashNode::new(arc))))
+                .expect("send ring drained every iteration");
+
+            let envelope = FxEnvelope {
+                msg: FxMsg {
+                    track: 1,
+                    slot: 0,
+                    synth: None,
+                    state: FxState::for_slot(&slot, 48_000.0),
+                },
+                trash_slot: Box::new(TrashNode::new(None)),
+            };
+            fx_tx
+                .tx
+                .push(envelope)
+                .expect("fx ring drained every iteration");
+
+            // Audio thread: install FX, swap Song, render a block.
+            let (allocs, deallocs) = alloc_probe::counts(|| {
+                fx_rx.drain(&mut engine);
+                let s = rx.update();
+                at = engine.process(s, 1, false, at, &mut out, true);
+            });
+            total_allocs += allocs;
+            total_deallocs += deallocs;
+        }
+
+        assert_eq!(
+            (total_allocs, total_deallocs),
+            (0, 0),
+            "audio thread allocated ({total_allocs}) or freed ({total_deallocs}) during trash overflow"
+        );
+        // Every replaced song must still be alive until the UI drains trash.
+        assert!(
+            weaks.iter().all(|w| w.upgrade().is_some()),
+            "replaced songs were dropped before UI tick()"
+        );
+
+        // UI finally catches up and frees all replaced songs and FX states.
+        assert_eq!(tx.tick(), UPDATES);
+        assert_eq!(fx_tx.tick(), UPDATES);
+        // All replaced songs (all except the currently playing last one) are gone.
+        assert!(weaks[..UPDATES - 1].iter().all(|w| w.upgrade().is_none()));
+        assert!(weaks[UPDATES - 1].upgrade().is_some());
+    }
+
+    #[test]
+    fn dropping_link_reclaims_undrained_trash() {
+        let (mut tx, mut rx) = song_link(Song::default());
+        let mut weaks = Vec::new();
+        for i in 0..300 {
+            let arc = Arc::new(Song {
+                tempo: 90.0 + i as f64,
+                ..Song::default()
+            });
+            weaks.push(Arc::downgrade(&arc));
+            tx.generation += 1;
+            tx.tx
+                .push((tx.generation, Box::new(TrashNode::new(arc))))
+                .unwrap();
+            rx.update();
+        }
+        assert!(weaks.iter().all(|w| w.upgrade().is_some()));
+        drop(tx);
+        drop(rx);
+        assert!(
+            weaks.iter().all(|w| w.upgrade().is_none()),
+            "undrained trash nodes must be freed when the link is dropped"
+        );
     }
 }
