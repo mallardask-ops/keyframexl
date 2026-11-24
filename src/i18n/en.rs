@@ -2124,6 +2124,7 @@ pub const EN: Strings = Strings {
     exp_split_tip: "Also a file per used mixer insert, named after the track. Master effects stay out of the stems, as in FL.",
     exp_start: "Start",
     exp_choose_format: "Choose WAV, FLAC or MP3",
+    exp_name_empty: "Enter a file name before exporting.",
     exp_tail_leave: "Leave remainder",
     exp_tail_cut: "Cut remainder",
     exp_tail_wrap: "Wrap remainder",

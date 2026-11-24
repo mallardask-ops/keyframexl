@@ -40,6 +40,8 @@ impl Default for ExportPrefs {
 
 pub struct ExportDialog {
     pub path: PathBuf,
+    /// Editable file stem shown in the dialog; may be temporarily empty while typing.
+    pub(crate) file_stem: String,
     pub song_mode: bool,
     /// Song mode, only the playlist's time selection.
     pub selection: bool,
@@ -119,8 +121,13 @@ impl App {
         }
         // A time selection in the song is what gets exported first (FL).
         let selection = song_mode && self.song.loop_range.is_some();
+        let file_stem = path
+            .file_stem()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
         self.export = Some(ExportDialog {
             path,
+            file_stem,
             song_mode,
             selection,
             running: None,
@@ -201,9 +208,15 @@ impl App {
     /// Start rendering on a worker thread.
     pub(crate) fn start_export(&mut self) {
         let tr = self.tr();
-        if self.export.is_none() {
+        let Some(d) = &mut self.export else {
+            return;
+        };
+        if clean_stem(&d.file_stem).trim().is_empty() {
+            d.error = Some(tr.exp_name_empty.into());
             return;
         }
+        d.path = renamed(&d.path, &d.file_stem);
+        d.error = None;
         if let Some(error) = self
             .song
             .instruments
@@ -493,8 +506,9 @@ impl App {
         self.poll_export();
         let Some(d) = &self.export else { return };
         let running = d.running.is_some();
-        let (path, song_mode, progress, stage, error) = (
+        let (path, file_stem, song_mode, progress, stage, error) = (
             d.path.clone(),
+            d.file_stem.clone(),
             d.song_mode,
             d.progress,
             d.stage.clone(),
@@ -651,16 +665,12 @@ impl App {
                                 ui.add_enabled_ui(!running, |ui| {
                                     label(ui, tr.exp_sec_file);
                                     // The name matters most; the folder is context.
-                                    let stem = path
-                                        .file_stem()
-                                        .map(|n| n.to_string_lossy().to_string())
-                                        .unwrap_or_default();
                                     let folder = path
                                         .parent()
                                         .map(|p| p.display().to_string())
                                         .unwrap_or_default();
                                     ui.horizontal(|ui| {
-                                        let mut name = stem.clone();
+                                        let mut name = file_stem.clone();
                                         let w = (ui.available_width() - 110.0).max(120.0);
                                         let r = ui
                                             .add(
@@ -911,7 +921,13 @@ impl App {
         if let Some(name) = new_stem
             && let Some(d) = &mut self.export
         {
-            d.path = renamed(&d.path, &name);
+            d.file_stem = clean_stem(&name);
+            if !d.file_stem.trim().is_empty() {
+                d.path = renamed(&d.path, &d.file_stem);
+                if d.error.as_deref() == Some(tr.exp_name_empty) {
+                    d.error = None;
+                }
+            }
         }
         if pick_path {
             let name = path
@@ -924,7 +940,14 @@ impl App {
                 .save_file()
                 && let Some(d) = &mut self.export
             {
+                d.file_stem = p
+                    .file_stem()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
                 d.path = p;
+                if d.error.as_deref() == Some(tr.exp_name_empty) {
+                    d.error = None;
+                }
             }
         }
         if start {
@@ -943,13 +966,16 @@ impl App {
     }
 }
 
+fn clean_stem(stem: &str) -> String {
+    stem.chars()
+        .filter(|c| !matches!(c, '/' | '\\' | '\0'))
+        .collect()
+}
+
 /// `path` with its file name replaced by `stem` (path separators removed),
 /// keeping the folder and extension. An empty name keeps the old one.
 pub(super) fn renamed(path: &std::path::Path, stem: &str) -> PathBuf {
-    let stem: String = stem
-        .chars()
-        .filter(|c| !matches!(c, '/' | '\\' | '\0'))
-        .collect();
+    let stem = clean_stem(stem);
     if stem.trim().is_empty() {
         return path.to_path_buf();
     }
