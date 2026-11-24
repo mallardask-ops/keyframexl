@@ -2248,6 +2248,7 @@ pub const UK: Strings = Strings {
     exp_split_tip: "А також файл для кожного використаного інсерта мікшера, названий за доріжкою. Ефекти майстра не потрапляють у стеми, як у FL.",
     exp_start: "Почати",
     exp_choose_format: "Виберіть WAV, FLAC або MP3",
+    exp_name_empty: "Введіть назву файлу перед експортом.",
     exp_tail_leave: "Лишити залишок",
     exp_tail_cut: "Обрізати залишок",
     exp_tail_wrap: "Загорнути залишок",

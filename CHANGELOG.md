@@ -10,6 +10,8 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 - **Piano roll performance**: large patterns with thousands of notes now scroll, zoom, and edit smoothly by rendering and hit-testing only the visible viewport.
 
 ### Fixed
+- Export audio: the file name field can now be cleared completely while typing;
+  an error is shown only if you try to start exporting with an empty name.
 - Cloning a plugin channel in the Channel Rack now gives the copy its own
   independent plugin instance instead of routing both channels' notes into the
   first plugin; existing projects saved with duplicate plugin IDs are repaired

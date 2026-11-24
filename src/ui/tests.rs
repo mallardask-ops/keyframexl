@@ -2057,6 +2057,22 @@ fn export_file_name_edit_keeps_folder_and_extension() {
 }
 
 #[test]
+fn export_allows_clearing_file_name_and_errors_only_on_start() {
+    let mut app = App::with_song(Song::default(), None);
+    app.open_export(std::path::PathBuf::from("/music/beats/loop.wav"), false);
+    {
+        let d = app.export.as_mut().unwrap();
+        assert_eq!(d.file_stem, "loop");
+        d.file_stem.clear();
+    }
+    app.start_export();
+    let d = app.export.as_ref().unwrap();
+    assert_eq!(d.file_stem, "");
+    assert_eq!(d.error.as_deref(), Some(app.tr().exp_name_empty));
+    assert!(d.stage.is_empty());
+}
+
+#[test]
 fn manual_window_edge_drag_keeps_other_axis() {
     let mut app = App::with_song(Song::default(), None);
     app.show_manual = true;
