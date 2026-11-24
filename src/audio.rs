@@ -847,6 +847,7 @@ impl Audio {
     /// Once per UI frame: retry a pending song, free replaced ones.
     pub fn tick(&self) {
         if let Ok(mut l) = self.link.lock() {
+            l.0.tick();
             l.1.tick();
         }
         // Instances the audio thread let go of are dropped here (they may block).

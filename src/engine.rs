@@ -1507,7 +1507,9 @@ impl Engine {
         slot: usize,
         state: crate::fx::FxState,
     ) -> Option<crate::fx::FxState> {
-        let slots = self.fx.get_mut(track)?;
+        let Some(slots) = self.fx.get_mut(track) else {
+            return Some(state);
+        };
         if slot >= slots.len() {
             if slot >= slots.capacity() {
                 return Some(state);

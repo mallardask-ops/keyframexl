@@ -13,6 +13,9 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 - Native Linux plugin windows built on VSTGUI (MT-PowerDrumKit and others) no
   longer go black after you switch to another tab and back, and react to the
   mouse without delay.
+- Audio playback no longer frees replaced song snapshots or effect states on
+  the real-time audio thread even if the interface stalls during rapid edits,
+  preventing sudden dropouts.
 
 ## 0.2.1 — 2026-11-24
 
