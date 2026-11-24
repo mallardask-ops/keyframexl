@@ -935,31 +935,40 @@ impl App {
                 || row_drop
                     .dnd_hover_payload::<super::browser::PluginDrag>()
                     .is_some();
-            let place = ui.input(|i| i.pointer.hover_pos()).map(|q| {
-                let f = (q.y - slot.top()) / slot.height();
-                if f < 0.25 {
-                    Some(n)
-                } else if f > 0.75 {
-                    Some(n + 1)
-                } else {
-                    None
-                }
-            });
+            let place = ui
+                .ctx()
+                .pointer_interact_pos()
+                .or_else(|| ui.input(|i| i.pointer.hover_pos()))
+                .map(|q| {
+                    let f = (q.y - slot.top()) / slot.height();
+                    if f < 0.25 {
+                        Some(n)
+                    } else if f > 0.75 {
+                        Some(n + 1)
+                    } else {
+                        None
+                    }
+                });
             if dragging {
                 match place.flatten() {
                     Some(at) => {
                         let ly = if at == n { slot.top() } else { slot.bottom() };
                         fixed_painter.line_segment(
                             [pos2(left + 4.0, ly), pos2(right, ly)],
-                            Stroke::new(2.5_f32, t::text()),
+                            Stroke::new(2.5_f32, t::brand()),
                         );
-                        fixed_painter.circle_filled(pos2(left + 4.0, ly), 4.0, t::text());
+                        fixed_painter.circle_filled(pos2(left + 4.0, ly), 4.5, t::brand());
                     }
                     None => {
+                        fixed_painter.rect_filled(
+                            row_rect.expand(1.0),
+                            6.0,
+                            t::brand().gamma_multiply(0.16),
+                        );
                         fixed_painter.rect_stroke(
                             row_rect.expand(1.0),
                             6.0,
-                            Stroke::new(1.5_f32, t::text()),
+                            Stroke::new(2.0_f32, t::brand()),
                             egui::StrokeKind::Outside,
                         );
                     }
@@ -990,8 +999,8 @@ impl App {
                 } else {
                     self.drop_file_on_channel(id, path);
                 }
-            }
-            if let Some(drag) = row_drop.dnd_release_payload::<super::browser::PluginDrag>() {
+            } else if let Some(drag) = row_drop.dnd_release_payload::<super::browser::PluginDrag>()
+            {
                 let plugin = &drag.0;
                 self.collect_plugin_states();
                 // FL renames the channel to the plugin unless the user renamed it.

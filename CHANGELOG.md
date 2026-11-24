@@ -10,6 +10,10 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 - **Piano roll performance**: large patterns with thousands of notes now scroll, zoom, and edit smoothly by rendering and hit-testing only the visible viewport.
 
 ### Fixed
+- Browser drag-and-drop: dragging samples, `.dwp` presets, or plugins out of
+  the Browser no longer highlights text across neighboring rows, shows a
+  floating drag label at the cursor, and clearly highlights insert vs. replace
+  drop targets in the Channel Rack.
 - Piano roll playhead in Song mode: skips clips on muted playlist tracks, stays
   visible when paused at a playlist position, and works with *Follow playhead*.
 - Piano roll selection: `Ctrl+drag` box selection now works in Paint and Select

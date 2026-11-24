@@ -394,6 +394,10 @@ impl App {
             .id_salt(("browser-list", tab))
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                // Prevent egui's default label text-selection from highlighting
+                // rows while dragging samples, .dwp presets, or plugins out of
+                // the browser.
+                ui.style_mut().interaction.selectable_labels = false;
                 if tab == 2 {
                     self.files_tab(ui, &q);
                     return;
@@ -817,6 +821,24 @@ impl App {
         }
     }
 
+    /// Floating pill following the cursor while dragging an item out of the Browser.
+    fn paint_drag_ghost(ctx: &egui::Context, pos: egui::Pos2, label: &str) {
+        egui::Area::new(egui::Id::new("kfxl-browser-drag-ghost"))
+            .order(egui::Order::Tooltip)
+            .interactable(false)
+            .fixed_pos(pos + egui::vec2(14.0, 14.0))
+            .show(ctx, |ui| {
+                egui::Frame::NONE
+                    .fill(t::surface())
+                    .stroke(egui::Stroke::new(1.5_f32, t::brand()))
+                    .corner_radius(4.0)
+                    .inner_margin(egui::Margin::symmetric(8, 4))
+                    .show(ui, |ui| {
+                        ui.label(RichText::new(label).font(t::medium(12.5)).color(t::text()));
+                    });
+            });
+    }
+
     /// One file row inside `browser_directory` (shared by top-level and subfolders).
     fn browser_file_row(&mut self, ui: &mut Ui, path: &Path, name: &str) {
         let tr = self.tr();
@@ -824,6 +846,7 @@ impl App {
         let label = name.to_owned();
         let r = ui.add(
             egui::Label::new(RichText::new(label).font(t::sans(13.0)))
+                .selectable(false)
                 .sense(egui::Sense::click_and_drag()),
         );
         // Presets (FL: click a channel preset to add it, double-click a mixer state to load it).
@@ -872,6 +895,11 @@ impl App {
         ));
         if r.drag_started() {
             egui::DragAndDrop::set_payload(ui.ctx(), FileDrag(path.clone()));
+        }
+        if r.dragged()
+            && let Some(pos) = ui.ctx().pointer_interact_pos()
+        {
+            Self::paint_drag_ghost(ui.ctx(), pos, name);
         }
         if r.double_clicked() {
             self.load_file(path.clone(), false);
@@ -1067,7 +1095,11 @@ impl App {
                     .push_id(fav, |ui| {
                         ui.horizontal(|ui| {
                             let handle = ui
-                                .add(egui::Label::new("⠿").sense(egui::Sense::drag()))
+                                .add(
+                                    egui::Label::new("⠿")
+                                        .selectable(false)
+                                        .sense(egui::Sense::drag()),
+                                )
                                 .on_hover_and_drag_cursor(egui::CursorIcon::Grab)
                                 .on_hover_text("Drag to reorder favorites");
                             handle.dnd_set_drag_payload(FavoriteOrder(fav.clone()));
@@ -1255,6 +1287,7 @@ impl App {
         let preset = keyframexl::preset::Kind::of_path(&path).is_some();
         let r = ui.add(
             egui::Label::new(RichText::new(format!("{mark}{name}")).font(t::sans(13.0)))
+                .selectable(false)
                 .sense(egui::Sense::click_and_drag()),
         );
         if r.clicked() {
@@ -1269,6 +1302,11 @@ impl App {
         }
         if r.drag_started() {
             egui::DragAndDrop::set_payload(ui.ctx(), FileDrag(path.clone()));
+        }
+        if r.dragged()
+            && let Some(pos) = ui.ctx().pointer_interact_pos()
+        {
+            Self::paint_drag_ghost(ui.ctx(), pos, &name);
         }
         r.context_menu(|ui| {
             super::kit::menu_style(ui);
