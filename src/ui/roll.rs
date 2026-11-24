@@ -2390,7 +2390,7 @@ impl App {
             ui.input(|i| (i.modifiers.alt, i.modifiers.shift, i.modifiers.command));
         let grid = self.snap.grid();
         let me = self.roll_inst;
-        let pointer = ui.input(|i| i.pointer.interact_pos());
+        let pointer = ui.input(|i| i.pointer.interact_pos().or_else(|| i.pointer.latest_pos()));
         let (pressed, secondary_pressed, down, secondary_down) = ui.input(|i| {
             (
                 i.pointer.primary_pressed(),
@@ -2447,7 +2447,7 @@ impl App {
             } else {
                 None
             };
-            let gesture = if (ctrl && self.tool == Tool::Draw)
+            let gesture = if (ctrl && matches!(self.tool, Tool::Draw | Tool::Paint | Tool::Select))
                 || (self.tool == Tool::Select && hit.is_none())
             {
                 Some(Gesture::Select {
@@ -2916,17 +2916,33 @@ impl App {
                 add,
                 base,
             } => {
-                let cur_tick = g.tick_f(q.x);
-                let cur_pitch = g.pitch_f32(q.y);
-                let (t0, t1) = (from_tick.min(cur_tick), from_tick.max(cur_tick));
-                let (p0, p1) = (from_pitch.min(cur_pitch), from_pitch.max(cur_pitch));
-                let hits = self
-                    .roll_index
-                    .marquee_hits(&self.pattern().notes, me, t0, t1, p0, p1);
-                self.roll_sel = if add { base } else { Vec::new() };
-                for id in hits {
-                    if !self.roll_sel.contains(&id) {
-                        self.roll_sel.push(id);
+                if let Some(q) = pointer {
+                    let cur_tick = g.tick_f(q.x);
+                    let cur_pitch = g.pitch_f32(q.y);
+                    let is_click = from_tick == cur_tick && (from_pitch - cur_pitch).abs() < 0.05;
+                    if is_click && let Some(n) = self.note_at(g, q) {
+                        if add {
+                            self.roll_sel = base;
+                            if let Some(pos) = self.roll_sel.iter().position(|&id| id == n.id) {
+                                self.roll_sel.remove(pos);
+                            } else {
+                                self.roll_sel.push(n.id);
+                            }
+                        } else {
+                            self.roll_sel = vec![n.id];
+                        }
+                    } else {
+                        let (t0, t1) = (from_tick.min(cur_tick), from_tick.max(cur_tick));
+                        let (p0, p1) = (from_pitch.min(cur_pitch), from_pitch.max(cur_pitch));
+                        let hits =
+                            self.roll_index
+                                .marquee_hits(&self.pattern().notes, me, t0, t1, p0, p1);
+                        self.roll_sel = if add { base } else { Vec::new() };
+                        for id in hits {
+                            if !self.roll_sel.contains(&id) {
+                                self.roll_sel.push(id);
+                            }
+                        }
                     }
                 }
                 let tr = self.tr();
