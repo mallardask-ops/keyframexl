@@ -636,48 +636,14 @@ impl Voice {
             && z.loop_mode != LoopMode::None
             && zv.loop_end > zv.loop_start + 1
             && (z.loop_mode != LoopMode::Sustain || self.t < gate);
-        if self.pos < zv.offset as f64 || self.pos >= zv.end as f64 {
+        let Some((s, next_pos, next_dir)) =
+            crate::sampler::read_zone_frame(&zv, z.loop_mode, looping, ratio, self.pos, self.dir)
+        else {
             self.done = true;
             return [0.0; 2];
-        }
-        let i = self.pos.floor() as usize;
-        let frac = (self.pos - i as f64) as f32;
-        let next = if looping && self.dir > 0.0 && i + 1 >= zv.loop_end {
-            if z.loop_mode == LoopMode::PingPong {
-                zv.loop_end - 1
-            } else {
-                zv.loop_start
-            }
-        } else if self.dir < 0.0 {
-            i.saturating_sub(1).max(zv.offset)
-        } else {
-            (i + 1).min(zv.end - 1)
         };
-        let (a, b) = (zv.frames[i], zv.frames[next]);
-        let fade = if zv.fade_in > 0 || zv.fade_out > 0 {
-            zv.fade_gain(self.pos)
-        } else {
-            1.0
-        };
-        let s = [
-            (a[0] + (b[0] - a[0]) * frac) as f64 * fade,
-            (a[1] + (b[1] - a[1]) * frac) as f64 * fade,
-        ];
-        self.pos += ratio * self.dir;
-        if looping {
-            let (ls, le) = (zv.loop_start as f64, zv.loop_end as f64);
-            if z.loop_mode == LoopMode::PingPong {
-                if self.dir > 0.0 && self.pos >= le - 1.0 {
-                    self.pos = 2.0 * (le - 1.0) - self.pos;
-                    self.dir = -1.0;
-                } else if self.dir < 0.0 && self.pos <= ls {
-                    self.pos = 2.0 * ls - self.pos;
-                    self.dir = 1.0;
-                }
-            } else if self.pos >= le {
-                self.pos = ls + (self.pos - ls) % (le - ls);
-            }
-        }
+        self.pos = next_pos;
+        self.dir = next_dir;
 
         // Two filters, serial or parallel (DirectWave Filter 1 & 2).
         let mut out = s;
@@ -5003,6 +4969,99 @@ mod tests {
             "reverse begins at the last frame: {}",
             out[0][0]
         );
+    }
+
+    #[test]
+    fn voice_render_zone_matches_zone_frame_across_loop_modes_and_pitches() {
+        let frames: Vec<[f32; 2]> = (0..64)
+            .map(|i| {
+                let x = i as f32 / 64.0;
+                [(x * 7.0).sin() * 0.8, (x * 11.0).cos() * 0.6]
+            })
+            .collect();
+        let program = Program::default();
+        let modes = [
+            LoopMode::None,
+            LoopMode::Continuous,
+            LoopMode::Sustain,
+            LoopMode::PingPong,
+        ];
+        let cases: &[(usize, usize, usize, usize, u8, f64, f64, usize, usize, f64)] = &[
+            // (offset, end, loop_start, loop_end, key, tune_cents, rate, fade_in, fade_out, pan)
+            (0, 64, 10, 34, 60, 0.0, 100.0, 0, 0, 0.0),
+            (6, 54, 14, 30, 65, 37.0, 100.0, 4, 5, -0.35),
+            (4, 48, 12, 24, 53, -25.0, 80.0, 0, 6, 0.4),
+        ];
+        for &mode in &modes {
+            for &(
+                offset,
+                end,
+                loop_start,
+                loop_end,
+                key,
+                tune_cents,
+                rate,
+                fade_in,
+                fade_out,
+                pan,
+            ) in cases
+            {
+                let z = Zone {
+                    stretch: Default::default(),
+                    stretched: None,
+                    fade_in,
+                    fade_out,
+                    name: "diff".into(),
+                    root: 60,
+                    low: 0,
+                    high: 127,
+                    low_velocity: 1,
+                    high_velocity: 127,
+                    sample_rate: 100,
+                    frames: std::sync::Arc::new(frames.clone()),
+                    offset,
+                    end,
+                    loop_mode: mode,
+                    loop_start,
+                    loop_end,
+                    adsr: crate::sampler::Adsr {
+                        attack: 0.05,
+                        decay: 0.1,
+                        sustain: 0.7,
+                        release: 0.4,
+                        ..Default::default()
+                    },
+                    gain: 0.85,
+                    pan,
+                    tune_cents,
+                    velocity_tracking: 0.5,
+                    params: crate::sampler::ZoneParams::default(),
+                };
+                z.validate().unwrap();
+                let gate_frames = 60usize;
+                let gate = gate_frames as f64 / rate;
+                let mut v = Voice::new(1, 1, Source::Zone { zone: 0 }, key, 96, gate);
+                v.pos = z.offset as f64;
+                for n in 0..140 {
+                    let t = n as f64 / rate;
+                    let got = if v.done {
+                        [0.0; 2]
+                    } else {
+                        let out = v.render_zone(&z, &program, rate);
+                        [out[0] as f32, out[1] as f32]
+                    };
+                    let expected = z.frame(key, 96, t, gate, t, gate);
+                    for ch in 0..2 {
+                        assert!(
+                            (got[ch] - expected[ch]).abs() < 1e-5,
+                            "mode={mode:?} key={key} offset={offset} frame={n} ch={ch}: voice={} zone::frame={}",
+                            got[ch],
+                            expected[ch]
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

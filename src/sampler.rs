@@ -731,6 +731,96 @@ pub struct ZoneView<'a> {
     pub fade_out: usize,
 }
 
+/// Advance `(pos, dir)` by `step` frames, wrapping or bouncing inside
+/// `loop_start..loop_end` when `looping` is true.
+pub fn advance_zone_pos(
+    pos: f64,
+    dir: f64,
+    step: f64,
+    loop_start: usize,
+    loop_end: usize,
+    loop_mode: LoopMode,
+    looping: bool,
+) -> (f64, f64) {
+    let mut pos = pos + step * dir;
+    let mut dir = dir;
+    if looping {
+        let (ls, le) = (loop_start as f64, loop_end as f64);
+        if loop_mode == LoopMode::PingPong {
+            let span = (le - 1.0 - ls).max(1.0);
+            if dir > 0.0 && pos >= le - 1.0 {
+                let x = (pos - ls) % (2.0 * span);
+                if x < span {
+                    pos = ls + x;
+                    dir = 1.0;
+                } else {
+                    pos = ls + 2.0 * span - x;
+                    dir = -1.0;
+                }
+            } else if dir < 0.0 && pos <= ls {
+                let x = (ls - pos) % (2.0 * span);
+                if x < span {
+                    pos = ls + x;
+                    dir = 1.0;
+                } else {
+                    pos = ls + 2.0 * span - x;
+                    dir = -1.0;
+                }
+            }
+        } else if pos >= le {
+            pos = ls + (pos - ls) % (le - ls);
+        }
+    }
+    (pos, dir)
+}
+
+/// Read one linearly interpolated, fade-scaled stereo frame from `zv` at
+/// `(pos, dir)` and advance `(pos, dir)` by `rate_ratio` with loop handling.
+/// Returns `None` when `pos` is outside `zv.offset..zv.end`.
+pub fn read_zone_frame(
+    zv: &ZoneView<'_>,
+    loop_mode: LoopMode,
+    looping: bool,
+    rate_ratio: f64,
+    pos: f64,
+    dir: f64,
+) -> Option<([f64; 2], f64, f64)> {
+    if pos < zv.offset as f64 || pos >= zv.end as f64 {
+        return None;
+    }
+    let i = pos.floor() as usize;
+    let frac = (pos - i as f64) as f32;
+    let next = if looping && dir > 0.0 && i + 1 >= zv.loop_end {
+        if loop_mode == LoopMode::PingPong {
+            zv.loop_end - 1
+        } else {
+            zv.loop_start
+        }
+    } else {
+        (i + 1).min(zv.end - 1)
+    };
+    let (a, b) = (zv.frames[i], zv.frames[next]);
+    let fade = if zv.fade_in > 0 || zv.fade_out > 0 {
+        zv.fade_gain(pos)
+    } else {
+        1.0
+    };
+    let s = [
+        (a[0] + (b[0] - a[0]) * frac) as f64 * fade,
+        (a[1] + (b[1] - a[1]) * frac) as f64 * fade,
+    ];
+    let (next_pos, next_dir) = advance_zone_pos(
+        pos,
+        dir,
+        rate_ratio,
+        zv.loop_start,
+        zv.loop_end,
+        loop_mode,
+        looping,
+    );
+    Some((s, next_pos, next_dir))
+}
+
 impl ZoneView<'_> {
     /// The fade gain at sample position `pos` (1 without fades).
     pub fn fade_gain(&self, pos: f64) -> f64 {
@@ -858,22 +948,6 @@ impl Zone {
             && velocity <= self.high_velocity
             && velocity > 0
     }
-    fn wrap(&self, raw: f64) -> f64 {
-        let start = self.loop_start as f64;
-        let end = self.loop_end as f64;
-        if raw < start {
-            return raw;
-        }
-        if self.loop_mode == LoopMode::PingPong {
-            let span = (end - start - 1.0).max(1.0);
-            let x = (raw - start) % (2.0 * span);
-            start + if x <= span { x } else { 2.0 * span - x }
-        } else if raw < end {
-            raw
-        } else {
-            start + (raw - start) % (end - start)
-        }
-    }
     pub fn frame(
         &self,
         key: u8,
@@ -886,42 +960,51 @@ impl Zone {
         if !self.matches(key, velocity) || t < 0.0 || t >= gate + self.adsr.release {
             return [0.0; 2];
         }
+        let zv = self.view();
         let ratio = 2.0_f64.powf((key as f64 - self.root as f64 + self.tune_cents / 100.0) / 12.0)
             * self.sample_rate as f64;
-        let raw = self.offset as f64 + phase_time * ratio;
-        let looping = self.loop_mode != LoopMode::None && self.loop_end > self.loop_start + 1;
-        let index = if looping && self.loop_mode == LoopMode::Sustain && t >= gate {
-            self.wrap(self.offset as f64 + gate_phase * ratio) + (phase_time - gate_phase) * ratio
-        } else if looping {
-            self.wrap(raw)
+        let has_loop = self.loop_mode != LoopMode::None && zv.loop_end > zv.loop_start + 1;
+        let (pos, dir, looping) = if has_loop && self.loop_mode == LoopMode::Sustain && t >= gate {
+            let (gate_pos, gate_dir) = advance_zone_pos(
+                zv.offset as f64,
+                1.0,
+                gate_phase * ratio,
+                zv.loop_start,
+                zv.loop_end,
+                self.loop_mode,
+                true,
+            );
+            let (pos, dir) = advance_zone_pos(
+                gate_pos,
+                gate_dir,
+                (phase_time - gate_phase) * ratio,
+                zv.loop_start,
+                zv.loop_end,
+                self.loop_mode,
+                false,
+            );
+            (pos, dir, false)
         } else {
-            raw
+            let (pos, dir) = advance_zone_pos(
+                zv.offset as f64,
+                1.0,
+                phase_time * ratio,
+                zv.loop_start,
+                zv.loop_end,
+                self.loop_mode,
+                has_loop,
+            );
+            (pos, dir, has_loop)
         };
-        if index < self.offset as f64 || index >= self.end as f64 {
+        let Some((s, _, _)) = read_zone_frame(&zv, self.loop_mode, looping, 0.0, pos, dir) else {
             return [0.0; 2];
-        }
-        let i = index.floor() as usize;
-        let fraction = (index - i as f64) as f32;
-        let a = self.frames[i];
-        let next = if looping
-            && (t < gate || self.loop_mode != LoopMode::Sustain)
-            && i + 1 >= self.loop_end
-        {
-            if self.loop_mode == LoopMode::PingPong {
-                self.loop_end - 1
-            } else {
-                self.loop_start
-            }
-        } else {
-            (i + 1).min(self.end - 1)
         };
-        let b = self.frames[next];
         let velocity_gain =
             (1.0 - self.velocity_tracking) + self.velocity_tracking * (velocity as f64 / 127.0);
-        let gain = self.adsr.value(t, gate) * self.gain * velocity_gain * self.fade_gain(index);
+        let gain = self.adsr.value(t, gate) * self.gain * velocity_gain;
         [
-            (a[0] + (b[0] - a[0]) * fraction) * (gain * (1.0 - self.pan.max(0.0))) as f32,
-            (a[1] + (b[1] - a[1]) * fraction) * (gain * (1.0 + self.pan.min(0.0))) as f32,
+            (s[0] * gain * (1.0 - self.pan.max(0.0))) as f32,
+            (s[1] * gain * (1.0 + self.pan.min(0.0))) as f32,
         ]
     }
     pub fn validate(&self) -> Result<(), &'static str> {
