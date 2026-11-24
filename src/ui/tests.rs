@@ -1680,6 +1680,13 @@ fn the_rolls_playhead_follows_its_clip_in_the_song() {
         "the pattern repeats inside a long clip"
     );
     assert_eq!(at(&song, pid, 5 * BAR), None, "after the clip");
+    // A clip on a muted playlist track must not hijack the piano roll playhead.
+    song.track_mut(0).muted = true;
+    assert_eq!(
+        at(&song, pid, 2 * BAR),
+        None,
+        "muted playlist track clips are skipped"
+    );
 }
 
 #[test]

@@ -331,7 +331,13 @@ pub(crate) fn song_to_pattern_tick(
     let plen = song.pattern(pid)?.length.max(1);
     song.clips
         .iter()
-        .filter(|c| c.pattern == pid && !c.muted && t >= c.start && t < c.start + song.clip_len(c))
+        .filter(|c| {
+            c.pattern == pid
+                && !c.muted
+                && !song.track_muted(c.track)
+                && t >= c.start
+                && t < c.start + song.clip_len(c)
+        })
         .map(|c| (t - c.start + c.offset).rem_euclid(plen))
         .next()
 }
@@ -611,16 +617,15 @@ impl App {
         let view_ticks = grid.width() / v.cell * STEP as f32;
         v.x0 =
             v.x0.clamp(0.0, ((plen + 2 * BAR) as f32 - view_ticks).max(0.0));
-        // Follow the playhead in pattern mode (FL): keep it on screen.
-        if self.follow && self.is_playing() && !self.song_mode {
-            let len_frames = self.frames_per_step() * steps(plen) as f64;
-            if len_frames > 0.0 {
-                let tick =
-                    (self.position_frames() as f64 % len_frames / len_frames * plen as f64) as f32;
-                if tick < v.x0 + 8.0 || tick > v.x0 + view_ticks - v.cell * 2.0 {
-                    v.x0 = (tick - view_ticks * 0.3)
-                        .clamp(0.0, ((plen + 2 * BAR) as f32 - view_ticks).max(0.0));
-                }
+        // Follow the playhead (Pattern and Song modes): keep it on screen.
+        if self.follow
+            && self.is_playing()
+            && let Some(play_tick) = self.roll_playhead()
+        {
+            let tick = play_tick as f32;
+            if tick < v.x0 + 8.0 || tick > v.x0 + view_ticks - v.cell * 2.0 {
+                v.x0 = (tick - view_ticks * 0.3)
+                    .clamp(0.0, ((plen + 2 * BAR) as f32 - view_ticks).max(0.0));
             }
         }
         self.roll_view.insert(me, v);
@@ -2052,8 +2057,9 @@ impl App {
                 );
             }
         }
-        // Playhead: white line with a caret in the ruler.
-        if self.is_playing()
+        // Playhead: white line with a caret in the ruler (shown while playing
+        // and when parked at a non-zero transport position).
+        if (self.is_playing() || self.position_frames() > 0)
             && let Some(tick) = self.roll_playhead()
         {
             let x = g.x(tick);
