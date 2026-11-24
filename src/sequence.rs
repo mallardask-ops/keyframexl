@@ -103,6 +103,11 @@ impl Note {
     pub fn end(&self) -> Tick {
         self.start + self.length
     }
+    /// Whether this note fits a single step-sequencer pad: on the step grid,
+    /// one step long, and at the default step pitch (`STEP_PITCH`).
+    pub fn is_step_like(&self) -> bool {
+        self.start % STEP == 0 && self.length == STEP && self.pitch == STEP_PITCH
+    }
 }
 
 /// Pitch glide: notes of `group` on `instrument` that sound at `start` bend to `target`.
@@ -324,14 +329,18 @@ impl Pattern {
             .position(|n| n.instrument == instrument && n.start == at)
     }
     /// A channel shows step pads while all its notes look like steps:
-    /// on the step grid and one step long. Otherwise the rack shows a
-    /// note preview and editing happens in the piano roll (FL behaviour).
+    /// on the step grid, one step long, at `STEP_PITCH`, with at most one
+    /// note per step, and no slides. Otherwise the rack shows a note preview
+    /// and editing happens in the piano roll (FL behaviour).
     pub fn is_step_channel(&self, instrument: u64) -> bool {
+        if self.slides.iter().any(|s| s.instrument == instrument) {
+            return false;
+        }
+        let mut seen = std::collections::HashSet::new();
         self.notes
             .iter()
             .filter(|n| n.instrument == instrument)
-            .all(|n| n.start % STEP == 0 && n.length == STEP)
-            && !self.slides.iter().any(|s| s.instrument == instrument)
+            .all(|n| n.is_step_like() && seen.insert(n.start))
     }
 }
 
@@ -2318,6 +2327,40 @@ mod tests {
         // Past the pattern end is rejected.
         std::sync::Arc::make_mut(&mut song.patterns[0]).notes[1].length = BAR;
         assert!(song.validate().is_err());
+    }
+
+    #[test]
+    fn is_step_channel_rejects_melodic_pitches_and_chords() {
+        let mut pat = Pattern::new(1, "Pattern 1");
+        // Empty channel starts in step mode.
+        assert!(pat.is_step_channel(1));
+
+        // 1-step notes on STEP_PITCH at distinct steps stay in step mode.
+        pat.notes.push(Note::new(1, 0, STEP, STEP_PITCH, 100));
+        pat.notes.push(Note::new(1, 2 * STEP, STEP, STEP_PITCH, 80));
+        assert!(pat.is_step_channel(1));
+
+        // 1-step melodic bassline (off STEP_PITCH) switches to piano roll preview.
+        pat.notes.push(Note::new(2, 0, STEP, 52, 100)); // E3
+        pat.notes.push(Note::new(2, 2 * STEP, STEP, 47, 100)); // B2
+        pat.notes.push(Note::new(2, 4 * STEP, STEP, 43, 100)); // G2
+        assert!(!pat.is_step_channel(2));
+
+        // Duplicate note on the same step (chord) switches to piano roll preview.
+        pat.notes.push(Note::new(3, 0, STEP, STEP_PITCH, 100));
+        pat.notes.push(Note::new(3, 0, STEP, STEP_PITCH, 90));
+        assert!(!pat.is_step_channel(3));
+
+        // A slide on a step channel switches to piano roll preview.
+        pat.notes.push(Note::new(4, 0, STEP, STEP_PITCH, 100));
+        pat.slides.push(Glide {
+            start: 0,
+            length: STEP,
+            target: 64,
+            group: 0,
+            instrument: 4,
+        });
+        assert!(!pat.is_step_channel(4));
     }
 
     #[test]
