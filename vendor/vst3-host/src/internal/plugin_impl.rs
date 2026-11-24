@@ -3298,7 +3298,8 @@ impl PluginInternal for PluginImpl {
         }
 
         // Poll registered fds (zero timeout - never blocks the UI thread)
-        // and notify ready ones. Same snapshot-then-invoke pattern.
+        // and notify ready ones and X connections. Same snapshot-then-invoke
+        // pattern.
         let handlers: Vec<_> = match self.run_loop.lock() {
             Ok(reg) => reg.handlers.clone(),
             Err(_) => return,
@@ -3308,18 +3309,18 @@ impl PluginInternal for PluginImpl {
         }
         let mut fds: Vec<libc::pollfd> = handlers
             .iter()
-            .map(|&(_, fd)| libc::pollfd {
-                fd,
+            .map(|h| libc::pollfd {
+                fd: h.fd,
                 events: libc::POLLIN,
                 revents: 0,
             })
             .collect();
-        let ready = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as _, 0) };
-        if ready > 0 {
-            for (pfd, (handler, fd)) in fds.iter().zip(handlers.iter()) {
-                if pfd.revents & (libc::POLLIN | libc::POLLERR | libc::POLLHUP) != 0 {
-                    unsafe { handler.onFDIsSet(*fd) };
-                }
+        unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as _, 0) };
+        for (pfd, h) in fds.iter().zip(handlers.iter()) {
+            let ready = pfd.revents & (libc::POLLIN | libc::POLLERR | libc::POLLHUP) != 0;
+            // X connections also run when not readable: see `RunLoopHandler::x11`.
+            if ready || h.x11 {
+                unsafe { h.handler.onFDIsSet(h.fd) };
             }
         }
     }

@@ -19,3 +19,16 @@ recorded yet.
 - `DockState::windows_covering(rect)`, `WindowState::set_minimized` /
   `is_minimized` public: the toolbar folds floating windows that hide a docked
   panel it is asked to show.
+
+## vst3-host (0.11.1)
+
+- Linux `IRunLoop`: an event handler registered for a connection to the X
+  server (`is_x11_connection`: Unix socket under `/tmp/.X11-unix/`, or TCP
+  6000-6099) runs on every `service_run_loop`, not only when its fd is
+  readable. VSTGUI reads X events into xcb's queue during round trips (the
+  `xcb_aux_sync` at the end of its handler, cairo drawing); the fd then stays
+  quiet and a queued Expose was never dispatched, so the editor stayed black
+  after it was hidden and shown again. Check: open MT-PowerDrumKit (native
+  VST3), switch to Parameters and back to Plugin; the kit is drawn again.
+  Tests in the crate run with `cargo test --lib` from a copy of the folder (it
+  is not a workspace member).

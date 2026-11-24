@@ -1148,11 +1148,66 @@ pub fn create_state_restore_stream(
 /// the plugin impl (servicing, driven by the host each UI frame).
 #[cfg(target_os = "linux")]
 pub struct RunLoopRegistry {
-    pub handlers: Vec<(
-        vst3::ComPtr<vst3::Steinberg::Linux::IEventHandler>,
-        vst3::Steinberg::Linux::FileDescriptor,
-    )>,
+    pub handlers: Vec<RunLoopHandler>,
     pub timers: Vec<RunLoopTimer>,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone)]
+pub struct RunLoopHandler {
+    pub handler: vst3::ComPtr<vst3::Steinberg::Linux::IEventHandler>,
+    pub fd: vst3::Steinberg::Linux::FileDescriptor,
+    /// The fd is a connection to the X server. Its handler runs on every
+    /// service, not only when the fd is readable: an xcb client (VSTGUI)
+    /// reads events into its own queue during round trips, e.g. the
+    /// `xcb_aux_sync` that ends its event handler or cairo's drawing, and
+    /// those queued events (an Expose after the editor is shown again)
+    /// leave nothing to read on the fd.
+    pub x11: bool,
+}
+
+/// Whether `fd` is a socket connected to an X server: a Unix socket under
+/// `/tmp/.X11-unix/` (path or abstract name) or TCP to port 6000-6099.
+#[cfg(target_os = "linux")]
+pub fn is_x11_connection(fd: vst3::Steinberg::Linux::FileDescriptor) -> bool {
+    let mut addr: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+    let mut len = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
+    let ok = unsafe {
+        libc::getpeername(fd, (&raw mut addr).cast::<libc::sockaddr>(), &mut len)
+    } == 0;
+    if !ok {
+        return false;
+    }
+    match addr.ss_family as libc::c_int {
+        libc::AF_UNIX => {
+            let un = unsafe { &*(&raw const addr).cast::<libc::sockaddr_un>() };
+            let path_len = (len as usize)
+                .saturating_sub(std::mem::offset_of!(libc::sockaddr_un, sun_path))
+                .min(un.sun_path.len());
+            let path: Vec<u8> = un.sun_path[..path_len].iter().map(|&c| c as u8).collect();
+            is_x11_socket_path(&path)
+        }
+        libc::AF_INET => {
+            let inet = unsafe { &*(&raw const addr).cast::<libc::sockaddr_in>() };
+            is_x11_port(u16::from_be(inet.sin_port))
+        }
+        libc::AF_INET6 => {
+            let inet = unsafe { &*(&raw const addr).cast::<libc::sockaddr_in6>() };
+            is_x11_port(u16::from_be(inet.sin6_port))
+        }
+        _ => false,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn is_x11_socket_path(path: &[u8]) -> bool {
+    let path = path.strip_prefix(b"\0").unwrap_or(path);
+    path.starts_with(b"/tmp/.X11-unix/X")
+}
+
+#[cfg(target_os = "linux")]
+fn is_x11_port(port: u16) -> bool {
+    (6000..6100).contains(&port)
 }
 
 #[cfg(target_os = "linux")]
@@ -1232,7 +1287,11 @@ impl vst3::Steinberg::Linux::IRunLoopTrait for HostPlugFrame {
         };
         match self.run_loop.lock() {
             Ok(mut reg) => {
-                reg.handlers.push((handler.to_com_ptr(), fd));
+                reg.handlers.push(RunLoopHandler {
+                    handler: handler.to_com_ptr(),
+                    fd,
+                    x11: is_x11_connection(fd),
+                });
                 kResultOk
             }
             Err(_) => kInternalError,
@@ -1245,7 +1304,7 @@ impl vst3::Steinberg::Linux::IRunLoopTrait for HostPlugFrame {
     ) -> tresult {
         match self.run_loop.lock() {
             Ok(mut reg) => {
-                reg.handlers.retain(|(h, _)| h.as_ptr() != handler);
+                reg.handlers.retain(|h| h.handler.as_ptr() != handler);
                 kResultOk
             }
             Err(_) => kInternalError,
@@ -3957,6 +4016,32 @@ mod plug_frame_tests {
         }
         assert!(reg.lock().unwrap().handlers.is_empty());
         assert!(reg.lock().unwrap().timers.is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn x11_connections_are_told_from_other_fds() {
+        use std::os::fd::AsRawFd;
+        use std::os::linux::net::SocketAddrExt;
+        use std::os::unix::net::{SocketAddr, UnixListener, UnixStream};
+
+        assert!(is_x11_socket_path(b"/tmp/.X11-unix/X0"));
+        assert!(is_x11_socket_path(b"\0/tmp/.X11-unix/X12"));
+        assert!(!is_x11_socket_path(b"/run/user/1000/pipewire-0"));
+        assert!(is_x11_port(6000) && is_x11_port(6010));
+        assert!(!is_x11_port(5999) && !is_x11_port(6100));
+
+        // An abstract socket named like an X display (touches no real server).
+        let name = format!("/tmp/.X11-unix/Xkfxl-test-{}", std::process::id());
+        let addr = SocketAddr::from_abstract_name(name.as_bytes()).unwrap();
+        let listener = UnixListener::bind_addr(&addr).unwrap();
+        let client = UnixStream::connect_addr(&addr).unwrap();
+        assert!(is_x11_connection(client.as_raw_fd()));
+        drop(listener);
+
+        let (a, _b) = UnixStream::pair().unwrap();
+        assert!(!is_x11_connection(a.as_raw_fd()));
+        assert!(!is_x11_connection(-1));
     }
 }
 
