@@ -1666,6 +1666,19 @@ impl Engine {
         }
     }
 
+    /// Loop bounds in frames for `(song, pattern, song_mode)` using the engine's
+    /// cached tempo table (allocation-free when the tempo map is unchanged).
+    pub fn loop_bounds_for(&mut self, song: &Song, pattern: u64, song_mode: bool) -> (u64, u64) {
+        self.sync_tempo(song, song_mode);
+        loop_bounds(
+            song,
+            self.tempo.as_ref(),
+            pattern,
+            song_mode,
+            self.rate as u32,
+        )
+    }
+
     /// Render interleaved stereo into `out` starting at loop position `start`.
     /// Returns the position after the block. With `looping`, the timeline wraps.
     pub fn process(
@@ -1701,9 +1714,16 @@ impl Engine {
             (0, u64::MAX)
         };
         let active_pat = if song_mode { 0 } else { pattern };
-        let transport = (song_mode, active_pat, length);
+        let transport_key = if song_mode {
+            song.tempo.to_bits()
+        } else {
+            length
+        };
+        let transport = (song_mode, active_pat, transport_key);
         if transport != self.transport {
-            // Pattern switched or tempo changed: let ringing voices fade, not click.
+            // Mode, pattern, or tempo changed: let ringing voices fade, not click.
+            // In Song mode, editing clips at the end of the playlist changes
+            // `length` without interrupting currently playing patterns.
             for v in &mut self.voices {
                 v.kill_now();
             }
@@ -4839,6 +4859,42 @@ mod tests {
         for f in 0..length {
             assert_eq!([live[f * 2], live[f * 2 + 1]], offline[f], "frame {f}");
         }
+    }
+
+    #[test]
+    fn editing_later_playlist_clip_does_not_kill_playing_voices() {
+        use crate::sequence::{Clip, Note, STEP};
+        let mut song = Song::default();
+        let synth = song.add_channel(
+            "Pad",
+            InstrumentKind::Synth {
+                patch: Default::default(),
+            },
+        );
+        song.add_note(1, Note::new(synth, 0, BAR, 60, 110));
+        song.clips.push(Clip::new(1, 0, 0));
+        song.clips.push(Clip::new(1, 2 * BAR, 0));
+
+        let mut engine = Engine::new(RATE);
+        let mut buf = vec![0.0f32; 2 * 512];
+        // Play into bar 1 so the synth voice is actively sounding.
+        let mut at = 0u64;
+        for _ in 0..8 {
+            engine.process(&song, 1, true, at, &mut buf, true);
+            at += 512;
+        }
+        assert!(engine.active_voices() > 0, "voice should be ringing");
+
+        // Move the later clip to bar 4 (changes song.end_bar_tick() / loop length).
+        song.clips[1].start = 4 * BAR;
+        engine.process(&song, 1, true, at, &mut buf, true);
+        let peak = buf.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+        assert!(
+            engine.active_voices() > 0 && peak > 0.01,
+            "editing an unrelated clip later in the playlist must not cut ringing voices (voices={}, peak={peak})",
+            engine.active_voices()
+        );
+        let _ = STEP;
     }
 
     #[test]

@@ -2192,6 +2192,21 @@ pub fn wrap_frame(pos: u64, (start, end): (u64, u64)) -> u64 {
     }
 }
 
+/// Rebase a monotonic transport position when song loop bounds change mid-playback
+/// (e.g. adding, moving, or deleting a clip at the end of the playlist) so the
+/// wrapped playhead stays on the exact same frame instead of jumping via modulo.
+pub fn rebase_loop_pos(pos: u64, prev: (u64, u64), next: (u64, u64)) -> u64 {
+    if prev == next {
+        return pos;
+    }
+    let cur = wrap_frame(pos, prev);
+    if cur < next.1 {
+        cur
+    } else {
+        wrap_frame(cur, next)
+    }
+}
+
 /// Frames in one pass of the pattern, or of the playlist in song mode.
 pub fn loop_frames(song: &Song, pattern_id: u64, song_mode: bool, rate: u32) -> u64 {
     if song_mode && let Some(map) = crate::tempo::effective_tempo_map(song) {
@@ -2674,6 +2689,25 @@ mod sharing_tests {
         assert!(Arc::ptr_eq(&snapshot.patterns[0], &song.patterns[0]));
         assert!(!Arc::ptr_eq(&snapshot.patterns[1], &song.patterns[1]));
         assert!(song.patterns[1].notes.iter().all(|n| n.instrument != other));
+    }
+
+    #[test]
+    fn rebase_loop_pos_keeps_playhead_steady_when_song_length_changes() {
+        let bar = 96_000u64;
+        // Loop #3, bar 2 inside an 8-bar song: monotonic pos = 18 bars -> wrapped = 2 bars.
+        let pos = 18 * bar + 1234;
+        let prev = (0, 8 * bar);
+        let next = (0, 9 * bar);
+        let rebased = rebase_loop_pos(pos, prev, next);
+        assert_eq!(wrap_frame(rebased, next), 2 * bar + 1234);
+
+        // Shrinking the song past the current playhead wraps cleanly into the new length.
+        let shrunk = (0, 4 * bar);
+        let pos_late = 6 * bar + 500;
+        assert_eq!(
+            wrap_frame(rebase_loop_pos(pos_late, prev, shrunk), shrunk),
+            2 * bar + 500
+        );
     }
 
     #[test]

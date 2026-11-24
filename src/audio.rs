@@ -1053,6 +1053,7 @@ impl Audio {
         let xruns = Arc::new(AtomicU32::new(0));
         let xrun_count = xruns.clone();
         let rt_told = AtomicBool::new(false);
+        let mut prev_song_bounds: Option<(u64, u64)> = None;
         let mut render_stereo = move |data: &mut [f32]| {
             tick.fetch_add(1, Ordering::Relaxed);
             keyframexl::denormal::flush_to_zero();
@@ -1111,6 +1112,7 @@ impl Audio {
                 return;
             }
             if !p.load(Ordering::Relaxed) {
+                prev_song_bounds = None;
                 if was_playing {
                     // Transport stopped: the song's notes stop at once.
                     engine.stop();
@@ -1155,15 +1157,28 @@ impl Audio {
             }
             was_playing = true;
             let started = std::time::Instant::now();
-            let at = pos.load(Ordering::Relaxed);
-            engine.process(
-                snap,
-                i.load(Ordering::Relaxed),
-                m.load(Ordering::Relaxed),
-                at,
-                data,
-                true,
-            );
+            let pat = i.load(Ordering::Relaxed);
+            let mode = m.load(Ordering::Relaxed);
+            let mut at = pos.load(Ordering::Relaxed);
+            if mode {
+                let cur_bounds = engine.loop_bounds_for(snap, pat, true);
+                if let Some(prev) = prev_song_bounds
+                    && prev != cur_bounds
+                {
+                    let rebased = keyframexl::sequence::rebase_loop_pos(at, prev, cur_bounds);
+                    if rebased != at
+                        && pos
+                            .compare_exchange(at, rebased, Ordering::Relaxed, Ordering::Relaxed)
+                            .is_ok()
+                    {
+                        at = rebased;
+                    }
+                }
+                prev_song_bounds = Some(cur_bounds);
+            } else {
+                prev_song_bounds = None;
+            }
+            engine.process(snap, pat, mode, at, data, true);
             if metro_on.load(Ordering::Relaxed) {
                 let (from, wrap) = engine.block_timeline();
                 let table = engine.tempo_table();
