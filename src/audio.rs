@@ -1146,8 +1146,9 @@ impl Audio {
             was_playing = true;
             let started = std::time::Instant::now();
             let at = pos.load(Ordering::Relaxed);
-            engine.process(
+            engine.process_with_index(
                 snap,
+                rx.hit_index(),
                 i.load(Ordering::Relaxed),
                 m.load(Ordering::Relaxed),
                 at,

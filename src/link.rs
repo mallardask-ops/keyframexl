@@ -12,6 +12,7 @@
 use crate::automation::Target;
 use crate::engine::Engine;
 use crate::fx::{FxKind, FxState};
+use crate::hit_index::HitIndex;
 use crate::sequence::Song;
 use rtrb::{Consumer, Producer, PushError, RingBuffer};
 use std::sync::Arc;
@@ -23,41 +24,53 @@ const TRASH_CAP: usize = 256;
 /// Live parameter commands in flight before the audio thread drains them.
 const PARAM_CAP: usize = 512;
 
+/// Song snapshot paired with its prebuilt hit-collection index so the audio
+/// thread swaps both atomically without allocating, sorting, or freeing.
+struct SongPacket {
+    song: Arc<Song>,
+    index: Arc<HitIndex>,
+}
+
 /// UI side: send songs, free the ones the audio thread has replaced.
 pub struct SongSender {
-    tx: Producer<(u64, Arc<Song>)>,
-    trash: Consumer<Arc<Song>>,
+    tx: Producer<(u64, SongPacket)>,
+    trash: Consumer<SongPacket>,
     /// The newest song when the ring was full; retried by [`SongSender::tick`].
-    pending: Option<(u64, Arc<Song>)>,
+    pending: Option<(u64, SongPacket)>,
+    /// Most recently built index, used to reuse unchanged `Arc<Pattern>` tables.
+    last_index: Arc<HitIndex>,
     /// Generation of the newest song handed to `send` (0 = the initial song).
     generation: u64,
 }
 
 /// Audio side: the song to play now.
 pub struct SongReceiver {
-    rx: Consumer<(u64, Arc<Song>)>,
-    trash: Producer<Arc<Song>>,
-    current: Arc<Song>,
+    rx: Consumer<(u64, SongPacket)>,
+    trash: Producer<SongPacket>,
+    current: SongPacket,
     /// Generation of `current`.
     generation: u64,
     /// Old songs kept because the trash ring was full; handed back later.
-    held: Option<Arc<Song>>,
+    held: Option<SongPacket>,
 }
 
 pub fn song_link(song: Song) -> (SongSender, SongReceiver) {
     let (tx, rx) = RingBuffer::new(SEND_CAP);
     let (trash_tx, trash_rx) = RingBuffer::new(TRASH_CAP);
+    let song = Arc::new(song);
+    let index = Arc::new(HitIndex::build_incremental(&song, None));
     (
         SongSender {
             tx,
             trash: trash_rx,
             pending: None,
+            last_index: Arc::clone(&index),
             generation: 0,
         },
         SongReceiver {
             rx,
             trash: trash_tx,
-            current: Arc::new(song),
+            current: SongPacket { song, index },
             generation: 0,
             held: None,
         },
@@ -67,8 +80,10 @@ pub fn song_link(song: Song) -> (SongSender, SongReceiver) {
 impl SongSender {
     /// Queue `song` for the audio thread. Never blocks; latest wins when full.
     pub fn send(&mut self, song: Arc<Song>) {
+        let index = Arc::new(HitIndex::build_incremental(&song, Some(&self.last_index)));
+        self.last_index = Arc::clone(&index);
         self.generation += 1;
-        self.pending = Some((self.generation, song));
+        self.pending = Some((self.generation, SongPacket { song, index }));
         self.tick();
     }
 
@@ -112,13 +127,13 @@ impl SongReceiver {
             self.give_back(old);
         }
         let mut changed = false;
-        while let Ok((generation, song)) = self.rx.pop() {
-            let old = std::mem::replace(&mut self.current, song);
+        while let Ok((generation, packet)) = self.rx.pop() {
+            let old = std::mem::replace(&mut self.current, packet);
             self.generation = generation;
             changed = true;
             self.give_back(old);
         }
-        (&self.current, changed)
+        (&self.current.song, changed)
     }
 
     /// Generation of the song playing now (0 = the initial song).
@@ -127,10 +142,15 @@ impl SongReceiver {
     }
 
     pub fn current(&self) -> &Song {
-        &self.current
+        &self.current.song
     }
 
-    fn give_back(&mut self, old: Arc<Song>) {
+    /// Prebuilt hit-collection index matching [`Self::current`].
+    pub fn hit_index(&self) -> &HitIndex {
+        &self.current.index
+    }
+
+    fn give_back(&mut self, old: SongPacket) {
         if self.held.is_some() {
             // The UI is not collecting and one song is already held: keep the
             // newest held, let the older drop. Only reachable if the UI froze
@@ -686,5 +706,64 @@ mod realtime_tests {
         assert!(changed);
         engine.clear_live_params();
         assert_eq!(engine.live_param(Target::MixerVolume { track: 1 }), None);
+    }
+
+    #[test]
+    fn the_indexed_song_mode_audio_block_neither_allocates_nor_frees() {
+        use crate::sequence::{BAR, Clip};
+        let mut song = Song::default();
+        for s in 0..16 {
+            song.add_note(1, Note::new(1, s * STEP, STEP, 60, 100));
+        }
+        for bar in 0..8 {
+            song.clips.push(Clip::new(1, bar * BAR, 0));
+        }
+        let (mut tx, mut rx) = song_link(Song::default());
+        let mut engine = Engine::new(48_000);
+        engine.reserve(128, 1024);
+        let mut out = vec![0.0f32; 1024];
+        tx.send(Arc::new(song.clone()));
+        let mut at = 0u64;
+        let first = alloc_probe::count(|| {
+            for _ in 0..100 {
+                rx.update();
+                at = engine.process_with_index(
+                    rx.current(),
+                    rx.hit_index(),
+                    1,
+                    true,
+                    at,
+                    &mut out,
+                    true,
+                );
+            }
+        });
+        let mut edited = song.clone();
+        edited
+            .pattern_mut(1)
+            .unwrap()
+            .notes
+            .push(Note::new(1, STEP / 2, STEP, 67, 100));
+        tx.send(Arc::new(edited));
+        let second = alloc_probe::count(|| {
+            for _ in 0..100 {
+                rx.update();
+                at = engine.process_with_index(
+                    rx.current(),
+                    rx.hit_index(),
+                    1,
+                    true,
+                    at,
+                    &mut out,
+                    true,
+                );
+            }
+        });
+        assert_eq!(
+            (first, second),
+            (0, 0),
+            "allocations or frees in indexed song-mode audio path"
+        );
+        assert_eq!(tx.tick(), 1);
     }
 }

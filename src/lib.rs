@@ -205,6 +205,7 @@ mod flp_gen;
 pub mod forge;
 pub mod fx;
 pub mod genres;
+pub mod hit_index;
 pub mod kits;
 pub mod legacy;
 pub mod link;

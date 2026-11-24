@@ -9,6 +9,10 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 See [docs/v0.2.1.md](docs/v0.2.1.md) for the Windows port and 0.2.1 plan.
 
 ### Engine and internals
+- **Indexed playlist hit scheduling**: large arrangements with hundreds of
+  clips and thousands of notes now play smoothly at low audio buffers without
+  scanning every note on every block, while keeping offline renders
+  byte-for-byte identical.
 - **Cross-OS `.kfxl` compatibility, native Windows FL Studio lookup & docs (W5)**:
   `resolve_plugin_path` now resolves hosted plugins across Linux and Windows by
   CLAP `#id`, cross-OS bundle/library stem (`.dll` ↔ `.so`, `.vst3`, `.clap`),

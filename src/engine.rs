@@ -810,13 +810,16 @@ impl Voice {
 }
 
 #[derive(Clone, Copy)]
-struct Hit {
-    at: u64,
-    tick: Tick,
-    pattern: usize,
-    note: usize,
+pub(crate) struct Hit {
+    pub(crate) at: u64,
+    pub(crate) tick: Tick,
+    pub(crate) pattern: usize,
+    pub(crate) note: usize,
     /// Frames of a vocal phrase that fall before the song's start.
-    skip: usize,
+    pub(crate) skip: usize,
+    /// Tie-break key matching the original `(clip, note, rep)` scan order.
+    pub(crate) clip: u32,
+    pub(crate) rep: i64,
 }
 
 /// A rendered vocal phrase playing: a mono buffer read from `pos`.
@@ -1286,6 +1289,10 @@ pub struct Engine {
     sampler_fx: Vec<SamplerFx>,
     /// Round robin: (channel, trigger group, notes counted, last zone played).
     trigger_state: Vec<(u64, u8, u32, u32)>,
+    /// Lazily synced hit index for offline `process` calls.
+    hit_index: crate::hit_index::HitIndex,
+    /// `true` once `reserve` ran (RT audio mode: never allocate in `process`).
+    reserved: bool,
 }
 
 /// Plugin instances one engine holds (reserved up front).
@@ -1388,6 +1395,8 @@ impl Engine {
                 })
                 .collect(),
             trigger_state: Vec::with_capacity(MAX_TRIGGER_STATES),
+            hit_index: crate::hit_index::HitIndex::default(),
+            reserved: false,
         }
     }
 
@@ -1464,6 +1473,7 @@ impl Engine {
     /// Size every mixer buffer up front (live use): after this, blocks of up
     /// to `frames` and mixers of up to `tracks` never allocate in `process`.
     pub fn reserve(&mut self, tracks: usize, frames: usize) {
+        self.reserved = true;
         self.grow_buses(tracks, frames);
         self.live_params.reserve(MAX_LIVE_PARAMS);
         for c in &mut self.synth_fx {
@@ -1681,6 +1691,36 @@ impl Engine {
         out: &mut [f32],
         looping: bool,
     ) -> u64 {
+        self.process_inner(song, None, pattern, song_mode, start, out, looping)
+    }
+
+    /// Like [`Self::process`], using a [`crate::hit_index::HitIndex`] built off
+    /// the audio thread so snapshot swaps never allocate, sort, or free on RT.
+    #[allow(clippy::too_many_arguments)]
+    pub fn process_with_index(
+        &mut self,
+        song: &Song,
+        index: &crate::hit_index::HitIndex,
+        pattern: u64,
+        song_mode: bool,
+        start: u64,
+        out: &mut [f32],
+        looping: bool,
+    ) -> u64 {
+        self.process_inner(song, Some(index), pattern, song_mode, start, out, looping)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn process_inner(
+        &mut self,
+        song: &Song,
+        index: Option<&crate::hit_index::HitIndex>,
+        pattern: u64,
+        song_mode: bool,
+        start: u64,
+        out: &mut [f32],
+        looping: bool,
+    ) -> u64 {
         crate::denormal::flush_to_zero();
         out.fill(0.0);
         let frames = out.len() / 2;
@@ -1749,7 +1789,7 @@ impl Engine {
             } else {
                 frames - done
             };
-            self.segment(song, pattern, song_mode, pos, done, span);
+            self.segment(song, index, pattern, song_mode, pos, done, span);
             done += span;
             pos += span as u64;
             if looping && pos >= bounds.1 {
@@ -1773,9 +1813,11 @@ impl Engine {
     }
 
     /// Render `frames` frames of the timeline from `from` into the buses at block offset `at`.
+    #[allow(clippy::too_many_arguments)]
     fn segment(
         &mut self,
         song: &Song,
+        index: Option<&crate::hit_index::HitIndex>,
         pattern: u64,
         song_mode: bool,
         from: u64,
@@ -1783,7 +1825,7 @@ impl Engine {
         frames: usize,
     ) {
         let to = from + frames as u64;
-        self.collect_hits(song, pattern, song_mode, from, to);
+        self.collect_hits(song, index, pattern, song_mode, from, to);
         let mut cursor = from;
         let mut written = 0;
         for i in 0..self.hits.len() {
@@ -2671,27 +2713,10 @@ impl Engine {
         }
     }
 
-    /// Frames from the start of a pattern to tick `t`, swing included.
-    fn note_frame(&self, song: &Song, t: Tick) -> u64 {
-        let sps = Self::sps(song);
-        ((steps(t) * sps + swing_offset(t, sps, song.swing.clamp(0.0, 0.6))) * self.rate).ceil()
-            as u64
-    }
-
     /// Frames from the song start to playlist tick `t`. Whole bars count in
     /// truncated bar frames, as format 1 did, so old songs keep their timing.
     fn clip_frame(&self, song: &Song, t: Tick) -> u64 {
-        if let Some(table) = &self.tempo {
-            return table.frames_at_ceil(t);
-        }
-        let bar = (16.0 * Self::sps(song) * self.rate) as u64;
-        let rest = t.rem_euclid(BAR);
-        (t / BAR) as u64 * bar
-            + if rest == 0 {
-                0
-            } else {
-                (steps(rest) * Self::sps(song) * self.rate).ceil() as u64
-            }
+        crate::hit_index::clip_frame(song, self.tempo.as_ref(), self.rate, t)
     }
 
     /// Playlist tick at song frame `f` (the inverse of `clip_frame`).
@@ -2704,107 +2729,55 @@ impl Engine {
         (f / bar) as Tick * BAR + rest as Tick
     }
 
-    fn collect_hits(&mut self, song: &Song, pattern: u64, song_mode: bool, from: u64, to: u64) {
-        self.hits.clear();
+    fn collect_hits(
+        &mut self,
+        song: &Song,
+        index: Option<&crate::hit_index::HitIndex>,
+        pattern: u64,
+        song_mode: bool,
+        from: u64,
+        to: u64,
+    ) {
         self.vocal_song_mode = song_mode;
-        // `window`: the pattern ticks this pass plays. A clip may cut its
-        // pattern, or run longer than it: then the pattern repeats (FL).
-        // `start`: the clip's playlist tick (song mode), for the tempo map.
         let vocal = self.vocal.load();
-        let add = |hits: &mut Vec<Hit>,
-                   offset: u64,
-                   start: Tick,
-                   pi: usize,
-                   p: &Pattern,
-                   e: &Engine,
-                   window: (Tick, Tick)| {
-            let plen = p.length.max(1);
-            let (first, last) = (window.0.div_euclid(plen), (window.1 - 1).div_euclid(plen));
-            for (ni, n) in p.notes.iter().enumerate() {
-                if n.muted || song.instrument(n.instrument).is_none_or(|i| i.muted) {
-                    continue;
-                }
-                let sings = matches!(
-                    song.instrument(n.instrument).map(|i| &i.kind),
-                    Some(InstrumentKind::Vocal { .. })
-                );
-                for k in first..=last {
-                    let t = n.start + k * plen;
-                    if t < window.0 || t >= window.1 {
-                        continue;
-                    }
-                    let local = t - window.0;
-                    // A vocal phrase starts at its first note, early by the syllable's
-                    // preutterance; the notes after it are inside the phrase's audio.
-                    let mut lead = 0usize;
-                    if sings {
-                        let key = (n.id, start + local);
-                        let placed = vocal.placed(song_mode);
-                        if placed.members.contains(&key) {
-                            continue;
-                        }
-                        match placed.starts.get(&key) {
-                            Some(ph) => lead = ph.lead,
-                            None => continue,
-                        }
-                    }
-                    let at = match &e.tempo {
-                        // With tempo changes a clip's notes follow the map, not the clip's first tempo.
-                        Some(table) => {
-                            let sps = seconds_per_step(table.bpm_at(start + local));
-                            (table.frames_at(start + local)
-                                + swing_offset(local, sps, song.swing.clamp(0.0, 0.6)) * e.rate)
-                                .ceil() as u64
-                        }
-                        None => offset + e.note_frame(song, local),
-                    };
-                    let (at, skip) = (
-                        at.saturating_sub(lead as u64),
-                        (lead as u64).saturating_sub(at) as usize,
-                    );
-                    if (from..to).contains(&at) {
-                        hits.push(Hit {
-                            at,
-                            tick: start + local,
-                            pattern: pi,
-                            note: ni,
-                            skip,
-                        });
-                    }
-                }
-            }
-        };
-        let mut hits = std::mem::take(&mut self.hits);
-        if song_mode {
-            for c in song
-                .clips
-                .iter()
-                .filter(|c| !c.muted && !song.track_muted(c.track))
-            {
-                if let Some(pi) = song.patterns.iter().position(|p| p.id == c.pattern) {
-                    let p = &song.patterns[pi];
-                    let offset = self.clip_frame(song, c.start);
-                    let window = (c.offset, c.offset + song.clip_len(c));
-                    let span = self.clip_frame(song, window.1 - window.0);
-                    // A phrase may start before its clip by its preutterance.
-                    if offset < to + vocal.max_lead as u64 && offset + span > from {
-                        add(&mut hits, offset, c.start, pi, p, self, window);
-                    }
-                }
-            }
-        } else if let Some(pi) = song.patterns.iter().position(|p| p.id == pattern) {
-            add(
-                &mut hits,
-                0,
-                0,
-                pi,
-                &song.patterns[pi],
-                self,
-                (0, song.patterns[pi].length),
+        if let Some(idx) = index {
+            idx.collect_hits(
+                song,
+                self.tempo.as_ref(),
+                self.rate,
+                &vocal,
+                pattern,
+                song_mode,
+                from,
+                to,
+                &mut self.hits,
+            );
+        } else if self.reserved {
+            crate::hit_index::collect_hits_unindexed(
+                song,
+                self.tempo.as_ref(),
+                self.rate,
+                &vocal,
+                pattern,
+                song_mode,
+                from,
+                to,
+                &mut self.hits,
+            );
+        } else {
+            self.hit_index.sync(song);
+            self.hit_index.collect_hits(
+                song,
+                self.tempo.as_ref(),
+                self.rate,
+                &vocal,
+                pattern,
+                song_mode,
+                from,
+                to,
+                &mut self.hits,
             );
         }
-        hits.sort_by_key(|h| h.at);
-        self.hits = hits;
     }
 
     fn push(&mut self, v: Voice) {
