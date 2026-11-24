@@ -127,6 +127,7 @@ fn parse_json(bytes: &[u8]) -> Result<Song, String> {
         _ => return Err("Project is from a newer KeyFrameXL".into()),
     };
     song.ensure_note_ids();
+    song.ensure_unique_plugin_ids();
     song.validate().map_err(str::to_owned)?;
     Ok(song)
 }

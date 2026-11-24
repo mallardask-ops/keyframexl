@@ -1410,13 +1410,31 @@ impl App {
         if sel.is_empty() {
             return;
         }
+        let has_plugin = sel
+            .iter()
+            .any(|&id| self.song.instrument(id).and_then(|i| i.plugin()).is_some());
+        if has_plugin {
+            self.collect_plugin_states();
+        }
         self.checkpoint();
         let mut new_ids = Vec::new();
+        let mut cloned_plugin = false;
+        let mut skipped_link: Option<String> = None;
         for id in sel {
             let Some(at) = self.song.instruments.iter().position(|i| i.id == id) else {
                 continue;
             };
             let mut inst = self.song.instruments[at].clone();
+            if let keyframexl::sequence::InstrumentKind::Plugin { plugin } = &mut inst.kind {
+                // FL Link plays only FL's selected channel; a second instance
+                // cannot run independently (same guard as `add_plugin_channel`).
+                if crate::fl_link::is_link(std::path::Path::new(&plugin.path)) {
+                    skipped_link = Some(inst.name.clone());
+                    continue;
+                }
+                plugin.id = self.song.next_plugin_id();
+                cloned_plugin = true;
+            }
             let nid = self
                 .song
                 .instruments
@@ -1466,9 +1484,21 @@ impl App {
             }
             new_ids.push(nid);
         }
+        let tr = self.tr();
+        if new_ids.is_empty() {
+            if let Some(name) = skipped_link {
+                self.say(
+                    Tone::Bad,
+                    crate::i18n::fill(tr.plg_link_exists, &[(tr.plg_col_name, &name)]),
+                );
+            }
+            return;
+        }
         self.rack_sel = new_ids;
         self.publish();
-        let tr = self.tr();
+        if cloned_plugin {
+            self.plugins_frame();
+        }
         let count = self.rack_sel.len();
         self.say(Tone::Quiet, tr.rack_channels_cloned.fmt(tr.lang, count));
     }
