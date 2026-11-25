@@ -1277,6 +1277,10 @@ pub struct Engine {
     sampler_fx: Vec<SamplerFx>,
     /// Round robin: (channel, trigger group, notes counted, last zone played).
     trigger_state: Vec<(u64, u8, u32, u32)>,
+    /// Mixer or synth effect tails still ringing while the transport is stopped.
+    fx_ringing: bool,
+    /// Quiet frames elapsed since the last dry input or audible effect output.
+    fx_quiet: u64,
 }
 
 /// Plugin instances one engine holds (reserved up front).
@@ -1379,6 +1383,8 @@ impl Engine {
                 })
                 .collect(),
             trigger_state: Vec::with_capacity(MAX_TRIGGER_STATES),
+            fx_ringing: false,
+            fx_quiet: 0,
         }
     }
 
@@ -1425,6 +1431,7 @@ impl Engine {
             || !self.phrases.is_empty()
             || !self.plugins.is_empty()
             || self.sampler_fx.iter().any(|c| c.ringing)
+            || self.fx_ringing
     }
 
     /// A raw MIDI message (controller, pitch bend) to a plugin channel now.
@@ -1770,6 +1777,7 @@ impl Engine {
             playing: true,
             frame: pos,
         };
+        let mut had_sources = !self.voices.is_empty() || !self.phrases.is_empty();
         let mut done = 0;
         while done < frames {
             let span = if looping {
@@ -1778,6 +1786,8 @@ impl Engine {
                 frames - done
             };
             self.segment(song, pattern, song_mode, pos, done, span);
+            had_sources |=
+                !self.hits.is_empty() || !self.voices.is_empty() || !self.phrases.is_empty();
             done += span;
             pos += span as u64;
             if looping && pos >= bounds.1 {
@@ -1792,6 +1802,7 @@ impl Engine {
         self.run_sampler_fx(song, frames);
         self.run_plugins(song, frames, block_clock);
         self.mix(song, frames, out);
+        self.update_fx_tail(song, frames, had_sources, out);
         if self.clip_output {
             for s in out.iter_mut() {
                 *s = s.clamp(-1.0, 1.0);
@@ -2986,6 +2997,7 @@ impl Engine {
         out.fill(0.0);
         self.auto.clear();
         let frames = out.len() / 2;
+        let had_sources = !self.voices.is_empty() || !self.phrases.is_empty();
         self.prepare_buses(song.mixer.len().max(1), frames);
         self.prepare_sampler_fx(song, frames);
         self.render_voices(song, 0, frames);
@@ -3001,8 +3013,42 @@ impl Engine {
         let clock = self.clock;
         self.run_plugins(song, frames, clock);
         self.mix(song, frames, out);
+        self.update_fx_tail(song, frames, had_sources, out);
         for s in out.iter_mut() {
             *s = s.clamp(-1.0, 1.0);
+        }
+    }
+
+    /// Track whether mixer or synth effects still have ringing tails so
+    /// `process_live` keeps draining them while the transport is stopped.
+    fn update_fx_tail(&mut self, song: &Song, frames: usize, had_sources: bool, out: &[f32]) {
+        let mut tail = 0.0f64;
+        for track in &song.mixer {
+            for slot in track.fx.iter().filter(|s| s.enabled) {
+                tail = tail.max(slot.kind.tail_seconds());
+            }
+        }
+        for c in self.synth_fx.iter().filter(|c| c.inst.is_some()) {
+            if let Some(InstrumentKind::Synth { patch }) =
+                c.inst.and_then(|id| song.instrument(id)).map(|i| &i.kind)
+            {
+                for slot in patch.fx.iter().filter(|s| s.enabled) {
+                    tail = tail.max(slot.kind.tail_seconds());
+                }
+            }
+        }
+        if tail <= 0.0 {
+            self.fx_ringing = false;
+            self.fx_quiet = 0;
+            return;
+        }
+        let audible = out.iter().any(|s| s.abs() > 1e-5) || self.peaks.iter().any(|&p| p > 1e-5);
+        if had_sources || audible {
+            self.fx_quiet = 0;
+            self.fx_ringing = true;
+        } else {
+            self.fx_quiet = self.fx_quiet.saturating_add(frames as u64);
+            self.fx_ringing = (self.fx_quiet as f64) < tail * self.rate;
         }
     }
 

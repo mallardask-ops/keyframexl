@@ -143,6 +143,46 @@ impl FxKind {
         matches!(self, Self::Compressor | Self::Plugin | Self::Vocoder)
     }
 
+    /// How long after the last dry input this effect can still emit sound
+    /// (reverb decay, delay echo gaps, modulation/dynamics release), in seconds.
+    pub fn tail_seconds(self) -> f64 {
+        match self {
+            Self::Delay
+            | Self::StereoDelay
+            | Self::Reverb
+            | Self::RoomReverb
+            | Self::Bloom
+            | Self::Convolution
+            | Self::Time => 4.0,
+            Self::Chorus
+            | Self::HyperChorus
+            | Self::Phaser
+            | Self::Stereo
+            | Self::StereoShaper
+            | Self::Compressor
+            | Self::Limiter
+            | Self::Multiband
+            | Self::NoiseGate
+            | Self::Filter
+            | Self::Vocoder
+            | Self::Transient => 0.15,
+            Self::Eq
+            | Self::ParamEq
+            | Self::TiltEq
+            | Self::Drive
+            | Self::SoftClipper
+            | Self::Wavefolder
+            | Self::Bitcrusher
+            | Self::Squeeze
+            | Self::Balance
+            | Self::MidSide
+            | Self::AutoPan
+            | Self::Tremolo
+            | Self::RingMod
+            | Self::Plugin => 0.0,
+        }
+    }
+
     pub fn label(self) -> &'static str {
         self.builtin().name
     }
