@@ -28,6 +28,7 @@ pub(crate) mod record;
 mod riff_machine;
 pub(crate) mod roll;
 mod roll_cull;
+mod roll_stretch;
 mod sampler;
 mod script;
 mod settings_ui;

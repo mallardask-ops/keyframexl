@@ -648,6 +648,8 @@ pub const UK: Strings = Strings {
     roll_notes_copied_to: "Скопійовано {what} на {pos}. Ctrl+Z скасовує.",
     roll_notes_moved_to: "Переміщено {what} на {pos}. Ctrl+Z скасовує.",
     roll_notes_resized: "{what}: довжина {len}. Ctrl+Z скасовує.",
+    roll_notes_stretched: "Розтягнуто {what} ({ratio}×). Ctrl+Z скасовує.",
+    roll_stretch_tip: "Тягніть, щоб розтягнути виділені ноти по таймлайну (Alt: вільно)",
     roll_erased: "Витерто. Ctrl+Z скасовує.",
     roll_notes_muted_status: "Ноти приглушено. Ctrl+Z скасовує.",
     roll_notes_unmuted_status: "Ноти увімкнено. Ctrl+Z скасовує.",
