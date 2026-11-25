@@ -12,6 +12,10 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 - **Piano roll performance**: large patterns with thousands of notes now scroll, zoom, and edit smoothly by rendering and hit-testing only the visible viewport.
 
 ### Fixed
+- Effects on pause: mixer and synth effect tails (reverb, delay, chorus, etc.)
+  now ring out naturally when playing live MIDI while paused or after pausing
+  playback, instead of cutting off and replaying stale tails when Play is
+  pressed again.
 - Channel Rack preview: melodic or chord patterns written with 1-step notes in
   the Piano Roll now display the mini piano roll preview in the Channel Rack
   instead of step pads.
