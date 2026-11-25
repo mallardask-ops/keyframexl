@@ -311,6 +311,7 @@ define_strings! {
         roll_batch_applies_all, roll_batch_applies_sel, roll_batch_applied, roll_batch_no_notes,
         roll_bar_caps, roll_slide_to, roll_lyric_hint,
         roll_note_placed, roll_notes_copied_to, roll_notes_moved_to, roll_notes_resized,
+        roll_notes_stretched, roll_stretch_tip,
         roll_erased, roll_notes_muted_status, roll_notes_unmuted_status,
         roll_slide_help, roll_slide_edited, roll_painted, roll_slice_none, roll_slide_added,
         roll_porta_select_first, roll_new_notes_color, roll_nothing_to_paste,

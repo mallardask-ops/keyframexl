@@ -7,6 +7,10 @@ versions below are the stable tags. The 0.2.0 plan with its tasks is in
 ## Unreleased
 
 ### Changed
+- **Piano roll time-stretch handle**: selecting two or more notes now shows a
+  stretch handle at the right edge of the selection so you can proportionally
+  stretch or compress the phrase along the timeline (snaps to the grid; hold
+  `Alt` for free scaling).
 - **Playlist toolbar**: added a Snap grid selector and a *Follow playhead*
   toggle directly to the Playlist header (and Snap to the Playlist menu).
 - **Piano roll performance**: large patterns with thousands of notes now scroll, zoom, and edit smoothly by rendering and hit-testing only the visible viewport.

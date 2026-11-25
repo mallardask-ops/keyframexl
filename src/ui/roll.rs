@@ -198,6 +198,12 @@ pub(crate) enum Gesture {
         orig: Vec<Note>,
         duplicate: bool,
     },
+    /// Time-stretch selected notes proportionally along the timeline.
+    Stretch {
+        origin: Tick,
+        orig_span: Tick,
+        orig: Vec<Note>,
+    },
     /// Box selection (Ctrl+drag or Select tool), anchored in musical coordinates
     /// so scrolling while selecting never loses off-screen notes.
     Select {
@@ -792,6 +798,31 @@ impl App {
             ui.data_mut(|d| d.insert_temp(ghost_key, (self.selected, me, id, target, now)));
         }
         self.paint_notes(&p.with_clip_rect(grid), &g);
+        if matches!(self.tool, Tool::Draw | Tool::Paint | Tool::Select)
+            || matches!(
+                self.roll_gesture,
+                Some((owner, Gesture::Stretch { .. })) if owner == me
+            )
+        {
+            let sel = self.selected_notes();
+            let active_ratio = match &self.roll_gesture {
+                Some((
+                    owner,
+                    Gesture::Stretch {
+                        origin, orig_span, ..
+                    },
+                )) if *owner == me && *orig_span > 0 => super::roll_stretch::selection_bounds(&sel)
+                    .map(|b| (b.end - *origin) as f64 / *orig_span as f64),
+                _ => None,
+            };
+            super::roll_stretch::paint_handle(
+                &p.with_clip_rect(grid),
+                &g,
+                &sel,
+                resp.hover_pos(),
+                active_ratio,
+            );
+        }
         if resp.double_clicked()
             && !scrollbar_busy
             && let Some(q) = resp.interact_pointer_pos()
@@ -2414,32 +2445,48 @@ impl App {
             && let Some(hp) = resp.hover_pos()
             && g.grid.contains(hp)
         {
-            let hit = self.note_at(g, hp);
-            let on_slide = if hit.is_none() && matches!(self.tool, Tool::Draw | Tool::Slide) {
-                self.slide_hit(g, hp)
-            } else {
-                None
-            };
-            let icon = match (on_slide, self.tool) {
-                (Some((_, MoveMode::Move)), _) => CursorIcon::Grab,
-                (Some(_), _) => CursorIcon::ResizeHorizontal,
-                (None, tool) => match tool {
-                    Tool::Draw | Tool::Paint | Tool::Select => match hit {
-                        Some(n) => match Self::edge_mode(g, &n, hp.x) {
-                            MoveMode::Move => CursorIcon::Grab,
-                            _ => CursorIcon::ResizeHorizontal,
-                        },
-                        None if ctrl || self.tool == Tool::Select => CursorIcon::Crosshair,
-                        None => CursorIcon::Default,
+            let on_stretch = !ctrl
+                && matches!(self.tool, Tool::Draw | Tool::Paint | Tool::Select)
+                && super::roll_stretch::hit_handle(g, &self.selected_notes(), hp).is_some();
+            if on_stretch {
+                ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
+                let tip = self.tr().roll_stretch_tip;
+                egui::show_tooltip_at_pointer(
+                    ui.ctx(),
+                    ui.layer_id(),
+                    ui.id().with("roll-stretch-tip"),
+                    |ui| {
+                        ui.label(tip);
                     },
-                    Tool::Delete if hit.is_some() => CursorIcon::NotAllowed,
-                    Tool::Mute if hit.is_some() => CursorIcon::PointingHand,
-                    Tool::Slice => CursorIcon::ResizeColumn,
-                    Tool::Zoom => CursorIcon::ZoomIn,
-                    _ => CursorIcon::Default,
-                },
-            };
-            ui.ctx().set_cursor_icon(icon);
+                );
+            } else {
+                let hit = self.note_at(g, hp);
+                let on_slide = if hit.is_none() && matches!(self.tool, Tool::Draw | Tool::Slide) {
+                    self.slide_hit(g, hp)
+                } else {
+                    None
+                };
+                let icon = match (on_slide, self.tool) {
+                    (Some((_, MoveMode::Move)), _) => CursorIcon::Grab,
+                    (Some(_), _) => CursorIcon::ResizeHorizontal,
+                    (None, tool) => match tool {
+                        Tool::Draw | Tool::Paint | Tool::Select => match hit {
+                            Some(n) => match Self::edge_mode(g, &n, hp.x) {
+                                MoveMode::Move => CursorIcon::Grab,
+                                _ => CursorIcon::ResizeHorizontal,
+                            },
+                            None if ctrl || self.tool == Tool::Select => CursorIcon::Crosshair,
+                            None => CursorIcon::Default,
+                        },
+                        Tool::Delete if hit.is_some() => CursorIcon::NotAllowed,
+                        Tool::Mute if hit.is_some() => CursorIcon::PointingHand,
+                        Tool::Slice => CursorIcon::ResizeColumn,
+                        Tool::Zoom => CursorIcon::ZoomIn,
+                        _ => CursorIcon::Default,
+                    },
+                };
+                ui.ctx().set_cursor_icon(icon);
+            }
         }
 
         // ---- press: start a gesture
@@ -2453,7 +2500,21 @@ impl App {
             } else {
                 None
             };
-            let gesture = if (ctrl && matches!(self.tool, Tool::Draw | Tool::Paint | Tool::Select))
+            let stretch_hit =
+                if !ctrl && matches!(self.tool, Tool::Draw | Tool::Paint | Tool::Select) {
+                    let sel = self.selected_notes();
+                    super::roll_stretch::hit_handle(g, &sel, q).map(|b| (b, sel))
+                } else {
+                    None
+                };
+            let gesture = if let Some((b, orig)) = stretch_hit {
+                self.checkpoint();
+                Some(Gesture::Stretch {
+                    origin: b.origin,
+                    orig_span: b.span(),
+                    orig,
+                })
+            } else if (ctrl && matches!(self.tool, Tool::Draw | Tool::Paint | Tool::Select))
                 || (self.tool == Tool::Select && hit.is_none())
             {
                 Some(Gesture::Select {
@@ -2646,6 +2707,22 @@ impl App {
                         ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
                     }
                 }
+            }
+            Gesture::Stretch {
+                origin,
+                orig_span,
+                orig,
+            } if down => {
+                let new_span = super::roll_stretch::target_span(*origin, at, grid, alt);
+                for o in orig {
+                    if let Some(n) = self.note_mut(o.id) {
+                        let (ns, nl) =
+                            super::roll_stretch::stretch_note(o, *origin, *orig_span, new_span);
+                        n.start = ns;
+                        n.length = nl;
+                    }
+                }
+                ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
             }
             Gesture::Slide {
                 at: from,
@@ -2840,6 +2917,37 @@ impl App {
         self.roll_gesture = None;
         self.release_note();
         match gesture {
+            Gesture::Stretch {
+                origin,
+                orig_span,
+                orig,
+            } => {
+                let now: Vec<Note> = orig
+                    .iter()
+                    .filter_map(|o| self.pattern().notes.iter().find(|n| n.id == o.id).copied())
+                    .collect();
+                let changed = now
+                    .iter()
+                    .zip(&orig)
+                    .any(|(n, o)| (n.start, n.length) != (o.start, o.length));
+                if !changed {
+                    self.history.pop();
+                    return;
+                }
+                self.fit_pattern();
+                self.publish();
+                let new_end = now.iter().map(|n| n.end()).max().unwrap_or(origin);
+                let ratio = (new_end - origin).max(1) as f64 / orig_span.max(1) as f64;
+                let tr = self.tr();
+                let what = tr.roll_notes_count.fmt(tr.lang, now.len());
+                self.say(
+                    Tone::Quiet,
+                    crate::i18n::fill(
+                        tr.roll_notes_stretched,
+                        &[("what", &what), ("ratio", &format!("{ratio:.2}"))],
+                    ),
+                );
+            }
             Gesture::Edit {
                 mode,
                 anchor,

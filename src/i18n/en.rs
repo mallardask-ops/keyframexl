@@ -648,6 +648,8 @@ pub const EN: Strings = Strings {
     roll_notes_copied_to: "Copied {what} to {pos}. Ctrl+Z undoes.",
     roll_notes_moved_to: "Moved {what} to {pos}. Ctrl+Z undoes.",
     roll_notes_resized: "{what}: {len} long. Ctrl+Z undoes.",
+    roll_notes_stretched: "Stretched {what} ({ratio}×). Ctrl+Z undoes.",
+    roll_stretch_tip: "Drag to time-stretch selected notes (Alt: free)",
     roll_erased: "Erased. Ctrl+Z undoes.",
     roll_notes_muted_status: "Notes muted. Ctrl+Z undoes.",
     roll_notes_unmuted_status: "Notes unmuted. Ctrl+Z undoes.",
